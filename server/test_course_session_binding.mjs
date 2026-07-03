@@ -67,6 +67,26 @@ test("does not create courses when trial session creation fails", async () => {
   assert.deepEqual(order, ["main", "mock"]);
 });
 
+test("rejects expired trial sessions before creating any session", async () => {
+  const order = [];
+  await assert.rejects(
+    createSessionsThenConfigureCourses({
+      now: new Date("2026-07-03T10:12:00+08:00"),
+      sessionPayloads: [
+        { kind: "main", payload: { name: "正式考试", start: "2026-07-03 10:30", end: "2026-07-03 11:30" } },
+        { kind: "mock", payload: { name: "试考", start: "2026-07-02 15:00", end: "2026-07-02 20:00" } },
+      ],
+      createSession: async (item) => {
+        order.push(item.kind);
+        return { kind: item.kind, id: `${item.kind}-1` };
+      },
+      configureCourses: async () => order.push("course"),
+    }),
+    /试考时间已结束：试考 2026-07-02 15:00 - 2026-07-02 20:00/,
+  );
+  assert.deepEqual(order, []);
+});
+
 test("posts formal course binding with session id and course code only", async () => {
   const calls = [];
   const logs = [];
@@ -177,16 +197,19 @@ test("strictly rejects empty and non-string binding values", () => {
   assert.throws(() => validateCourseBinding({ sessionId: "S1", courseCode: "" }));
 });
 
-test("rejects binding when there are no course codes", async () => {
+test("treats empty courses as a completed no-op binding", async () => {
   let requested = false;
-  await assert.rejects(
-    bindCoursesToFormalSession({
-      login: {}, apiBase: "https://eztest.cn", sessionId: "S1", courses: [],
-      requestJson: async () => { requested = true; }, emitLog: () => {},
-    }),
-    { message: "科目已创建，但绑定参数不合法，请检查 session_id / course_code" },
-  );
+  const logs = [];
+  const result = await bindCoursesToFormalSession({
+    login: {}, apiBase: "https://eztest.cn", sessionId: "S1", courses: [],
+    requestJson: async () => { requested = true; }, emitLog: (message, level) => logs.push({ message, level }),
+  });
+
   assert.equal(requested, false);
+  assert.deepEqual(result, { status: "success", results: [], skipped: true });
+  assert.deepEqual(logs, [
+    { message: "[科目绑定] 未读取到可绑定科目，跳过正式场次科目绑定。", level: "success" },
+  ]);
 });
 
 test("logs response details and translates HTTP 400 binding errors", async () => {

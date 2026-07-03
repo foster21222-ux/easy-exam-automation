@@ -45,9 +45,17 @@ test("only AutoConfigPage imports auto configuration components", () => {
   }
 });
 
-test("AutoConfigPage owns every auto component root", () => {
+test("AutoConfigPage owns auto components inside one stable workbench root", () => {
   const autoPage = read("web/pages/AutoConfigPage.mjs");
-  assert.match(autoPage, /roots:\s*\[[\s\S]*\.\.\.components\.map\(\(component\) => component\.element\)/);
+  for (const component of autoComponents) assert.ok(autoPage.includes(component), component);
+  assert.ok(autoPage.includes('documentObject.querySelector("#autoWorkbench")'));
+  assert.match(autoPage, /roots:\s*\[[\s\S]*root[\s\S]*\]/);
+  assert.equal(autoPage.includes("...components.map((component) => component.element)"), false);
+});
+
+test("FinalScreenshot component owns the whole screenshot panel", () => {
+  const component = read("web/components/auto-config/FinalScreenshot.mjs");
+  assert.ok(component.includes('querySelector("#captureGrid")?.closest(".capture-panel")'));
 });
 
 test("CandidateImportPage loads task context when entering the route", async () => {

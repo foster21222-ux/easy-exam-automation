@@ -36,6 +36,28 @@ test("assigns date exam serial and subject serial from existing local tasks", ()
   assert.deepEqual(config.courses.map((course) => course.form_codes), [["20260629-02-01"], ["20260629-02-02"]]);
 });
 
+test("treats empty requirement subjects as completed without tenant course requests", async () => {
+  const logs = [];
+  let requested = false;
+
+  const courses = await ensureFormalCoursesCreated({
+    login: {},
+    apiBase: "https://eztest.cn",
+    config: { courses: [] },
+    requestJson: async () => {
+      requested = true;
+      return {};
+    },
+    emitLog: (message, level) => logs.push({ message, level }),
+  });
+
+  assert.deepEqual(courses, []);
+  assert.equal(requested, false);
+  assert.deepEqual(logs, [
+    { message: "[API 科目] 需求单科目为空，跳过科目创建，配置流程继续完成。", level: "success" },
+  ]);
+});
+
 test("creates a course with the next available code when the requested name is new and code is occupied", async () => {
   const calls = [];
   const logs = [];

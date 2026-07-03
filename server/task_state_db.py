@@ -10,6 +10,7 @@ STEP_DEFS = [
     ("requirement_parse", "需求单解析"),
     ("formal_session_create", "正式场次创建"),
     ("trial_session_create", "试考场次创建"),
+    ("trial_paper_bind", "试考试卷绑定"),
     ("course_create", "科目创建"),
     ("paper_bind", "正式场次绑定科目"),
     ("trial_candidate_import", "试考考生导入"),

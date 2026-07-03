@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ata.easy-exam-service</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/ata/Library/Application Support/easy-exam-automation/app/scripts/run_local_service.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/app</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/logs/service.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/logs/service.stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORT</key>
+    <string>8765</string>
+    <key>CODEX_NODE</key>
+    <string>/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node</string>
+    <key>CODEX_PYTHON</key>
+    <string>/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3</string>
+  </dict>
+</dict>
+</plist>

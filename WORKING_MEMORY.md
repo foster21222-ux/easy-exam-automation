@@ -1,5 +1,18 @@
 # 易考自动配置工作记忆
 
+## 本地页面验收约定（2026-07-02）
+
+- 用户明确要求：每一次向用户确认“已更新/已修复/可以了”之前，必须保证用户正在看的 `127.0.0.1:8765` 服务已经更新，而不是只更新桌面工作区源码。
+- 项目下所有代码修改，最后效果都要能在本地页面 `http://127.0.0.1:8765/` 内看到。
+- `8765` 常驻服务由 macOS LaunchAgent `com.chen.yikao-auto-config-web` 从 `/Users/chen/Library/Application Support/yikao-auto-config-web` 运行；不要假设它会直接读取桌面项目源码。
+- 后续改动完成前，先运行同步脚本把当前项目文件同步到运行目录并重启服务：
+
+```bash
+/Users/chen/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/sync_local_runtime.mjs
+```
+
+- 同步脚本成功后，再通过 `http://127.0.0.1:8765/` 的实际 HTTP 响应、Chrome 当前页面刷新后的 DOM/截图，或同等运行服务证据做效果检查；未完成这一步不得对用户说“已更新到页面/已修好”。
+
 ## 需求中心保护范围（2026-06-22）
 
 - GitHub 合并提交 `6532369` 引入的需求中心由同事维护，后续改动不得修改该功能的页面、路由、API、数据库及测试。

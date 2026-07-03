@@ -10,6 +10,7 @@ import {
   createSessionsThenConfigureCourses,
 } from "./course_session_binding.mjs";
 import { bindPapersToFormalSession } from "./paper_binding.mjs";
+import { bindDefaultTrialPaperToSession } from "./trial_default_paper.mjs";
 import {
   assignCourseCodesForExamConfig,
   ensureFormalCoursesCreated,
@@ -48,15 +49,23 @@ import {
 import { handleRequirementRequest } from "./requirement_request_api.mjs";
 import { deleteTaskSessionsFromTenant } from "./session_deletion.mjs";
 import {
+  apiKeyProfilesForUser,
   currentUserLogin,
+  deleteApiKeyProfileForUser,
   defaultUserSettings,
   normalizeUserSettings,
+  publicApiKeyProfiles,
+  publicApiKeyProfilesForUser,
   saveUserLogin,
+  updateApiKeyProfileForUser,
+  upsertApiKeyProfileInRecord,
 } from "./user_settings.mjs";
+import { runCustomerServiceSchedulerForTargets } from "./customer_service_scheduler.mjs";
 import {
   syncExamConfigToTencentDocs,
   tencentDocsSettingsFromEnv,
 } from "./tencent_docs_sync.mjs";
+import { handleWechatCollector } from "./wechat_collector_api.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -458,6 +467,8 @@ function buildSessionPayloads(config) {
     new_mark: false,
     practice_mode: false,
     monitor: videoMonitor,
+    monitor_replay: true,
+    anonymous_monitor: true,
     audio_monitor: videoMonitor,
     eagle_eye: boolValue(config.hawkeye),
     watermark: true,
@@ -616,7 +627,9 @@ async function runYikaoApiCreationJob({ job, login }) {
         job.config = { ...job.config, courses };
         await runTaskState("update_config", { taskId: job.taskId, config: { courses } });
         await updateTaskStep(job.taskId, "course_create", "success", {
-          message: `科目创建/确认完成，最终科目编号：${courses.map((course) => `${course.name}/${course.code}`).join("、")}`,
+          message: courses.length
+            ? `科目创建/确认完成，最终科目编号：${courses.map((course) => `${course.name}/${course.code}`).join("、")}`
+            : "需求单科目为空，已跳过科目创建。",
           result: { courses },
         });
 
@@ -633,11 +646,46 @@ async function runYikaoApiCreationJob({ job, login }) {
           emitLog,
         });
         await updateTaskStep(job.taskId, "paper_bind", "success", {
-          message: `已将 ${courses.length} 个科目绑定到正式考试场次`,
+          message: courses.length ? `已将 ${courses.length} 个科目绑定到正式考试场次` : "需求单科目为空，已跳过正式场次科目绑定。",
           result: { bindResult },
         });
       },
     });
+
+    const trialSession = created.find((session) => session?.kind === "mock");
+    if (trialSession?.id) {
+      activeStep = "trial_paper_bind";
+      await updateTaskStep(job.taskId, "trial_paper_bind", "running", {
+        message: `开始绑定试考默认试卷，session_id=${trialSession.id}`,
+      });
+      const trialPaperLogs = [];
+      const trialEmitLog = (message, level = "success") => {
+        trialPaperLogs.push(message);
+        emitLog(message, level);
+      };
+      const bindResult = await bindDefaultTrialPaperToSession({
+        login,
+        apiBase,
+        sessionId: trialSession.id,
+        requestJson: readTenantJsonWithLogin,
+        emitLog: trialEmitLog,
+      });
+      if (bindResult.status === "waiting_manual") {
+        await updateTaskStep(job.taskId, "trial_paper_bind", "waiting_manual", {
+          message: trialPaperLogs.join("\n") || "默认试考科目未关联试卷，请在租户后台关联后重试",
+          result: { sessionId: trialSession.id, bindResult },
+        });
+      } else {
+        await updateTaskStep(job.taskId, "trial_paper_bind", "success", {
+          message: trialPaperLogs.join("\n") || "试考默认试卷绑定成功",
+          result: { sessionId: trialSession.id, bindResult },
+        });
+      }
+    } else {
+      await updateTaskStep(job.taskId, "trial_paper_bind", "skipped", {
+        message: "需求单未启用试考，跳过试考试卷绑定",
+      });
+    }
 
     const creationCapture = await saveApiCreationCapture(job, created);
     pushEvent(job, { type: "captures", captures: [creationCapture], ts: ts() });
@@ -955,27 +1003,117 @@ async function handleCandidateParse(req, res) {
   json(res, 200, { uploadId: importId, filename, ...parsed });
 }
 
-function validateCandidatePayload(candidates = []) {
+const candidateFieldLabels = {
+  permit: "准考证号",
+  full_name: "姓名",
+  identity_id: "身份证号",
+  course_code: "科目编号",
+  mobile: "手机号",
+  email: "邮箱",
+};
+
+function candidateFieldLabel(field) {
+  return candidateFieldLabels[field] || "字段";
+}
+
+const candidateMobileFieldAliases = new Set(["手机号码", "手机号", "手机", "联系电话", "电话", "mobile", "phone"]);
+
+function normalizeCandidateHeader(value) {
+  return String(value || "").trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function candidatePermitMappedFromMobile(fieldMapping = {}) {
+  const permitSource = normalizeCandidateHeader(fieldMapping?.permit);
+  return Boolean(permitSource) && [...candidateMobileFieldAliases].some((alias) => normalizeCandidateHeader(alias) === permitSource);
+}
+
+function isValidCandidatePermit(value) {
+  return /^[A-Za-z0-9]+$/.test(String(value || "").trim());
+}
+
+const candidateIdentityWeights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+const candidateIdentityCodes = "10X98765432";
+
+function normalizeCandidateIdentityId(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function candidateIdentityBirthDateIsValid(value) {
+  const birth = value.slice(6, 14);
+  const year = Number(birth.slice(0, 4));
+  const month = Number(birth.slice(4, 6));
+  const day = Number(birth.slice(6, 8));
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function candidateIdentityChecksum(value) {
+  const total = candidateIdentityWeights.reduce((sum, weight, index) => sum + Number(value[index]) * weight, 0);
+  return candidateIdentityCodes[total % 11];
+}
+
+function validateCandidateIdentityId(value) {
+  const normalized = normalizeCandidateIdentityId(value);
+  if (!normalized) return "";
+  if (!/^\d{17}[\dX]$/.test(normalized)) return "身份证号格式不正确";
+  if (!candidateIdentityBirthDateIsValid(normalized)) return "身份证号出生日期不合法";
+  if (candidateIdentityChecksum(normalized) !== normalized.slice(-1)) return "身份证号校验码错误";
+  return "";
+}
+
+function normalizeCandidateMobile(value) {
+  return String(value || "").trim().replace(/[\s\u3000-]+/g, "");
+}
+
+function isValidCandidateMobile(value) {
+  return /^1[3-9]\d{9}$/.test(normalizeCandidateMobile(value));
+}
+
+function validateCandidateMobile(value, options = {}) {
+  const normalized = normalizeCandidateMobile(value);
+  if (!normalized) return options.required ? "手机号不能为空" : "";
+  if (!/^\d{11}$/.test(normalized)) return "手机号必须为 11 位数字";
+  if (!/^1[3-9]\d{9}$/.test(normalized)) return "手机号格式不正确";
+  return "";
+}
+
+function validateCandidatePayload(candidates = [], fieldMapping = {}) {
   const errors = [];
   if (!Array.isArray(candidates) || !candidates.length) {
     return ["缺少考生数据"];
   }
   const permitRows = new Map();
   const identityRows = new Map();
+  const permitFromMobile = candidatePermitMappedFromMobile(fieldMapping);
   candidates.forEach((candidate, index) => {
     const row = index + 2;
-    const permit = String(candidate?.permit || "").trim();
+    const permit = permitFromMobile
+      ? normalizeCandidateMobile(candidate?.permit)
+      : String(candidate?.permit || "").trim();
     const fullName = String(candidate?.full_name || "").trim();
-    const identityId = String(candidate?.identity_id || "").trim();
-    if (!permit) errors.push(`第 ${row} 行缺少 permit`);
-    if (!fullName) errors.push(`第 ${row} 行缺少 full_name`);
+    const identityId = normalizeCandidateIdentityId(candidate?.identity_id);
+    const mobile = normalizeCandidateMobile(candidate?.mobile);
+    if (!permit) errors.push(`第 ${row} 行缺少${candidateFieldLabel("permit")}`);
+    if (!fullName) errors.push(`第 ${row} 行缺少${candidateFieldLabel("full_name")}`);
+    if (permit && !isValidCandidatePermit(permit)) errors.push(`第 ${row} 行准考证号只能包含英文字母和数字`);
+    const identityError = validateCandidateIdentityId(identityId);
+    if (identityError) errors.push(`第 ${row} 行${identityError}`);
+    const mobileError =
+      permitFromMobile && fieldMapping?.mobile === fieldMapping?.permit
+        ? ""
+        : validateCandidateMobile(mobile);
+    if (mobileError) errors.push(`第 ${row} 行${mobileError}`);
+    if (permitFromMobile) {
+      const permitMobileError = validateCandidateMobile(permit, { required: true });
+      if (permitMobileError) errors.push(`第 ${row} 行${permitMobileError}`);
+    }
     if (permit) permitRows.set(permit, [...(permitRows.get(permit) || []), row]);
     if (identityId) identityRows.set(identityId, [...(identityRows.get(identityId) || []), row]);
     if (/^\s*\d+(?:\.\d+)?[eE]\+?\d+\s*$/.test(identityId)) {
-      errors.push(`第 ${row} 行 identity_id 为科学计数法格式，请修正原始文件后再导入`);
+      errors.push(`第 ${row} 行${candidateFieldLabel("identity_id")}为科学计数法格式，请修正原始文件后再导入`);
     }
     if (/^\s*\d+(?:\.\d+)?[eE]\+?\d+\s*$/.test(permit)) {
-      errors.push(`第 ${row} 行 permit 为科学计数法格式，请修正原始文件后再导入`);
+      errors.push(`第 ${row} 行${candidateFieldLabel("permit")}为科学计数法格式，请修正原始文件后再导入`);
     }
   });
   for (const [permit, rows] of permitRows.entries()) {
@@ -1213,7 +1351,7 @@ async function ensureSessionCustomPersonalFields(login, sessionId, customFields 
 async function handleCandidateTemplate(req, res) {
   const payload = parseJsonSafe(await readBody(req));
   const candidates = payload?.candidates || [];
-  const errors = validateCandidatePayload(candidates);
+  const errors = validateCandidatePayload(candidates, payload?.fieldMapping || payload?.field_mapping || payload?.mapping || {});
   if (errors.length) {
     return json(res, 400, { error: "考生数据校验失败", errors });
   }
@@ -1853,7 +1991,7 @@ async function mergeEntryAndScoreRows({ login, sessionId, entries = [], scores =
   for (const score of scores) {
     const permit = scorePermit(score, examName);
     if (!permit) {
-      logs.push("[成绩处理] 发现无法匹配的成绩记录：缺少 permit，已跳过合并");
+      logs.push("[成绩处理] 发现无法匹配的成绩记录：缺少准考证号，已跳过合并");
       continue;
     }
     scoreByPermit.set(permit, score);
@@ -2107,7 +2245,10 @@ async function handleCandidateImport(req, res) {
   if (!sessionId) {
     return badRequest(res, "未选择场次");
   }
-  const errors = [...validateCandidatePayload(candidates), ...validateCandidateCustomFields(candidates)];
+  const errors = [
+    ...validateCandidatePayload(candidates, payload?.fieldMapping || payload?.field_mapping || {}),
+    ...validateCandidateCustomFields(candidates),
+  ];
   if (errors.length) {
     return json(res, 400, { error: "考生数据校验失败", errors });
   }
@@ -2519,13 +2660,21 @@ async function handleGetSettings(req, res) {
 async function handleSaveSettings(req, res) {
   const payload = parseJsonSafe(await readBody(req));
   if (!auth.enabled) {
+    const nextLogin = {
+      ...state.settings.login,
+      ...(payload?.login || {}),
+    };
     const nextSettings = {
       ...state.settings,
-      login: {
-        ...state.settings.login,
-        ...(payload?.login || {}),
-      },
+      login: nextLogin,
     };
+    if (nextLogin.tenantApiKey) {
+      upsertApiKeyProfileInRecord(nextSettings, {
+        apiBase: nextLogin.apiBase || "https://eztest.cn",
+        tenantApiKey: nextLogin.tenantApiKey,
+        label: nextLogin.username || nextLogin.tenantApiKey,
+      }, { current: true });
+    }
     state.settings = nextSettings;
     await fs.writeFile(settingsPath, JSON.stringify(nextSettings, null, 2), "utf8");
     return json(res, 200, { ok: true, settings: state.settings });
@@ -2536,6 +2685,148 @@ async function handleSaveSettings(req, res) {
   saveUserLogin(state.userSettings, user, payload?.login || {});
   await fs.writeFile(userSettingsPath, JSON.stringify(state.userSettings, null, 2), "utf8");
   json(res, 200, { ok: true, settings: { ...state.settings, login: publicYikaoLogin(getYikaoLoginForRequest(req)) } });
+}
+
+async function handleCustomerServiceScheduler(req, res, url) {
+  const user = getAuthUserFromRequest(auth, req);
+  if (auth.enabled && !user) return json(res, 401, { error: "请先登录" });
+
+  const profileMatch = url.pathname.match(/^\/api\/customer-service-scheduler\/profiles\/([^/]+)$/);
+  if (req.method === "GET" && url.pathname === "/api/customer-service-scheduler") {
+    return json(res, 200, {
+      ok: true,
+      profiles: auth.enabled
+        ? publicApiKeyProfilesForUser({ user, userSettings: state.userSettings })
+        : publicApiKeyProfiles(state.settings.apiKeyProfiles || []),
+    });
+  }
+
+  if (req.method === "PATCH" && profileMatch) {
+    const payload = parseJsonSafe(await readBody(req)) || {};
+    const profileId = decodeURIComponent(profileMatch[1]);
+    try {
+      if (auth.enabled) {
+        updateApiKeyProfileForUser(state.userSettings, user, profileId, payload);
+        await fs.writeFile(userSettingsPath, JSON.stringify(state.userSettings, null, 2), "utf8");
+      } else {
+        updateLocalApiKeyProfile(profileId, payload);
+        await fs.writeFile(settingsPath, JSON.stringify(state.settings, null, 2), "utf8");
+      }
+      return json(res, 200, {
+        ok: true,
+        profiles: auth.enabled
+          ? publicApiKeyProfilesForUser({ user, userSettings: state.userSettings })
+          : publicApiKeyProfiles(state.settings.apiKeyProfiles || []),
+      });
+    } catch (error) {
+      return badRequest(res, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (req.method === "DELETE" && profileMatch) {
+    const profileId = decodeURIComponent(profileMatch[1]);
+    try {
+      if (auth.enabled) {
+        deleteApiKeyProfileForUser(state.userSettings, user, profileId);
+        await fs.writeFile(userSettingsPath, JSON.stringify(state.userSettings, null, 2), "utf8");
+      } else {
+        deleteLocalApiKeyProfile(profileId);
+        await fs.writeFile(settingsPath, JSON.stringify(state.settings, null, 2), "utf8");
+      }
+      return json(res, 200, {
+        ok: true,
+        profiles: auth.enabled
+          ? publicApiKeyProfilesForUser({ user, userSettings: state.userSettings })
+          : publicApiKeyProfiles(state.settings.apiKeyProfiles || []),
+      });
+    } catch (error) {
+      return badRequest(res, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/customer-service-scheduler/run") {
+    const payload = parseJsonSafe(await readBody(req)) || {};
+    const requestedProfileId = String(payload.profileId || "");
+    const profiles = auth.enabled
+      ? apiKeyProfilesForUser({ user, userSettings: state.userSettings })
+      : state.settings.apiKeyProfiles || [];
+    const selectedProfiles = requestedProfileId
+      ? profiles.filter((profile) => profile.id === requestedProfileId)
+      : profiles.filter((profile) => profile.customerServiceScheduler?.enabled !== false);
+    const login = getYikaoLoginForRequest(req);
+    const targets = selectedProfiles
+      .filter((profile) => profile.tenantApiKey)
+      .map((profile) => ({
+        userId: auth.enabled ? normalizeEmail(user.email) : "local",
+        profileId: profile.id,
+        label: profile.label,
+        apiBase: profile.apiBase,
+        apiKey: profile.tenantApiKey,
+        keyHint: profile.keyHint,
+        login: {
+          url: login.url,
+          username: login.username,
+          password: login.password,
+        },
+      }));
+    const summary = await runCustomerServiceSchedulerForTargets({
+      targets,
+      dryRun: payload.dryRun !== false,
+      logger: () => {},
+    });
+    return json(res, 200, { ok: summary.failedProfiles === 0, summary });
+  }
+
+  return false;
+}
+
+function updateLocalApiKeyProfile(profileId, updates = {}) {
+  const profiles = state.settings.apiKeyProfiles || [];
+  const index = profiles.findIndex((profile) => profile.id === profileId);
+  if (index < 0) throw new Error("未找到 API Key 配置。");
+  if (updates.current === true) {
+    profiles.forEach((profile) => {
+      profile.current = false;
+    });
+    state.settings.login = {
+      ...(state.settings.login || {}),
+      tenantApiKey: profiles[index].tenantApiKey,
+    };
+  }
+  profiles[index] = {
+    ...profiles[index],
+    label: updates.label === undefined ? profiles[index].label : String(updates.label || "").trim(),
+    current: updates.current === undefined ? profiles[index].current : Boolean(updates.current),
+    customerServiceScheduler: {
+      ...(profiles[index].customerServiceScheduler || {}),
+      ...(updates.customerServiceScheduler || {}),
+      enabled: updates.customerServiceScheduler?.enabled === false
+        ? false
+        : updates.customerServiceScheduler?.enabled === true
+          ? true
+          : profiles[index].customerServiceScheduler?.enabled !== false,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  state.settings.apiKeyProfiles = profiles;
+}
+
+function deleteLocalApiKeyProfile(profileId) {
+  const profiles = state.settings.apiKeyProfiles || [];
+  const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
+  if (nextProfiles.length === profiles.length) throw new Error("未找到 API Key 配置。");
+  if (!nextProfiles.some((profile) => profile.current) && nextProfiles.length) {
+    nextProfiles[nextProfiles.length - 1].current = true;
+  }
+  const current = nextProfiles.find((profile) => profile.current);
+  state.settings = {
+    ...state.settings,
+    apiKeyProfiles: nextProfiles,
+    login: {
+      ...(state.settings.login || {}),
+      tenantApiKey: current?.tenantApiKey || "",
+    },
+  };
 }
 
 function requireAdmin(auth, req, res) {
@@ -2692,6 +2983,11 @@ async function handleTaskDetail(taskId, req, res) {
     syncedTask = await syncTaskDetailSessionState(req, task);
   } catch {
     syncedTask = task;
+  }
+  try {
+    syncedTask.candidates = await runTaskState("list_candidates", { taskId });
+  } catch {
+    syncedTask.candidates = [];
   }
   return json(res, 200, syncedTask);
 }
@@ -2987,6 +3283,47 @@ async function handleTaskStepRetry(taskId, stepKey, req, res) {
     }
   }
 
+  if (stepKey === "trial_paper_bind") {
+    const task = visibleTask;
+    const trialSession = (task.sessions || []).find((session) => session.sessionType === "trial");
+    const login = getYikaoLoginForRequest(req);
+    const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
+    const trialPaperLogs = [];
+    const emitLog = (message) => trialPaperLogs.push(message);
+
+    await updateTaskStep(taskId, stepKey, "running", {
+      incrementRetry: true,
+      message: "开始重试试考默认试卷绑定",
+    });
+    try {
+      const bindResult = await bindDefaultTrialPaperToSession({
+        login,
+        apiBase,
+        sessionId: trialSession?.session_id,
+        requestJson: readTenantJsonWithLogin,
+        emitLog,
+      });
+      if (bindResult.status === "waiting_manual") {
+        const updated = await updateTaskStep(taskId, stepKey, "waiting_manual", {
+          message: trialPaperLogs.join("\n") || "默认试考科目未关联试卷，请在租户后台关联后重试",
+          result: { sessionId: trialSession?.session_id, bindResult },
+        });
+        return json(res, 409, updated);
+      }
+      const updated = await updateTaskStep(taskId, stepKey, "success", {
+        message: trialPaperLogs.join("\n") || "试考默认试卷绑定重试成功",
+        result: { sessionId: trialSession?.session_id, bindResult },
+      });
+      return json(res, 200, updated);
+    } catch (error) {
+      await updateTaskStep(taskId, stepKey, "failed", {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        message: [...trialPaperLogs, error instanceof Error ? error.message : String(error)].filter(Boolean).join("\n"),
+      });
+      throw error;
+    }
+  }
+
   const task = await updateTaskStep(taskId, stepKey, "pending", {
     incrementRetry: true,
     message: "已提交单步骤重试，等待对应业务执行器处理",
@@ -3089,6 +3426,10 @@ async function requestHandler(req, res) {
     if (req.method === "POST" && url.pathname === "/api/settings") {
       return await handleSaveSettings(req, res);
     }
+    if (url.pathname === "/api/customer-service-scheduler" || url.pathname.startsWith("/api/customer-service-scheduler/")) {
+      const handled = await handleCustomerServiceScheduler(req, res, url);
+      if (handled !== false) return;
+    }
     if (req.method === "POST" && url.pathname === "/api/import") {
       return await handleImport(req, res);
     }
@@ -3099,6 +3440,9 @@ async function requestHandler(req, res) {
       return await handleCreateJob(req, res);
     }
     if (await handleRequirementRequest(req, res, url)) {
+      return;
+    }
+    if (await handleWechatCollector(req, res, url)) {
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/tasks") {

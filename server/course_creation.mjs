@@ -253,7 +253,7 @@ export async function ensureFormalCoursesCreated({
 }) {
   const courses = normalizeCourseRecords(config);
   if (!courses.length) {
-    emitLog("[API 科目] 需求单未读取到可创建的科目信息，跳过科目创建。", "warning");
+    emitLog("[API 科目] 需求单科目为空，跳过科目创建，配置流程继续完成。", "success");
     return [];
   }
 

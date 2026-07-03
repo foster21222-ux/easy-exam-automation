@@ -5,6 +5,7 @@ import { FinalScreenshot } from "../components/auto-config/FinalScreenshot.mjs";
 import { RequirementUpload } from "../components/auto-config/RequirementUpload.mjs";
 
 export function AutoConfigPage({ documentObject = document }) {
+  const root = documentObject.querySelector("#autoWorkbench");
   const components = [
     RequirementUpload(documentObject),
     AutoConfigProgress(documentObject),
@@ -17,7 +18,7 @@ export function AutoConfigPage({ documentObject = document }) {
     roots: [
       documentObject.querySelector("#autoTopbar"),
       documentObject.querySelector("#autoConfigStack"),
-      ...components.map((component) => component.element),
+      root,
     ],
     components,
     enter: async () => {},

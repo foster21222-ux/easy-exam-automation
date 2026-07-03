@@ -1,0 +1,331 @@
+app:
+  description: 易考对话式需求收集原型：客户自然描述考试服务需求，由大模型抽取结构化草稿并写入 easy-exam-automation 需求中心；不执行平台配置。
+  icon: 💬
+  icon_background: '#DCFCE7'
+  mode: advanced-chat
+  name: 易考需求对话收集
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.3.2
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+    opening_statement: '你好，我可以帮你逐步梳理考试需求。你可以直接说想安排什么考试，也可以粘贴已有需求、表格内容或说明要变更的地方；信息不完整时我会继续追问，完整后再给你确认表。'
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - '我想安排一场线上考试，帮我梳理一下需要哪些信息。'
+    - '我们 7 月 1 日上午 9 点到 11 点考试，科目是英语和化学，需要视频监控。'
+    - '我已经有一份需求表，想让你帮我整理成系统能接收的结构化需求。'
+    - '刚才确认的需求要调整一下，科目增加物理。'
+    suggested_questions_after_answer:
+      enabled: true
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - id: start-to-extract
+      source: start
+      sourceHandle: source
+      target: extract_requirement
+      targetHandle: target
+      data:
+        sourceType: start
+        targetType: llm
+        isInIteration: false
+        isInLoop: false
+      type: custom
+      zIndex: 0
+    - id: extract-to-upsert
+      source: extract_requirement
+      sourceHandle: source
+      target: upsert_requirement
+      targetHandle: target
+      data:
+        sourceType: llm
+        targetType: http-request
+        isInIteration: false
+        isInLoop: false
+      type: custom
+      zIndex: 0
+    - id: upsert-to-compose
+      source: upsert_requirement
+      sourceHandle: source
+      target: compose_customer_reply
+      targetHandle: target
+      data:
+        sourceType: http-request
+        targetType: llm
+        isInIteration: false
+        isInLoop: false
+      type: custom
+      zIndex: 0
+    - id: compose-to-answer
+      source: compose_customer_reply
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      data:
+        sourceType: llm
+        targetType: answer
+        isInIteration: false
+        isInLoop: false
+      type: custom
+      zIndex: 0
+    nodes:
+    - id: start
+      type: custom
+      position:
+        x: 80
+        y: 260
+      positionAbsolute:
+        x: 80
+        y: 260
+      sourcePosition: right
+      targetPosition: left
+      data:
+        desc: 客户自由描述需求
+        title: Start
+        type: start
+        variables: []
+    - id: extract_requirement
+      type: custom
+      position:
+        x: 390
+        y: 260
+      positionAbsolute:
+        x: 390
+        y: 260
+      sourcePosition: right
+      targetPosition: left
+      data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: 抽取结构化需求草稿
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 10
+        model:
+          completion_params:
+            temperature: 0.2
+          mode: chat
+          name: qwen3.6-plus
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - role: system
+          text: |-
+            你是易考考试服务需求顾问。你的任务是通过自然对话收集客户考试需求，并输出 easy-exam-automation 需求中心可以接收的 JSON。客户的开场可能很模糊，也可能已经提供完整需求、粘贴表格内容、询问如何安排考试、补充上一轮缺失项、带着人工审核要求补充信息、确认需求，或提出变更；你都要先理解意图，再整理结构化数据。
+
+            业务边界：
+            - 暂不收集客户基础信息，customer 固定为空对象。
+            - 试考默认都需要，只确认试考时间 mock_exam_time_range。
+            - 不询问水印和禁止复制，后端会默认开启。
+            - 不负责创建考试、创建场次、绑定试卷、导入考生、生成监考账号或任何平台执行。
+            - 不要承诺已经完成平台配置，只能说明已整理需求并提交人工审核。
+            - 第一次接口返回 requestId 后，后续同一轮对话必须复用这个 requestId，不能创建新需求。
+
+            必填字段：
+            - exam_name：考试名称。
+            - formal_exam_time_range：正式考试时间范围。
+            - mock_exam_time_range：试考时间范围。
+            - early_login_minutes：提前登录分钟数，输出为“30分钟”这类文本。
+            - late_limit_minutes：限制迟到分钟数，输出为“15分钟”这类文本。
+            - video_monitor_required：是或否。
+            - video_record_required：是或否。
+            - hawkeye_required：是或否。
+            - exam_client_type：网页考试或客户端考试。
+            - leave_limit_count：允许离开次数，数字。
+            - subjects：科目，多个科目用中文逗号分隔。
+
+            可选字段：
+            - candidate_template_required：是或否。
+            - waiting_notice、paper_time_rule、welcome_message、commitment_text、notes。
+
+            输出规则：
+            - 只输出 JSON，不要输出 Markdown，不要解释。
+            - 不确定的字段不要猜，不要填“未知”“待定”。
+            - 如果客户只是表达“想安排考试”“帮我梳理需求”“需要创建考试”等泛化诉求，intent 为 collecting，requirement 为空或只放已知信息，next_question 先询问考试名称、正式考试时间、科目这三个基础信息。
+            - 如果客户粘贴的是表格、清单或大段需求说明，尽量转换成 requirement 字段；仍缺失的字段用 next_question 继续追问。
+            - 如果客户回复的是人工审核补充问题，必须合并历史已知字段和本轮补充答案；如果历史或客户输入里有 requestId/需求编号，必须沿用同一个 requestId。
+            - 如果历史消息里已经出现需求中心返回的 requestId，必须把这个 requestId 原样放入输出 JSON 的 requestId 字段。
+            - 如果客户输入里出现“需求编号：xxx”或“requestId: xxx”，必须把该编号原样放入输出 JSON 的 requestId 字段，并把本轮回答合并到这张需求单。
+            - 如果客户是在补充上一轮缺失项，必须合并历史中已经确认的字段和本轮新增字段。
+            - 如果必填字段缺失，next_question 最多问两个最关键缺失项；优先顺序是考试名称、正式考试时间、科目、试考时间、登录和迟到规则、监控录制、考试端、离开次数。
+            - 如果必填字段完整但客户尚未明确确认，intent 为 ready_for_confirmation，并提供 customer_summary。
+            - 只有客户明确说“确认”“没问题”“以上无误”等，intent 才能是 customer_confirmed。
+            - 如果客户在确认后提出调整，intent 为 change_request。
+
+            JSON 格式：
+            {
+              "intent": "collecting",
+              "requestId": "",
+              "customer": {},
+              "requirement": {},
+              "customerReply": "",
+              "customerMessage": "",
+              "changes": {},
+              "next_question": "",
+              "customer_summary": "",
+              "message": "Dify 对话抽取"
+            }
+
+            字段含义：
+            - collecting 或 ready_for_confirmation：把已知需求字段放入 requirement。
+            - customer_confirmed：必须带 requestId；customerReply 放客户确认原话或确认摘要；requirement 可以为空。
+            - change_request：必须带 requestId；customerMessage 放客户变更原话；changes 只放客户要求变更的字段。
+        - role: user
+          text: '{{#sys.query#}}'
+        selected: false
+        title: 抽取需求草稿
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+    - id: upsert_requirement
+      type: custom
+      position:
+        x: 720
+        y: 260
+      positionAbsolute:
+        x: 720
+        y: 260
+      sourcePosition: right
+      targetPosition: left
+      data:
+        desc: 写入 easy-exam-automation 需求中心
+        title: 写入需求中心
+        type: http-request
+        method: POST
+        url: http://host.docker.internal:8765/api/ai/requirements/dispatch
+        authorization:
+          type: no-auth
+        headers: 'Content-Type: application/json'
+        params: ''
+        body:
+          type: json
+          data: '{{#extract_requirement.text#}}'
+        timeout:
+          connect: 10
+          read: 30
+          write: 30
+        retry_config:
+          enabled: false
+          max_retries: 1
+          retry_interval: 1000
+          exponential_backoff:
+            enabled: false
+            multiplier: 2
+            max_interval: 10000
+    - id: compose_customer_reply
+      type: custom
+      position:
+        x: 1060
+        y: 260
+      positionAbsolute:
+        x: 1060
+        y: 260
+      sourcePosition: right
+      targetPosition: left
+      data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: 生成客户可读追问或确认表
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 10
+        model:
+          completion_params:
+            temperature: 0.4
+          mode: chat
+          name: qwen3.6-plus
+          provider: langgenius/tongyi/tongyi
+        prompt_template:
+        - role: system
+          text: |-
+            你是易考考试服务需求顾问，负责把系统内部的结构化抽取结果转换成客户能直接理解的对话回复。
+
+            回复目标：
+            - 像顾问一样循序渐进地收集需求，不要展示 JSON、接口状态、HTTP 响应、字段名、代码块或调试信息。
+            - 客户可能以多种方式开始：模糊求助、直接描述一场考试、粘贴已有表格、询问能否安排考试、补充信息、带着人工审核补充问题回来、确认摘要、提出变更。都要自然承接。
+            - 信息不完整时，先简短复述已经知道的内容，再只追问 1-2 个当前最关键问题。
+            - 如果客户只是说想安排考试或需要引导，优先问考试名称、正式考试时间和科目；语气要像“我们先从基础信息开始”。
+            - 如果结构化结果已完整并进入 ready_for_confirmation，用客户可读的确认表展示，不要说已经完成平台配置；结尾请客户确认或指出需要调整的地方。
+            - 如果 intent 是 customer_confirmed，回复客户“已记录确认，后续会进入人工审核”，不要承诺自动执行。
+            - 如果 intent 是 change_request，回复客户“已记录变更”，并列出变更点，再请客户确认变更后的内容。
+            - 如后端返回 missingFields，也把它理解成还需要追问的信息，但不要展示 missingFields 这个词。
+
+            确认表格式：
+            请使用自然中文列表，包含已知内容：
+            - 考试名称
+            - 正式考试时间
+            - 试考时间
+            - 考试科目
+            - 登录和迟到规则
+            - 监控和录制要求
+            - 考试端
+            - 离开次数
+            - 其他说明
+
+            输出限制：
+            - 只输出给客户看的中文回复。
+            - 不要输出 Markdown 表格；可以使用短横线列表。
+            - 确认表或人工补充场景可以显示“需求编号”，便于客户后续补充时关联同一张需求单；不要展示接口状态或原始响应。
+            - 不要出现“本轮抽取结果”“接口状态”“需求中心返回”“JSON”“HTTP”等内部说法。
+        - role: user
+          text: |-
+            客户本轮输入：
+            {{#sys.query#}}
+
+            结构化抽取结果：
+            {{#extract_requirement.text#}}
+
+            需求中心处理结果：
+            {{#upsert_requirement.body#}}
+        selected: false
+        title: 生成客户回复
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+    - id: answer
+      type: custom
+      position:
+        x: 1380
+        y: 260
+      positionAbsolute:
+        x: 1380
+        y: 260
+      sourcePosition: right
+      targetPosition: left
+      data:
+        answer: '{{#compose_customer_reply.text#}}'
+        desc: ''
+        title: Answer
+        type: answer
+        variables: []
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

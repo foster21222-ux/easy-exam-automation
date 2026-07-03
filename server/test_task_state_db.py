@@ -63,6 +63,15 @@ class TaskStoreTest(unittest.TestCase):
         step = next(item for item in detail["steps"] if item["stepKey"] == "paper_bind")
         self.assertEqual(step["stepName"], "正式场次绑定科目")
 
+    def test_trial_paper_bind_step_follows_trial_session_create(self):
+        task = self.store.create_task("项目甲", "account-a", {})
+        detail = self.store.get_task(task["taskId"])
+        step_keys = [step["stepKey"] for step in detail["steps"]]
+        step = next(item for item in detail["steps"] if item["stepKey"] == "trial_paper_bind")
+        self.assertEqual(step["stepName"], "试考试卷绑定")
+        self.assertLess(step_keys.index("trial_session_create"), step_keys.index("trial_paper_bind"))
+        self.assertLess(step_keys.index("trial_paper_bind"), step_keys.index("course_create"))
+
     def test_get_task_backfills_score_process_step_for_existing_tasks(self):
         task = self.store.create_task("旧项目", "account-a", {})
         task_id = task["taskId"]

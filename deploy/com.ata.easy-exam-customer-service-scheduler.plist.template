@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ata.easy-exam-customer-service-scheduler</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node</string>
+    <string>/Users/ata/Library/Application Support/easy-exam-automation/app/scripts/customer_service_scheduler.mjs</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/app</string>
+
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/customer-service-scheduler.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/customer-service-scheduler.err.log</string>
+</dict>
+</plist>

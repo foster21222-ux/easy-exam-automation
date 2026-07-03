@@ -4,6 +4,7 @@ import json
 import re
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 FULL_NAME_ALIASES = {"姓名", "考生姓名", "full_name", "name"}
@@ -14,10 +15,23 @@ MOBILE_ALIASES = {"手机号码", "手机号", "手机", "联系电话", "电话
 EMAIL_ALIASES = {"邮箱", "邮箱地址", "电子邮箱", "电子邮件", "邮件", "email", "mail"}
 REQUIRED_FIELDS = ("permit", "full_name")
 TARGET_FIELDS = ("permit", "full_name", "identity_id", "course_code", "mobile", "email")
+FIELD_LABELS = {
+    "permit": "准考证号",
+    "full_name": "姓名",
+    "identity_id": "身份证号",
+    "course_code": "科目编号",
+    "mobile": "手机号",
+    "email": "邮箱",
+}
 TEMPLATE_HEADERS = ("准考证号", "姓名", "身份证号", "科目编号", "手机号码", "邮箱")
 DISALLOWED_CUSTOM_FIELD_NAMES = {"姓名", "身份证号", "证件号", "准考证号", "科目编号", "科目名称"}
 MAX_CUSTOM_FIELDS = 30
 SCIENTIFIC_RE = re.compile(r"^\s*\d+(?:\.\d+)?[eE]\+?\d+\s*$")
+CANDIDATE_PERMIT_RE = re.compile(r"^[A-Za-z0-9]+$")
+MAINLAND_MOBILE_RE = re.compile(r"^1[3-9]\d{9}$")
+IDENTITY_ID_RE = re.compile(r"^\d{17}[\dX]$")
+IDENTITY_CHECKSUM_WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
+IDENTITY_CHECKSUM_CODES = "10X98765432"
 
 
 def normalize_header(value):
@@ -37,6 +51,10 @@ def cell_to_text(value):
             return str(int(value))
         return str(value)
     return str(value).strip()
+
+
+def field_label(field):
+    return FIELD_LABELS.get(field, "字段")
 
 
 def detect_mapping(columns):
@@ -69,12 +87,73 @@ def canonical_import_field_name(value):
     return name
 
 
+def is_mobile_alias(value):
+    normalized = normalize_header(value).lower()
+    return normalized in {normalize_header(alias).lower() for alias in MOBILE_ALIASES}
+
+
+def is_valid_candidate_permit(value):
+    return bool(CANDIDATE_PERMIT_RE.fullmatch(cell_to_text(value)))
+
+
+def normalize_identity_id(value):
+    return cell_to_text(value).upper()
+
+
+def identity_birth_date_is_valid(value):
+    birth = value[6:14]
+    try:
+        parsed = datetime.strptime(birth, "%Y%m%d")
+    except ValueError:
+        return False
+    return parsed.strftime("%Y%m%d") == birth
+
+
+def identity_checksum(value):
+    total = sum(int(value[index]) * weight for index, weight in enumerate(IDENTITY_CHECKSUM_WEIGHTS))
+    return IDENTITY_CHECKSUM_CODES[total % 11]
+
+
+def validate_identity_id(value):
+    normalized = normalize_identity_id(value)
+    if not normalized:
+        return ""
+    if not IDENTITY_ID_RE.fullmatch(normalized):
+        return "身份证号格式不正确"
+    if not identity_birth_date_is_valid(normalized):
+        return "身份证号出生日期不合法"
+    if identity_checksum(normalized) != normalized[-1]:
+        return "身份证号校验码错误"
+    return ""
+
+
+def normalize_mobile(value):
+    return re.sub(r"[\s\u3000-]+", "", cell_to_text(value))
+
+
+def is_valid_mobile(value):
+    return bool(MAINLAND_MOBILE_RE.fullmatch(normalize_mobile(value)))
+
+
+def validate_mobile(value, *, required=False):
+    normalized = normalize_mobile(value)
+    if not normalized:
+        return "手机号不能为空" if required else ""
+    if not normalized.isdigit() or len(normalized) != 11:
+        return "手机号必须为 11 位数字"
+    if not MAINLAND_MOBILE_RE.fullmatch(normalized):
+        return "手机号格式不正确"
+    return ""
+
+
 def custom_field_candidates(columns, mapping):
+    mapped_columns = {str(value or "").strip() for value in (mapping or {}).values() if str(value or "").strip()}
+    disallowed_names = {normalize_header(name) for name in DISALLOWED_CUSTOM_FIELD_NAMES}
     return [
         column
         for column in columns
-        if str(column or "").strip()
-        and str(column or "").strip() not in DISALLOWED_CUSTOM_FIELD_NAMES
+        if (str(column or "").strip() and str(column or "").strip() not in mapped_columns)
+        and normalize_header(column) not in disallowed_names
         and canonical_import_field_name(column) not in {"手机号码", "邮箱"}
     ]
 
@@ -191,14 +270,18 @@ def build_candidates(raw_rows, mapping, custom_fields=None):
             target_name = field["target_name"]
             source_column = field["source_column"]
             custom_values[target_name] = cell_to_text(row.get(source_column, "")) if source_column else ""
+        mobile_value = normalize_mobile(row.get(mapping.get("mobile", ""), ""))
+        permit_value = cell_to_text(row.get(mapping.get("permit", ""), ""))
+        if is_mobile_alias(mapping.get("permit")):
+            permit_value = normalize_mobile(permit_value)
         candidates.append(
             {
                 "__row": row.get("__row"),
-                "permit": cell_to_text(row.get(mapping.get("permit", ""), "")),
+                "permit": permit_value,
                 "full_name": cell_to_text(row.get(mapping.get("full_name", ""), "")),
-                "identity_id": cell_to_text(row.get(mapping.get("identity_id", ""), "")),
+                "identity_id": normalize_identity_id(row.get(mapping.get("identity_id", ""), "")),
                 "course_code": cell_to_text(row.get(mapping.get("course_code", ""), "")),
-                "mobile": cell_to_text(row.get(mapping.get("mobile", ""), "")),
+                "mobile": mobile_value,
                 "email": cell_to_text(row.get(mapping.get("email", ""), "")),
                 "custom_fields": custom_values,
             }
@@ -209,21 +292,39 @@ def build_candidates(raw_rows, mapping, custom_fields=None):
 def validate_candidates(candidates, mapping):
     errors = []
     warnings = []
+    missing_mapped_fields = set()
+    permit_mapped_from_mobile = is_mobile_alias(mapping.get("permit"))
     for field in REQUIRED_FIELDS:
         if not mapping.get(field):
-            errors.append(f"缺少字段映射：{field}")
+            missing_mapped_fields.add(field)
+            errors.append(f"缺少字段映射：{field_label(field)}")
 
     duplicate_maps = {"permit": defaultdict(list), "identity_id": defaultdict(list)}
     for idx, row in enumerate(candidates, start=2):
         row_num = row.get("__row") or idx
         for field in REQUIRED_FIELDS:
+            if field in missing_mapped_fields:
+                continue
             value = cell_to_text(row.get(field))
             if not value:
-                errors.append(f"第 {row_num} 行缺少 {field}")
+                errors.append(f"第 {row_num} 行缺少{field_label(field)}")
+        permit = cell_to_text(row.get("permit"))
+        if permit and not is_valid_candidate_permit(permit):
+            errors.append(f"第 {row_num} 行准考证号只能包含英文字母和数字")
+        identity_error = validate_identity_id(row.get("identity_id"))
+        if identity_error:
+            errors.append(f"第 {row_num} 行{identity_error}")
+        mobile_error = "" if permit_mapped_from_mobile and mapping.get("mobile") == mapping.get("permit") else validate_mobile(row.get("mobile"))
+        if mobile_error:
+            errors.append(f"第 {row_num} 行{mobile_error}")
+        if permit_mapped_from_mobile:
+            permit_mobile_error = validate_mobile(permit, required=True)
+            if permit_mobile_error:
+                errors.append(f"第 {row_num} 行{permit_mobile_error}")
         for field in ("permit", "identity_id", "mobile"):
             value = cell_to_text(row.get(field))
             if value and SCIENTIFIC_RE.match(value):
-                errors.append(f"第 {row_num} 行 {field} 为科学计数法格式，请修正原始文件后再导入")
+                errors.append(f"第 {row_num} 行{field_label(field)}为科学计数法格式，请修正原始文件后再导入")
         for field, bucket in duplicate_maps.items():
             value = cell_to_text(row.get(field))
             if value:

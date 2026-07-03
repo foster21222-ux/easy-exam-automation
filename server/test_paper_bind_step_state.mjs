@@ -12,3 +12,9 @@ test("paper form bind retry does not mark missing form codes as success", () => 
   assert.ok(serverSource.includes('updatePaperFormBindState(taskId, "failed"'));
   assert.ok(serverSource.includes("missingCourseCodes"));
 });
+
+test("trial paper bind is a retryable task step", () => {
+  assert.ok(serverSource.includes('if (stepKey === "trial_paper_bind")'));
+  assert.ok(serverSource.includes("bindDefaultTrialPaperToSession"));
+  assert.ok(serverSource.includes('updateTaskStep(taskId, stepKey, "waiting_manual"'));
+});

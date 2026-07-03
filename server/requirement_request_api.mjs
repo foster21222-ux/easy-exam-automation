@@ -34,6 +34,12 @@ function decodeSegment(value) {
   return decodeURIComponent(value || "");
 }
 
+function normalizeSource(value, fallback = "dify") {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
 export function createRequirementRequestHandler(options = {}) {
   const dbPath = options.dbPath || process.env.REQUIREMENT_DB_PATH || defaultDbPath;
   const pythonBin = options.pythonBin || process.env.CODEX_PYTHON || process.env.PYTHON || "python3";
@@ -68,8 +74,65 @@ export function createRequirementRequestHandler(options = {}) {
     return parseJsonSafe(await readBody(req)) || {};
   }
 
+  async function runStoreOrBadRequest(res, action, payload) {
+    try {
+      return await runRequirementStore(action, payload);
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      return undefined;
+    }
+  }
+
   return async function handleRequirementRequest(req, res, url = new URL(req.url, "http://127.0.0.1")) {
     const pathname = url.pathname;
+
+    if (req.method === "POST" && pathname === "/api/ai/requirements/dispatch") {
+      const payload = await readJson(req);
+      const intent = String(payload.intent || "collecting").trim();
+      const requestId = payload.requestId || payload.request_id || "";
+
+      if (intent === "customer_confirmed") {
+        if (!requestId) {
+          json(res, 400, { error: "requestId is required for customer_confirmed intent" });
+          return true;
+        }
+        const requirement = await runStoreOrBadRequest(res, "confirm", {
+          requestId,
+          customerReply: payload.customerReply || payload.customer_reply || payload.customer_summary || "",
+          conversationId: payload.conversationId || payload.conversation_id || "",
+        });
+        if (!requirement) return true;
+        json(res, 200, { ok: true, action: "customer_confirmed", requirement });
+        return true;
+      }
+
+      if (intent === "change_request") {
+        if (!requestId) {
+          json(res, 400, { error: "requestId is required for change_request intent" });
+          return true;
+        }
+        const requirement = await runStoreOrBadRequest(res, "change", {
+          requestId,
+          customerMessage: payload.customerMessage || payload.customer_message || payload.customer_summary || "",
+          changes: payload.changes || payload.requirement || {},
+          analysisCandidates: payload.analysisCandidates || payload.analysis_candidates || null,
+        });
+        if (!requirement) return true;
+        json(res, 200, { ok: true, action: "change_request", requirement });
+        return true;
+      }
+
+      const requirement = await runRequirementStore("upsert", {
+        requestId,
+        customer: payload.customer || {},
+        requirement: payload.requirement || {},
+        message: payload.message || "",
+        source: normalizeSource(payload.source),
+        analysisCandidates: payload.analysisCandidates || payload.analysis_candidates || null,
+      });
+      json(res, 200, { ok: true, action: "upsert", requirement });
+      return true;
+    }
 
     if (req.method === "POST" && pathname === "/api/ai/requirements/upsert") {
       const payload = await readJson(req);
@@ -78,7 +141,8 @@ export function createRequirementRequestHandler(options = {}) {
         customer: payload.customer || {},
         requirement: payload.requirement || {},
         message: payload.message || "",
-        source: payload.source || "dify",
+        source: normalizeSource(payload.source),
+        analysisCandidates: payload.analysisCandidates || payload.analysis_candidates || null,
       });
       json(res, 200, { ok: true, requirement });
       return true;
@@ -112,6 +176,7 @@ export function createRequirementRequestHandler(options = {}) {
         requestId: decodeSegment(changeMatch[1]),
         customerMessage: payload.customerMessage || payload.customer_message || "",
         changes: payload.changes || {},
+        analysisCandidates: payload.analysisCandidates || payload.analysis_candidates || null,
       });
       json(res, 200, { ok: true, requirement });
       return true;
@@ -135,10 +200,39 @@ export function createRequirementRequestHandler(options = {}) {
     const readyMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/mark-ready$/);
     if (req.method === "POST" && readyMatch) {
       const payload = await readJson(req);
-      const requirement = await runRequirementStore("mark_ready", {
+      const requirement = await runStoreOrBadRequest(res, "mark_ready", {
         requestId: decodeSegment(readyMatch[1]),
         reviewer: payload.reviewer || "",
       });
+      if (!requirement) return true;
+      json(res, 200, { ok: true, requirement });
+      return true;
+    }
+
+    const clarificationMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/request-clarification$/);
+    if (req.method === "POST" && clarificationMatch) {
+      const payload = await readJson(req);
+      const requirement = await runStoreOrBadRequest(res, "request_clarification", {
+        requestId: decodeSegment(clarificationMatch[1]),
+        reviewer: payload.reviewer || "",
+        message: payload.message || "",
+        questions: Array.isArray(payload.questions) ? payload.questions : [],
+        missingFields: Array.isArray(payload.missingFields) ? payload.missingFields : [],
+      });
+      if (!requirement) return true;
+      json(res, 200, { ok: true, requirement });
+      return true;
+    }
+
+    const reviewedMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/mark-reviewed$/);
+    if (req.method === "POST" && reviewedMatch) {
+      const payload = await readJson(req);
+      const requirement = await runStoreOrBadRequest(res, "mark_reviewed", {
+        requestId: decodeSegment(reviewedMatch[1]),
+        reviewer: payload.reviewer || "",
+        message: payload.message || "",
+      });
+      if (!requirement) return true;
       json(res, 200, { ok: true, requirement });
       return true;
     }
@@ -146,10 +240,39 @@ export function createRequirementRequestHandler(options = {}) {
     const linkTaskMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/link-task$/);
     if (req.method === "POST" && linkTaskMatch) {
       const payload = await readJson(req);
-      const requirement = await runRequirementStore("link_task", {
+      const requirement = await runStoreOrBadRequest(res, "link_task", {
         requestId: decodeSegment(linkTaskMatch[1]),
         taskId: payload.taskId || payload.task_id || "",
       });
+      if (!requirement) return true;
+      json(res, 200, { ok: true, requirement });
+      return true;
+    }
+
+    const acceptChangeMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/change-requests\/([^/]+)\/accept$/);
+    if (req.method === "POST" && acceptChangeMatch) {
+      const payload = await readJson(req);
+      const requirement = await runStoreOrBadRequest(res, "accept_change", {
+        requestId: decodeSegment(acceptChangeMatch[1]),
+        changeId: decodeSegment(acceptChangeMatch[2]),
+        reviewer: payload.reviewer || "",
+        message: payload.message || "",
+      });
+      if (!requirement) return true;
+      json(res, 200, { ok: true, requirement });
+      return true;
+    }
+
+    const rejectChangeMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/change-requests\/([^/]+)\/reject$/);
+    if (req.method === "POST" && rejectChangeMatch) {
+      const payload = await readJson(req);
+      const requirement = await runStoreOrBadRequest(res, "reject_change", {
+        requestId: decodeSegment(rejectChangeMatch[1]),
+        changeId: decodeSegment(rejectChangeMatch[2]),
+        reviewer: payload.reviewer || "",
+        reason: payload.reason || payload.message || "",
+      });
+      if (!requirement) return true;
       json(res, 200, { ok: true, requirement });
       return true;
     }

@@ -10,16 +10,18 @@ from pathlib import Path
 REQUIRED_FIELDS = [
     "exam_name",
     "formal_exam_time_range",
+    "mock_exam_time_range",
     "early_login_minutes",
     "late_limit_minutes",
     "video_monitor_required",
     "video_record_required",
     "hawkeye_required",
     "exam_client_type",
-    "watermark_enabled",
-    "copy_forbidden",
     "subjects",
 ]
+
+STATUS_READY_FOR_MANUAL_EXECUTION = "ready_for_manual_execution"
+STATUS_LINKED_TO_EXECUTION_TASK = "linked_to_execution_task"
 
 
 def utc_now():
@@ -71,11 +73,34 @@ def normalize_subjects(value):
     return [part.strip() for part in parts if part.strip()]
 
 
+def normalize_text_list(value):
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = re.split(r"[\n\r]+", str(value))
+    return [str(item).strip(" \t-•、;；") for item in raw_items if str(item).strip(" \t-•、;；")]
+
+
+def build_customer_clarification_prompt(message="", questions=None, request_id=""):
+    questions = normalize_text_list(questions)
+    intro = str(message or "人工审核后需要补充信息").strip()
+    prefix = f"需求编号：{request_id}\n" if request_id else ""
+    if not questions:
+        return f"{prefix}{intro}"
+    lines = ["请补充以下信息："]
+    lines.extend(f"{index}. {question}" for index, question in enumerate(questions, start=1))
+    return f"{prefix}{intro}\n" + "\n".join(lines)
+
+
 def normalize_requirement(payload):
     source = dict(payload or {})
     result = {}
     for key, value in source.items():
         result[key] = value
+    result.setdefault("watermark_enabled", True)
+    result.setdefault("copy_forbidden", True)
     for key in ["early_login_minutes", "late_limit_minutes", "leave_limit_count"]:
         if key in result:
             result[key] = normalize_minutes(result.get(key))
@@ -179,7 +204,7 @@ class RequirementStore:
                 """
             )
 
-    def create_or_update_requirement(self, customer=None, requirement=None, message="", request_id=None, source="dify"):
+    def create_or_update_requirement(self, customer=None, requirement=None, message="", request_id=None, source="dify", analysis_candidates=None):
         request_id = request_id or str(uuid.uuid4())
         now = utc_now()
         normalized = normalize_requirement(requirement or {})
@@ -232,6 +257,11 @@ class RequirementStore:
                 "status": status,
                 "missingFields": missing,
             })
+            if analysis_candidates:
+                self._record_event(db, request_id, "analysis_candidate_recorded", source, {
+                    "analysisCandidates": analysis_candidates,
+                    "version": next_version,
+                })
         return self.get_requirement(request_id)
 
     def list_requirements(self):
@@ -291,49 +321,199 @@ class RequirementStore:
             })
         return self.get_requirement(request_id)
 
-    def create_change_request(self, request_id, customer_message="", changes=None):
+    def request_customer_clarification(self, request_id, reviewer="", message="", questions=None, missing_fields=None):
+        questions = normalize_text_list(questions)
+        missing_fields = normalize_text_list(missing_fields)
+        customer_prompt = build_customer_clarification_prompt(message, questions, request_id)
+        return self._set_status(
+            request_id,
+            "need_customer_clarification",
+            "customer_clarification_requested",
+            reviewer or "staff",
+            {
+                "message": message or "",
+                "questions": questions,
+                "missingFields": missing_fields,
+                "customerPrompt": customer_prompt,
+            },
+        )
+
+    def mark_reviewed_waiting_customer_confirmation(self, request_id, reviewer="", message=""):
+        return self._set_status(
+            request_id,
+            "reviewed_waiting_customer_confirmation",
+            "reviewed_waiting_customer_confirmation",
+            reviewer or "staff",
+            {"message": message or ""},
+        )
+
+    def create_change_request(self, request_id, customer_message="", changes=None, analysis_candidates=None):
         now = utc_now()
+        normalized_message = str(customer_message or "").strip()
+        normalized_changes = normalize_requirement(changes or {})
         with self.connect() as db:
             self._require_request(db, request_id)
+            pending_matches = db.execute(
+                """SELECT changes_json FROM requirement_change_requests
+                WHERE request_id=? AND status='pending_internal_review' AND customer_message=?""",
+                (request_id, normalized_message),
+            ).fetchall()
+            duplicate = any(
+                normalize_requirement(loads(row["changes_json"], {})) == normalized_changes
+                for row in pending_matches
+            )
+            if not duplicate:
+                db.execute(
+                    """INSERT INTO requirement_change_requests
+                    (change_id, request_id, status, customer_message, changes_json, created_at)
+                    VALUES (?, ?, 'pending_internal_review', ?, ?, ?)""",
+                    (
+                        str(uuid.uuid4()),
+                        request_id,
+                        normalized_message,
+                        json.dumps(normalized_changes, ensure_ascii=False),
+                        now,
+                    ),
+                )
+                db.execute(
+                    "UPDATE requirement_requests SET status='change_requested', updated_at=? WHERE request_id=?",
+                    (now, request_id),
+                )
+                self._record_event(db, request_id, "change_requested", "customer", {
+                    "message": normalized_message,
+                })
+                if analysis_candidates:
+                    self._record_event(db, request_id, "analysis_candidate_recorded", "wechat_llm", {
+                        "analysisCandidates": analysis_candidates,
+                        "changeMessage": normalized_message,
+                    })
+        return self.get_requirement(request_id)
+
+    def accept_change_request(self, request_id, change_id, reviewer="", message=""):
+        now = utc_now()
+        with self.connect() as db:
+            request = self._require_request(db, request_id)
+            change = self._require_change_request(db, request_id, change_id)
+            if change["status"] != "pending_internal_review":
+                raise ValueError("Change request is not pending internal review")
+            changes = loads(change["changes_json"], {})
+            latest = db.execute(
+                "SELECT * FROM requirement_versions WHERE request_id=? ORDER BY version DESC LIMIT 1",
+                (request_id,),
+            ).fetchone()
+            base_requirement = loads(latest["requirement_json"], {}) if latest else {}
+            next_requirement = self._requirement_from_change(base_requirement, changes)
+            normalized = normalize_requirement(next_requirement)
+            missing, errors = validate_requirement(normalized)
+            next_version_row = db.execute(
+                "SELECT MAX(version) AS version FROM requirement_versions WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            next_version = int(next_version_row["version"] or 0) + 1
+            status = "collecting" if missing or errors else "pending_internal_review"
+            title = str(normalized.get("exam_name") or request["title"] or "未命名考试需求")
             db.execute(
-                """INSERT INTO requirement_change_requests
-                (change_id, request_id, status, customer_message, changes_json, created_at)
-                VALUES (?, ?, 'pending_internal_review', ?, ?, ?)""",
+                """INSERT INTO requirement_versions
+                (request_id, version, source, message, requirement_json, missing_fields_json,
+                 validation_errors_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    str(uuid.uuid4()),
                     request_id,
-                    customer_message or "",
-                    json.dumps(normalize_requirement(changes or {}), ensure_ascii=False),
+                    next_version,
+                    "staff_change_acceptance",
+                    message or change["customer_message"] or "",
+                    json.dumps(normalized, ensure_ascii=False),
+                    json.dumps(missing, ensure_ascii=False),
+                    json.dumps(errors, ensure_ascii=False),
                     now,
                 ),
             )
             db.execute(
-                "UPDATE requirement_requests SET status='change_requested', updated_at=? WHERE request_id=?",
-                (now, request_id),
+                "UPDATE requirement_change_requests SET status='accepted' WHERE request_id=? AND change_id=?",
+                (request_id, change_id),
             )
-            self._record_event(db, request_id, "change_requested", "customer", {
-                "message": customer_message or "",
+            pending = db.execute(
+                """SELECT COUNT(*) AS count FROM requirement_change_requests
+                WHERE request_id=? AND status='pending_internal_review'""",
+                (request_id,),
+            ).fetchone()
+            if int(pending["count"] or 0) > 0:
+                status = "change_requested"
+            db.execute(
+                "UPDATE requirement_requests SET title=?, status=?, updated_at=? WHERE request_id=?",
+                (title, status, now, request_id),
+            )
+            self._record_event(db, request_id, "change_request_accepted", reviewer or "staff", {
+                "changeId": change_id,
+                "version": next_version,
+                "message": message or "",
+            })
+        return self.get_requirement(request_id)
+
+    def reject_change_request(self, request_id, change_id, reviewer="", reason=""):
+        now = utc_now()
+        with self.connect() as db:
+            self._require_request(db, request_id)
+            change = self._require_change_request(db, request_id, change_id)
+            if change["status"] != "pending_internal_review":
+                raise ValueError("Change request is not pending internal review")
+            db.execute(
+                "UPDATE requirement_change_requests SET status='rejected' WHERE request_id=? AND change_id=?",
+                (request_id, change_id),
+            )
+            pending = db.execute(
+                """SELECT COUNT(*) AS count FROM requirement_change_requests
+                WHERE request_id=? AND status='pending_internal_review'""",
+                (request_id,),
+            ).fetchone()
+            if int(pending["count"] or 0) == 0:
+                db.execute(
+                    "UPDATE requirement_requests SET status='pending_internal_review', updated_at=? WHERE request_id=?",
+                    (now, request_id),
+                )
+            else:
+                db.execute(
+                    "UPDATE requirement_requests SET updated_at=? WHERE request_id=?",
+                    (now, request_id),
+                )
+            self._record_event(db, request_id, "change_request_rejected", reviewer or "staff", {
+                "changeId": change_id,
+                "reason": reason or "",
             })
         return self.get_requirement(request_id)
 
     def mark_ready_to_create_task(self, request_id, reviewer=""):
-        return self._set_status(request_id, "ready_to_create_task", "marked_ready", reviewer)
+        return self.mark_ready_for_manual_execution(request_id, reviewer)
+
+    def mark_ready_for_manual_execution(self, request_id, reviewer=""):
+        with self.connect() as db:
+            request = self._require_request(db, request_id)
+            if request["status"] != "customer_confirmed":
+                raise ValueError("Requirement must be customer confirmed before manual execution handoff")
+        return self._set_status(
+            request_id,
+            STATUS_READY_FOR_MANUAL_EXECUTION,
+            "ready_for_manual_execution",
+            reviewer,
+        )
 
     def link_task(self, request_id, task_id):
         if not task_id:
             raise ValueError("task_id is required")
         now = utc_now()
         with self.connect() as db:
-            self._require_request(db, request_id)
+            request = self._require_request(db, request_id)
+            if request["status"] != STATUS_READY_FOR_MANUAL_EXECUTION:
+                raise ValueError("Requirement must be ready for manual execution before linking a task")
             db.execute(
                 """UPDATE requirement_requests
-                SET status='task_created', linked_task_id=?, updated_at=? WHERE request_id=?""",
-                (task_id, now, request_id),
+                SET status=?, linked_task_id=?, updated_at=? WHERE request_id=?""",
+                (STATUS_LINKED_TO_EXECUTION_TASK, task_id, now, request_id),
             )
-            self._record_event(db, request_id, "task_linked", "staff", {"taskId": task_id})
+            self._record_event(db, request_id, "execution_task_linked", "staff", {"taskId": task_id})
         return self.get_requirement(request_id)
 
-    def _set_status(self, request_id, status, event_type, actor=""):
+    def _set_status(self, request_id, status, event_type, actor="", payload=None):
         now = utc_now()
         with self.connect() as db:
             self._require_request(db, request_id)
@@ -341,7 +521,9 @@ class RequirementStore:
                 "UPDATE requirement_requests SET status=?, updated_at=? WHERE request_id=?",
                 (status, now, request_id),
             )
-            self._record_event(db, request_id, event_type, actor or "staff", {"status": status})
+            event_payload = {"status": status}
+            event_payload.update(payload or {})
+            self._record_event(db, request_id, event_type, actor or "staff", event_payload)
         return self.get_requirement(request_id)
 
     def _require_request(self, db, request_id):
@@ -351,6 +533,26 @@ class RequirementStore:
         if not row:
             raise ValueError("Requirement request not found")
         return row
+
+    def _require_change_request(self, db, request_id, change_id):
+        row = db.execute(
+            "SELECT * FROM requirement_change_requests WHERE request_id=? AND change_id=?",
+            (request_id, change_id),
+        ).fetchone()
+        if not row:
+            raise ValueError("Change request not found")
+        return row
+
+    def _requirement_from_change(self, base_requirement, changes):
+        if isinstance(changes, dict) and isinstance(changes.get("latestRequirement"), dict):
+            return changes["latestRequirement"]
+        merged = dict(base_requirement or {})
+        if isinstance(changes, dict):
+            for key, value in changes.items():
+                if key in {"changeRecords", "attachments"}:
+                    continue
+                merged[key] = value
+        return merged
 
     def _record_event(self, db, request_id, event_type, actor, payload):
         db.execute(
@@ -429,6 +631,7 @@ def main():
             message=payload.get("message", ""),
             request_id=payload.get("requestId") or payload.get("request_id"),
             source=payload.get("source", "dify"),
+            analysis_candidates=payload.get("analysisCandidates") or payload.get("analysis_candidates"),
         )
     elif action == "list":
         result = store.list_requirements()
@@ -445,11 +648,40 @@ def main():
             payload.get("requestId") or payload.get("request_id"),
             payload.get("customerMessage") or payload.get("customer_message") or "",
             payload.get("changes") or {},
+            payload.get("analysisCandidates") or payload.get("analysis_candidates"),
+        )
+    elif action == "accept_change":
+        result = store.accept_change_request(
+            payload.get("requestId") or payload.get("request_id"),
+            payload.get("changeId") or payload.get("change_id"),
+            payload.get("reviewer") or "",
+            payload.get("message") or "",
+        )
+    elif action == "reject_change":
+        result = store.reject_change_request(
+            payload.get("requestId") or payload.get("request_id"),
+            payload.get("changeId") or payload.get("change_id"),
+            payload.get("reviewer") or "",
+            payload.get("reason") or payload.get("message") or "",
         )
     elif action == "mark_ready":
         result = store.mark_ready_to_create_task(
             payload.get("requestId") or payload.get("request_id"),
             payload.get("reviewer") or "",
+        )
+    elif action == "request_clarification":
+        result = store.request_customer_clarification(
+            payload.get("requestId") or payload.get("request_id"),
+            payload.get("reviewer") or "",
+            payload.get("message") or "",
+            payload.get("questions") or [],
+            payload.get("missingFields") or payload.get("missing_fields") or [],
+        )
+    elif action == "mark_reviewed":
+        result = store.mark_reviewed_waiting_customer_confirmation(
+            payload.get("requestId") or payload.get("request_id"),
+            payload.get("reviewer") or "",
+            payload.get("message") or "",
         )
     elif action == "link_task":
         result = store.link_task(

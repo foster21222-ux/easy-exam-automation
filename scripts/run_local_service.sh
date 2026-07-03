@@ -14,14 +14,19 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set +a
 fi
 
+DEFAULT_CODEX_RUNTIME="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies"
+
 : "${PORT:=8765}"
-: "${CODEX_PYTHON:=/Users/chen/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3}"
+: "${CODEX_PYTHON:=$DEFAULT_CODEX_RUNTIME/python/bin/python3}"
 
 export PORT
 export CODEX_PYTHON
 export NODE_ENV=production
 
-: "${CODEX_NODE:=/Users/chen/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node}"
+DEFAULT_CODEX_NODE="$DEFAULT_CODEX_RUNTIME/node/bin/node"
+if [ -z "${CODEX_NODE:-}" ] || [ ! -x "$CODEX_NODE" ]; then
+  CODEX_NODE="$DEFAULT_CODEX_NODE"
+fi
 
 export CODEX_NODE
 

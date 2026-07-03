@@ -1,0 +1,14 @@
+{
+  "groups": [
+    {
+      "group_name": "AI赋能运营自动化小组",
+      "project_name": "易考自动化需求",
+      "customer_name": "内部测试客户",
+      "requirement_request_id": "wechat-ai-ops",
+      "enabled": true,
+      "interval_minutes": 15,
+      "initial_collection_mode": "ocr_current_window",
+      "initial_collected_at": ""
+    }
+  ]
+}

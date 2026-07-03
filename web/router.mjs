@@ -9,6 +9,8 @@ export const ROUTES = [
   { name: "requirements", pattern: /^\/requirements\/?$/, menuKey: "requirements" },
   { name: "requirement-detail", pattern: /^\/requirements\/([^/]+)\/?$/, param: "requestId", menuKey: "requirements" },
   { name: "users", pattern: /^\/users\/?$/, menuKey: "users" },
+  { name: "wechat-collector", pattern: /^\/wechat-collector\/?$/, menuKey: "wechat-collector" },
+  { name: "system-config", pattern: /^\/system-config\/?$/, menuKey: "system-config" },
   { name: "templates", pattern: /^\/templates\/?$/, menuKey: "templates" },
   { name: "logs", pattern: /^\/logs\/?$/, menuKey: "logs" },
 ];

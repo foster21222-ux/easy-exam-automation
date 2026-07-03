@@ -48,7 +48,7 @@ test("builds Tencent Docs rows through AD with configured defaults", () => {
   assert.equal(rows[0][12], "是，作答60分钟可交卷");
   assert.equal(rows[0][13], "一个单元，60-120分钟");
   assert.equal(rows[0][14], "准考证号");
-  assert.equal(rows[0][15], "428572");
+  assert.equal(rows[0][15], "统一入口：E107910\n考试口令：428572");
   assert.equal(rows[0][16], "准点收卷，迟到及离开扣时");
   assert.equal(rows[0][17], "双监控");
   assert.equal(rows[0][18], "考中侦测");
@@ -61,7 +61,7 @@ test("builds Tencent Docs rows through AD with configured defaults", () => {
   assert.equal(rows[0][25], "不允许");
   assert.equal(rows[0][26], "鹰眼");
   assert.equal(rows[0][28], "声音监控");
-  assert.match(rows[0][29], /考生您好！项目招聘考试笔试将于北京时间2026年7月1日\(周三\)09:00-11:00举行。/);
+  assert.match(rows[0][29], /考生您好！项目招聘考试将于北京时间2026年7月1日\(周三\)09:00-11:00举行。/);
   assert.match(rows[0][29], /试考时间为2026年6月30日15:00-6月30日17:00/);
   assert.match(rows[0][29], /客户端下载地址：https:\/\/eztest\.org\/exam\/session\/428572\/client\/download/);
   assert.match(rows[0][29], /考试口令统一为：E107910/);
@@ -74,9 +74,9 @@ test("builds Tencent Docs rows through AD with configured defaults", () => {
   assert.equal(rows[1][10], "90分钟");
   assert.equal(rows[1][12], "是，作答10分钟可交卷");
   assert.equal(rows[1][13], "一个单元，10-90分钟");
-  assert.equal(rows[1][15], "428573");
+  assert.equal(rows[1][15], "统一入口：E107910\n考试口令：428573");
   assert.equal(rows[1][16], "不准点收卷，无迟到扣时");
-  assert.equal(rows[1][17], "不需要");
+  assert.equal(rows[1][17], "双监控");
   assert.equal(rows[1][18], "不需要");
   assert.equal(rows[1][20], "ATA短信");
   assert.equal(rows[1][21], "已通知");
@@ -112,6 +112,117 @@ test("SMS uses unified exam code for unified address and session id for independ
   assert.doesNotMatch(independentRow[29], /考试口令统一为：【考试口令】/);
 });
 
+test("SMS uses the exam name directly before the scheduled time", () => {
+  const [row] = buildTencentDocRows({
+    config: { ...config, examName: "客户招聘笔试" },
+    created: [
+      {
+        kind: "main",
+        id: "428572",
+        name: "客户招聘笔试",
+        start: "2026-07-03 09:00",
+        end: "2026-07-03 10:30",
+      },
+    ],
+  });
+
+  assert.match(row[29], /考生您好！客户招聘笔试将于北京时间/);
+  assert.doesNotMatch(row[29], /笔试笔试/);
+
+  const [plainNameRow] = buildTencentDocRows({
+    config: { ...config, examName: "客户招聘考试" },
+    created: [
+      {
+        kind: "main",
+        id: "428572",
+        name: "客户招聘考试",
+        start: "2026-07-03 09:00",
+        end: "2026-07-03 10:30",
+      },
+    ],
+  });
+  assert.match(plainNameRow[29], /考生您好！客户招聘考试将于北京时间/);
+  assert.doesNotMatch(plainNameRow[29], /客户招聘考试笔试将于/);
+});
+
+test("P column includes both unified entry code and exam password for unified address", () => {
+  const [unifiedRow] = buildTencentDocRows({
+    config,
+    created: [
+      {
+        kind: "main",
+        id: "428572",
+        name: "统一地址考试",
+        start: "2026-07-03 09:00",
+        end: "2026-07-03 10:30",
+        url: "https://eztest.cn/exam/107910/uniform/login/",
+      },
+    ],
+  });
+  assert.equal(unifiedRow[15], "统一入口：E107910\n考试口令：428572");
+
+  const [independentRow] = buildTencentDocRows({
+    config: { ...config, unifiedExamAddress: false, examAddress: "独立考试地址" },
+    created: [
+      {
+        kind: "main",
+        id: "428572",
+        name: "独立地址考试",
+        start: "2026-07-03 09:00",
+        end: "2026-07-03 10:30",
+      },
+    ],
+  });
+  assert.equal(independentRow[15], "428572");
+});
+
+test("explicit independent exam address keeps P column on the session password", () => {
+  const [row] = buildTencentDocRows({
+    config: { ...config, unifiedExamAddress: false, examAddress: "独立考试地址" },
+    created: [
+      {
+        kind: "main",
+        id: "428572",
+        name: "独立地址考试",
+        start: "2026-07-03 09:00",
+        end: "2026-07-03 10:30",
+        url: "https://eztest.cn/exam/107910/uniform/login/",
+      },
+    ],
+  });
+
+  assert.equal(row[15], "428572");
+});
+
+test("unified address P column keeps explicit exam password next to the E-prefixed code", () => {
+  const [row] = buildTencentDocRows({
+    config: {
+      ...config,
+      unifiedExamAddress: true,
+      examCode: "428572",
+    },
+    created: [
+      {
+        kind: "main",
+        id: "428572",
+        name: "统一地址考试",
+        start: "2026-07-03 09:00",
+        end: "2026-07-03 10:30",
+        url: "https://eztest.cn/exam/107910/uniform/login/",
+      },
+    ],
+  });
+
+  assert.equal(row[15], "统一入口：E107910\n考试口令：428572");
+});
+
+test("trial R column follows the formal exam monitor rule", () => {
+  const rows = buildTencentDocRows({ config, created });
+
+  assert.equal(rows[0][17], "双监控");
+  assert.equal(rows[1][17], "双监控");
+});
+
 test("copies Tencent Docs example rows before overriding task-specific fields", () => {
   const remoteRows = [
     ["考试名称"],
@@ -128,7 +239,7 @@ test("copies Tencent Docs example rows before overriding task-specific fields", 
   assert.equal(rows[0][5], "81");
   assert.equal(rows[0][12], "是，作答60分钟可交卷");
   assert.equal(rows[0][13], "一个单元，60-120分钟");
-  assert.equal(rows[0][15], "428572");
+  assert.equal(rows[0][15], "统一入口：E107910\n考试口令：428572");
   assert.equal(rows[0][20], "ATA短信");
   assert.equal(rows[0][21], "已通知");
   assert.equal(rows[0][22], "纸质草稿纸");
@@ -139,7 +250,7 @@ test("copies Tencent Docs example rows before overriding task-specific fields", 
   assert.equal(rows[1][5], "62");
   assert.equal(rows[1][12], "是，作答10分钟可交卷");
   assert.equal(rows[1][13], "一个单元，10-90分钟");
-  assert.equal(rows[1][15], "428573");
+  assert.equal(rows[1][15], "统一入口：E107910\n考试口令：428573");
 });
 
 test("appends to blank rows and writes font plus centered alignment", () => {
@@ -156,8 +267,8 @@ test("appends to blank rows and writes font plus centered alignment", () => {
 
   assert.deepEqual(requests.map((item) => item.updateRangeRequest.gridData.startRow), [2, 3]);
   assert.equal(requests[0].updateRangeRequest.sheetId, "BB08J2");
-  assert.equal(requests[0].updateRangeRequest.gridData.rows[0].values[15].cellValue.text, "428572");
-  assert.equal(requests[1].updateRangeRequest.gridData.rows[0].values[15].cellValue.text, "428573");
+  assert.equal(requests[0].updateRangeRequest.gridData.rows[0].values[15].cellValue.text, "统一入口：E107910\n考试口令：428572");
+  assert.equal(requests[1].updateRangeRequest.gridData.rows[0].values[15].cellValue.text, "统一入口：E107910\n考试口令：428573");
 
   for (const request of requests) {
     const rowValues = request.updateRangeRequest.gridData.rows[0].values;

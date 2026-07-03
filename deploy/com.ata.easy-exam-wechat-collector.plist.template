@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ata.easy-exam-wechat-collector</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node</string>
+    <string>/Users/ata/Library/Application Support/easy-exam-automation/app/scripts/wechat_visible_collect.mjs</string>
+    <string>--config</string>
+    <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/wechat-requirement-groups.json</string>
+    <string>--state</string>
+    <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/wechat-checkpoints.json</string>
+    <string>--push</string>
+    <string>--api</string>
+    <string>http://127.0.0.1:8765</string>
+    <string>--captureMode</string>
+    <string>ocr</string>
+    <string>--output</string>
+    <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/wechat-last-run.json</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/app</string>
+
+  <key>StartInterval</key>
+  <integer>900</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/wechat-collector.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/ata/Library/Application Support/easy-exam-automation/runtime/wechat-collector.err.log</string>
+</dict>
+</plist>

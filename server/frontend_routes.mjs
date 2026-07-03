@@ -10,6 +10,8 @@ const FRONTEND_ROUTE_PATTERNS = [
   /^\/requirements\/?$/,
   /^\/requirements\/[^/]+\/?$/,
   /^\/users\/?$/,
+  /^\/wechat-collector\/?$/,
+  /^\/system-config\/?$/,
   /^\/templates\/?$/,
   /^\/logs\/?$/,
 ];

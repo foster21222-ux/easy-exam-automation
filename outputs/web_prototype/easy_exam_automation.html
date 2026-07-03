@@ -49,8 +49,9 @@
 
       .app-shell {
         min-height: 100vh;
-        display: grid;
-        grid-template-columns: 248px minmax(0, 1fr);
+        display: flex;
+        width: 100%;
+        min-width: 0;
       }
 
       .sidebar {
@@ -160,7 +161,9 @@
 
       .main {
         padding: 22px 26px 32px;
+        flex: 1 1 auto;
         min-width: 0;
+        width: 100%;
       }
 
       .topbar {
@@ -230,6 +233,136 @@
         cursor: not-allowed;
       }
 
+      .auto-workbench {
+        --workbench-left-width: calc((100% - 28px) / 2);
+        --workbench-right-width: calc((100% - 28px) / 2);
+        display: grid;
+        grid-template-columns:
+          minmax(0, var(--workbench-left-width))
+          12px
+          minmax(0, var(--workbench-right-width));
+        gap: 8px;
+        align-items: start;
+        width: 100%;
+        min-width: 0;
+      }
+
+      .auto-workbench.is-resizing {
+        cursor: col-resize;
+        user-select: none;
+      }
+
+      .workbench-main,
+      .support-rail {
+        display: grid;
+        gap: 16px;
+        min-width: 0;
+      }
+
+      .support-rail {
+        width: 100%;
+      }
+
+      .support-rail > .panel {
+        width: 100%;
+      }
+
+      .workbench-main {
+        position: sticky;
+        top: 18px;
+      }
+
+      .support-rail .panel-body {
+        overflow-x: auto;
+      }
+
+      .support-rail table {
+        min-width: 360px;
+      }
+
+      .workbench-resizer {
+        align-self: stretch;
+        min-height: 280px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        cursor: col-resize;
+        outline: none;
+        padding: 0;
+        position: relative;
+        touch-action: none;
+      }
+
+      .workbench-resizer::before {
+        content: "";
+        position: absolute;
+        inset: 8px 5px;
+        border-radius: 999px;
+        background: transparent;
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .workbench-resizer:hover::before,
+      .workbench-resizer:focus-visible::before,
+      .workbench-resizer.is-dragging::before {
+        background: #9ec8f3;
+        box-shadow: 0 0 0 3px rgba(33, 126, 216, 0.12);
+      }
+
+      .workbench-resizer:focus-visible {
+        box-shadow: inset 0 0 0 2px rgba(33, 126, 216, 0.24);
+      }
+
+      .auto-workbench .stack,
+      .auto-workbench .dashboard,
+      .auto-workbench .lower-grid {
+        display: contents;
+      }
+
+      .workflow-inline {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+        padding: 16px;
+        margin-top: 18px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .workflow-inline-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(176px, 0.22fr);
+        gap: 14px;
+        align-items: center;
+      }
+
+      .workflow-steps {
+        min-width: 0;
+      }
+
+      .workflow-summary {
+        align-self: stretch;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+        overflow-x: hidden;
+        padding: 12px;
+      }
+
+      .workflow-summary .subtitle {
+        overflow-wrap: anywhere;
+      }
+
+      .workflow-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
       .dashboard {
         display: grid;
         grid-template-columns: minmax(320px, 0.88fr) minmax(420px, 1.12fr);
@@ -277,7 +410,7 @@
 
       .settings-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
       }
 
@@ -351,10 +484,68 @@
         font-size: 12px;
       }
 
+      .scheduler-card {
+        border-top: 1px solid var(--line);
+        margin-top: 16px;
+        padding-top: 16px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .scheduler-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .scheduler-title {
+        margin: 0;
+        color: #1f2d3d;
+        font-size: 15px;
+        font-weight: 750;
+      }
+
+      .scheduler-profiles {
+        display: grid;
+        gap: 8px;
+      }
+
+      .scheduler-profile {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        background: #fbfcfe;
+      }
+
+      .scheduler-profile strong {
+        display: block;
+        color: #1f2d3d;
+        font-size: 13px;
+        line-height: 1.3;
+      }
+
+      .scheduler-profile span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .scheduler-profile-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
       .drop-zone {
         border: 1px dashed var(--line-strong);
         background: #fbfcfe;
-        min-height: 178px;
+        min-height: 142px;
         border-radius: 8px;
         padding: 18px;
         display: grid;
@@ -410,7 +601,7 @@
 
       .summary-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 10px;
         margin-top: 14px;
       }
@@ -441,29 +632,54 @@
       .progress-top {
         display: flex;
         justify-content: space-between;
-        align-items: end;
-        gap: 18px;
+        align-items: center;
+        gap: 12px;
       }
 
       .progress-number {
-        font-size: 34px;
+        font-size: 26px;
         font-weight: 800;
         color: var(--blue-dark);
         line-height: 1;
+        position: relative;
+        z-index: 1;
       }
 
-      .bar {
-        height: 12px;
-        border-radius: 999px;
-        background: #e4e8ee;
-        overflow: hidden;
+      .progress-circle {
+        --progress-circumference: 238.76;
+        --progress-offset: 238.76;
+        width: 92px;
+        aspect-ratio: 1;
+        display: grid;
+        place-items: center;
+        position: relative;
+        flex: 0 0 auto;
       }
 
-      .bar-fill {
+      .progress-ring {
+        position: absolute;
+        inset: 0;
+        width: 100%;
         height: 100%;
-        width: 0%;
-        background: var(--blue);
-        transition: width 260ms ease;
+        transform: rotate(-90deg);
+      }
+
+      .progress-ring-track,
+      .progress-ring-value {
+        fill: none;
+        stroke-width: 10;
+      }
+
+      .progress-ring-track {
+        stroke: #e4e8ee;
+      }
+
+      .progress-ring-value {
+        stroke: var(--blue);
+        stroke-linecap: round;
+        stroke-dasharray: var(--progress-circumference);
+        stroke-dashoffset: var(--progress-offset);
+        transition: stroke-dashoffset 180ms ease;
       }
 
       .step-list {
@@ -476,8 +692,8 @@
         border: 1px solid var(--line);
         background: #ffffff;
         border-radius: 8px;
-        padding: 10px;
-        min-height: 86px;
+        padding: 9px;
+        min-height: 64px;
       }
 
       .step-index {
@@ -519,11 +735,23 @@
         margin-top: 6px;
       }
 
+      .workflow-inline .progress-number {
+        font-size: 24px;
+      }
+
+      .workflow-inline .progress-top {
+        align-items: center;
+      }
+
       .lower-grid {
         display: grid;
         grid-template-columns: minmax(420px, 1.08fr) minmax(320px, 0.92fr);
         gap: 16px;
         margin-top: 16px;
+      }
+
+      .auto-workbench .lower-grid {
+        margin-top: 0;
       }
 
       table {
@@ -575,7 +803,7 @@
       .log-list {
         display: grid;
         gap: 9px;
-        max-height: 326px;
+        max-height: 260px;
         overflow: auto;
         padding-right: 4px;
       }
@@ -602,94 +830,8 @@
         font-size: 12px;
       }
 
-      .review-strip {
-        margin-top: 14px;
-        border: 1px solid #ffd89a;
-        background: #fff8ec;
-        border-radius: 8px;
-        padding: 12px;
-        display: flex;
-        gap: 10px;
-        align-items: flex-start;
-        color: #553600;
-        font-size: 13px;
-        line-height: 1.45;
-      }
-
-      .mock-window {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: white;
-        overflow: hidden;
-        margin-top: 14px;
-      }
-
-      .mock-window-bar {
-        height: 34px;
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        padding: 0 12px;
-        background: #edf1f5;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #aab4c0;
-      }
-
-      .mock-body {
-        padding: 13px;
-        display: grid;
-        grid-template-columns: 98px minmax(0, 1fr);
-        gap: 12px;
-        min-height: 150px;
-      }
-
-      .mock-menu {
-        display: grid;
-        align-content: start;
-        gap: 8px;
-      }
-
-      .mock-menu span,
-      .mock-row {
-        height: 12px;
-        border-radius: 999px;
-        background: #d9e2ec;
-      }
-
-      .mock-menu span:nth-child(2) {
-        background: #c7e1fb;
-      }
-
-      .mock-content {
-        display: grid;
-        gap: 10px;
-        align-content: start;
-      }
-
-      .mock-card {
-        border: 1px solid #d8e1eb;
-        border-radius: 7px;
-        padding: 10px;
-        display: grid;
-        gap: 8px;
-      }
-
-      .mock-row.short {
-        width: 48%;
-      }
-
-      .mock-row.mid {
-        width: 72%;
-      }
-
       .capture-panel {
-        margin-top: 14px;
+        margin-top: 0;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: #ffffff;
@@ -713,7 +855,7 @@
       .capture-grid {
         padding: 12px;
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 1fr;
         gap: 10px;
       }
 
@@ -723,61 +865,28 @@
         overflow: hidden;
         background: var(--panel-soft);
         min-width: 0;
-        cursor: pointer;
+        cursor: default;
         text-align: left;
         padding: 0;
       }
 
-      .capture-card:hover {
-        border-color: var(--blue);
-      }
-
       .capture-thumb {
-        height: 118px;
+        min-height: 220px;
+        aspect-ratio: 1544 / 528;
         background: #edf2f7;
-        padding: 9px;
+        padding: 14px;
         display: grid;
-        grid-template-columns: 58px minmax(0, 1fr);
-        gap: 8px;
+        place-items: center;
       }
 
-      .capture-nav {
-        display: grid;
-        align-content: start;
-        gap: 7px;
-      }
-
-      .capture-nav span,
-      .capture-line {
-        height: 8px;
-        border-radius: 999px;
-        background: #cdd8e5;
-      }
-
-      .capture-nav span:nth-child(3) {
-        background: #77b8ed;
-      }
-
-      .capture-sheet {
-        background: white;
-        border: 1px solid #d4dde8;
-        border-radius: 5px;
-        padding: 8px;
-        display: grid;
-        gap: 7px;
-        align-content: start;
-      }
-
-      .capture-line.short {
-        width: 46%;
-      }
-
-      .capture-line.mid {
-        width: 72%;
-      }
-
-      .capture-line.good {
-        background: #8bd0aa;
+      .capture-image {
+        width: 100%;
+        height: 100%;
+        border: 1px solid #d0d8e4;
+        border-radius: 8px;
+        background: #ffffff;
+        object-fit: contain;
+        display: block;
       }
 
       .capture-info {
@@ -799,75 +908,6 @@
         border-radius: 8px;
         background: var(--panel-soft);
         font-size: 13px;
-      }
-
-      .modal-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(17, 24, 39, 0.54);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        padding: 22px;
-        z-index: 30;
-      }
-
-      .modal-backdrop.open {
-        display: flex;
-      }
-
-      .modal {
-        width: min(1180px, 100%);
-        max-height: min(720px, 92vh);
-        background: #ffffff;
-        border-radius: 8px;
-        border: 1px solid var(--line);
-        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.26);
-        overflow: hidden;
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
-      }
-
-      .modal-head {
-        padding: 12px 14px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .modal-title {
-        font-size: 15px;
-        font-weight: 800;
-      }
-
-      .icon-btn {
-        width: 34px;
-        height: 34px;
-        border: 1px solid var(--line-strong);
-        border-radius: 6px;
-        background: #ffffff;
-        color: var(--text);
-        display: grid;
-        place-items: center;
-        cursor: pointer;
-      }
-
-      .modal-body {
-        padding: 12px;
-        overflow: auto;
-        background: #dfe3e8;
-      }
-
-      .large-shot {
-        min-height: 430px;
-        background: white;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        overflow: hidden;
-        display: grid;
-        grid-template-rows: 38px minmax(0, 1fr);
       }
 
       .large-browserbar {
@@ -1234,7 +1274,7 @@
         margin-top: 16px;
         border-color: #e5e7eb;
         border-radius: 24px;
-        overflow: hidden;
+        overflow: visible;
         background: #ffffff;
         box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -1274,6 +1314,15 @@
       .candidate-left,
       .candidate-right {
         min-width: 0;
+      }
+
+      .candidate-right {
+        position: sticky;
+        top: 18px;
+        max-height: calc(100vh - 36px);
+        overflow-y: auto;
+        padding-right: 4px;
+        overscroll-behavior: contain;
       }
 
       .candidate-card {
@@ -1353,6 +1402,12 @@
         box-shadow: 0 18px 28px rgba(0, 113, 227, 0.08);
       }
 
+      .candidate-upload-box > span {
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+      }
+
       .candidate-upload-box .drop-title {
         display: block;
         color: #111827;
@@ -1360,6 +1415,9 @@
         font-weight: 800;
         line-height: 1.35;
         margin-bottom: 10px;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       .candidate-upload-box .drop-note {
@@ -1395,14 +1453,24 @@
       }
 
       .candidate-help-box {
-        margin-top: 14px;
-        border: 1px solid #e5edf8;
-        border-radius: 12px;
-        background: rgba(247, 251, 255, 0.86);
+        display: block;
+        max-width: 100%;
+        margin-top: 8px;
         color: #64748b;
-        padding: 10px 12px;
         font-size: 12px;
         line-height: 1.55;
+        overflow-wrap: anywhere;
+      }
+
+      .candidate-upload-warning {
+        display: block;
+        max-width: 100%;
+        margin-top: 6px;
+        color: #dc2626;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
       }
 
       .candidate-card-head {
@@ -1417,7 +1485,7 @@
         color: #111827;
       }
 
-      .candidate-actions,
+      .load-sessions-action,
       .candidate-session-actions {
         display: flex;
         flex-wrap: wrap;
@@ -1471,25 +1539,6 @@
         box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
       }
 
-      .candidate-actions {
-        margin-top: 12px;
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .candidate-actions .btn {
-        min-height: 44px;
-        border-radius: 12px;
-        justify-content: center;
-        font-weight: 800;
-      }
-
-      .candidate-actions .btn.primary {
-        background: #0071e3;
-        border-color: #0071e3;
-        color: #ffffff;
-      }
-
       .custom-field-panel {
         margin-top: 14px;
         border: 1px solid #edf1f6;
@@ -1500,10 +1549,17 @@
 
       .custom-field-head {
         display: flex;
+        flex-wrap: wrap;
         align-items: flex-start;
         justify-content: space-between;
         gap: 12px;
+        min-width: 0;
         margin-bottom: 12px;
+      }
+
+      .custom-field-head > div:first-child {
+        min-width: 0;
+        max-width: 100%;
       }
 
       .custom-field-title {
@@ -1513,17 +1569,22 @@
       }
 
       .custom-field-actions {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(96px, max-content));
         gap: 8px;
         justify-content: flex-end;
+        max-width: 100%;
+        min-width: 0;
       }
 
       .custom-field-actions .btn {
         min-height: 34px;
         border-radius: 10px;
+        max-width: 100%;
         padding: 6px 10px;
         font-size: 12px;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }
 
       .custom-field-list {
@@ -1533,9 +1594,11 @@
 
       .custom-field-row {
         display: grid;
-        grid-template-columns: 28px minmax(100px, 1fr) minmax(120px, 1fr) minmax(80px, 1fr);
+        grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
         gap: 10px;
         align-items: center;
+        max-width: 100%;
+        overflow: hidden;
         padding: 10px;
         border: 1px solid #e5eaf2;
         border-radius: 12px;
@@ -1559,10 +1622,6 @@
         border: 1px dashed #d8dee8;
         border-radius: 12px;
         background: #ffffff;
-      }
-
-      .candidate-actions .btn.primary:hover {
-        background: #005bbf;
       }
 
       .candidate-issues {
@@ -1618,6 +1677,22 @@
         grid-template-columns: minmax(0, 1fr) 180px;
         gap: 18px;
         align-items: end;
+      }
+
+      .load-sessions-action[hidden] {
+        display: none;
+      }
+
+      .load-sessions-action .btn.primary {
+        width: 100%;
+        min-height: 48px;
+        justify-content: center;
+        border-radius: 14px;
+        background: #0071e3;
+        border-color: #0071e3;
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 850;
       }
 
       .candidate-form-block {
@@ -1833,6 +1908,7 @@
       @media (max-width: 768px) { .card-actions { grid-template-columns: 1fr; } }
       .project-title { font-size: 17px; font-weight: 800; margin-bottom: 6px; }
       .task-meta { color: var(--muted); font-size: 12px; line-height: 1.7; }
+      #wechatCollectorConfig { min-height: 0; max-height: 720px; overflow: auto; }
       .status-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 12px; font-weight: 800; white-space: nowrap; }
       .status-chip.success { background: #ecfdf3; color: #15803d; }
       .status-chip.running { background: #eaf3ff; color: #0670d8; }
@@ -1872,6 +1948,29 @@
       .task-step-actions { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
       .task-step-action { border: 1px solid var(--line); background: #fff; color: var(--blue); border-radius: 9px; padding: 7px 10px; font-weight: 800; cursor: pointer; }
       .task-step-action:disabled { color: var(--muted); background: #f4f7fb; cursor: not-allowed; }
+      .sms-notification-preview { margin-top: 12px; color: #475569; font-size: 12px; line-height: 1.65; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+      .sms-action-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+      .sms-message-text {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 5;
+        max-height: 8.25em;
+        overflow: hidden;
+        white-space: pre-wrap;
+      }
+      .sms-notification-preview.is-expanded .sms-message-text {
+        display: block;
+        -webkit-line-clamp: unset;
+        max-height: none;
+        overflow: visible;
+      }
+      .sms-expand-button { margin-top: 6px; border: 0; background: transparent; color: var(--blue); padding: 0; font-size: 12px; font-weight: 850; cursor: pointer; }
+      .sms-copy-button { border: 0; background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 850; cursor: pointer; }
+      .sms-copy-button:disabled { opacity: .72; cursor: default; }
+      .sms-platform-link { background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 850; text-decoration: none; display: inline-block; }
+      .sms-candidate-empty { color: var(--muted); font-size: 12px; display: inline-block; }
+      .sms-candidate-download { border: 0; background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 850; cursor: pointer; }
+      .sms-candidate-download:disabled { opacity: .7; cursor: default; }
       .task-step-detail { display: none; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 12px; color: #475569; white-space: pre-wrap; }
       .task-step-card.open .task-step-detail { display: block; }
       .retry-step { margin-top: 10px; border: 1px solid #f0a5a5; background: #fff; color: #c62828; border-radius: 9px; padding: 6px 10px; font-weight: 750; cursor: pointer; }
@@ -1925,7 +2024,7 @@
 
       @media (max-width: 1120px) {
         .app-shell {
-          grid-template-columns: 1fr;
+          display: block;
         }
 
         .sidebar {
@@ -1936,6 +2035,13 @@
         .lower-grid,
         .candidate-grid {
           grid-template-columns: 1fr;
+        }
+
+        .candidate-right {
+          position: static;
+          max-height: none;
+          overflow-y: visible;
+          padding-right: 0;
         }
 
         .candidate-upload-box {
@@ -1949,6 +2055,24 @@
         }
 
         .task-session-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .auto-workbench {
+          grid-template-columns: 1fr;
+        }
+
+        .workbench-main {
+          position: static;
+        }
+
+        .workbench-resizer {
+          display: none;
+        }
+
+        .workflow-inline-head {
           grid-template-columns: 1fr;
         }
       }
@@ -2085,6 +2209,20 @@
               <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M16 11h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
             用户管理
+          <button class="nav-item nav-button" id="wechatCollectorNavBtn" data-route-menu="wechat-collector" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 5h16v10H7l-3 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+              <path d="M8 9h8M8 12h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            微信采集
+          </button>
+          <button class="nav-item nav-button" id="systemConfigNavBtn" data-route-menu="system-config" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="M8 9h8M8 13h8M8 17h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            系统配置
+
           </button>
           <button class="nav-item nav-button" id="templatesNavBtn" data-route-menu="templates" type="button">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -2113,11 +2251,47 @@
         <div class="topbar" id="autoTopbar" hidden>
           <div>
             <h1>易考考试自动配置</h1>
-            <p class="subtitle">导入 Excel 需求单后，自动完成后台配置，并在确认页停下等待人工核对。</p>
+            <p class="subtitle">把客户考试需求、微信群沟通记录和考生名单转成可执行任务，统一完成审核、自动配置、进度追踪和结果下载。</p>
           </div>
         </div>
 
         <section class="stack" id="autoConfigStack" hidden>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">功能介绍</h2>
+                <p class="subtitle">围绕考试交付全流程，把需求收集、人工审核、自动执行和结果回收放在同一个本地控制台。</p>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="settings-grid">
+                <div class="field">
+                  <span class="field-label">自动配置</span>
+                  <span class="settings-note">导入 Excel 需求单，自动创建正式考试、试考、科目、提示语和承诺书，并在确认页等待人工核对。</span>
+                </div>
+                <div class="field">
+                  <span class="field-label">项目与考试追踪</span>
+                  <span class="settings-note">按项目、考试任务和执行步骤保存状态，支持失败重试、试卷绑定、监考账号和成绩反馈单下载。</span>
+                </div>
+                <div class="field">
+                  <span class="field-label">名单导入</span>
+                  <span class="settings-note">识别客户名单字段，校验准考证号、姓名、证件号，整理后导入指定易考场次。</span>
+                </div>
+                <div class="field">
+                  <span class="field-label">需求中心</span>
+                  <span class="settings-note">承接 Dify、内部接口或微信群采集结果，保留审核、客户确认、变更记录和执行任务关联。</span>
+                </div>
+                <div class="field">
+                  <span class="field-label">微信采集</span>
+                  <span class="settings-note">按微信群采集可见聊天内容和附件线索，推送到需求中心，并提供预检、链路自检和运行历史。</span>
+                </div>
+                <div class="field">
+                  <span class="field-label">系统配置</span>
+                  <span class="settings-note">集中维护本机服务、定时采集、LLM 候选解析和上线前检查，密钥只保存在本机运行目录。</span>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="panel">
             <div class="panel-head">
               <h2 class="panel-title">后台连接</h2>
@@ -2125,10 +2299,6 @@
             </div>
             <div class="panel-body">
               <div class="settings-grid">
-                <label class="field">
-                  <span class="field-label">登录网址</span>
-                  <input class="field-input" id="loginUrlInput" type="url" placeholder="https://eztest.org/manager/accounts/login" />
-                </label>
                 <label class="field">
                   <span class="field-label">账号</span>
                   <input class="field-input" id="loginUsernameInput" type="text" placeholder="请输入后台账号" />
@@ -2152,12 +2322,27 @@
                 <span class="settings-note">账号密码和租户 API Key 单独保存到本地运行目录；API Key 用于获取场次和导入考生。</span>
                 <button class="btn" id="saveLoginBtn" type="button">保存登录配置</button>
               </div>
+              <div class="scheduler-card">
+                <div class="scheduler-head">
+                  <div>
+                    <h3 class="scheduler-title">在线客服定时</h3>
+                    <span class="settings-note">保存新的租户 API Key 后会新增定时配置；之前保存的 Key 默认继续每小时运行。</span>
+                  </div>
+                  <div class="toolbar">
+                    <span class="tag amber" id="customerServiceSchedulerState">待加载</span>
+                    <button class="btn" id="customerServiceSchedulerRunBtn" type="button">立即试跑</button>
+                  </div>
+                </div>
+                <div class="scheduler-profiles" id="customerServiceSchedulerProfiles"></div>
+              </div>
             </div>
           </div>
         </section>
 
-        <section class="dashboard">
-          <div class="panel">
+        <section class="auto-workbench" id="autoWorkbench" hidden>
+          <main class="workbench-main">
+            <section class="dashboard">
+              <div class="panel">
             <div class="panel-head">
               <h2 class="panel-title">导入需求单</h2>
               <span class="panel-meta" id="fileState">等待导入</span>
@@ -2191,6 +2376,58 @@
                 </button>
               </div>
 
+              <div class="workflow-inline" aria-label="配置流程">
+                <div class="workflow-inline-head">
+                  <div class="workflow-steps">
+                    <div class="workflow-title-row">
+                      <h3 class="panel-title">配置流程</h3>
+                      <span class="panel-meta" id="stageText">尚未开始</span>
+                    </div>
+                    <div class="step-list" id="stepList">
+                      <div class="step" data-step="0">
+                        <div class="step-index">1</div>
+                        <div class="step-title">读取需求单</div>
+                        <div class="step-state">等待</div>
+                      </div>
+                      <div class="step" data-step="1">
+                        <div class="step-index">2</div>
+                        <div class="step-title">基础信息</div>
+                        <div class="step-state">等待</div>
+                      </div>
+                      <div class="step" data-step="2">
+                        <div class="step-index">3</div>
+                        <div class="step-title">个人信息</div>
+                        <div class="step-state">等待</div>
+                      </div>
+                      <div class="step" data-step="3">
+                        <div class="step-index">4</div>
+                        <div class="step-title">考试配置</div>
+                        <div class="step-state">等待</div>
+                      </div>
+                      <div class="step" data-step="4">
+                        <div class="step-index">5</div>
+                        <div class="step-title">确认核对</div>
+                        <div class="step-state">等待</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="workflow-summary" aria-label="配置进度">
+                    <div class="progress-top">
+                      <div class="progress-circle" id="progressCircle" role="img" aria-label="配置进度 0%">
+                        <svg class="progress-ring" viewBox="0 0 92 92" aria-hidden="true">
+                          <circle class="progress-ring-track" cx="46" cy="46" r="38"></circle>
+                          <circle class="progress-ring-value" id="progressRingValue" cx="46" cy="46" r="38"></circle>
+                        </svg>
+                        <div class="progress-number" id="progressNumber">0%</div>
+                      </div>
+                      <div>
+                        <p class="subtitle" id="progressCaption">导入需求单后可开始配置</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div class="summary-grid" aria-label="导入摘要">
                 <div class="metric">
                   <div class="metric-label">识别配置项</div>
@@ -2209,86 +2446,12 @@
                   <div class="metric-value" id="metricStatus">待导入</div>
                 </div>
               </div>
-
-              <div class="mock-window" aria-hidden="true">
-                <div class="mock-window-bar">
-                  <span class="dot"></span>
-                  <span class="dot"></span>
-                  <span class="dot"></span>
-                </div>
-                <div class="mock-body">
-                  <div class="mock-menu">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
-                  <div class="mock-content">
-                    <div class="mock-card">
-                      <span class="mock-row short"></span>
-                      <span class="mock-row"></span>
-                      <span class="mock-row mid"></span>
-                    </div>
-                    <div class="mock-card">
-                      <span class="mock-row mid"></span>
-                      <span class="mock-row"></span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 
-          <div class="panel">
-            <div class="panel-head">
-              <h2 class="panel-title">自动配置进度</h2>
-              <span class="panel-meta" id="stageText">尚未开始</span>
-            </div>
-            <div class="panel-body progress-wrap">
-              <div class="progress-top">
-                <div>
-                  <div class="progress-number" id="progressNumber">0%</div>
-                  <p class="subtitle" id="progressCaption">导入需求单后可开始配置</p>
-                </div>
-                <span class="tag amber" id="modeTag">确认页停下</span>
-              </div>
-              <div class="bar" aria-label="配置进度">
-                <div class="bar-fill" id="barFill"></div>
-              </div>
-              <div class="step-list" id="stepList">
-                <div class="step" data-step="0">
-                  <div class="step-index">1</div>
-                  <div class="step-title">读取需求单</div>
-                  <div class="step-state">等待</div>
-                </div>
-                <div class="step" data-step="1">
-                  <div class="step-index">2</div>
-                  <div class="step-title">基础信息</div>
-                  <div class="step-state">等待</div>
-                </div>
-                <div class="step" data-step="2">
-                  <div class="step-index">3</div>
-                  <div class="step-title">个人信息</div>
-                  <div class="step-state">等待</div>
-                </div>
-                <div class="step" data-step="3">
-                  <div class="step-index">4</div>
-                  <div class="step-title">考试配置</div>
-                  <div class="step-state">等待</div>
-                </div>
-                <div class="step" data-step="4">
-                  <div class="step-index">5</div>
-                  <div class="step-title">确认核对</div>
-                  <div class="step-state">等待</div>
-                </div>
-              </div>
-              <div class="review-strip">
-                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 9v4M12 17h.01M10.3 4.6 2.7 18a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                </svg>
-                <span>最终创建前会停在易考确认页，重点核对考试时间、正式场次科目绑定、监控项和考生信息字段。</span>
-              </div>
+            </section>
 
+            <section class="lower-grid">
               <div class="capture-panel">
                 <div class="capture-head">
                   <div class="capture-title">最后确认截图</div>
@@ -2298,39 +2461,8 @@
                   <div class="capture-empty">到达确认页后自动截取基本信息完整页，以及考试配置开考前、考试中、考试后三段完整页</div>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
 
-        <section class="lower-grid">
-          <div class="panel">
-            <div class="panel-head">
-              <h2 class="panel-title">配置预览</h2>
-              <span class="panel-meta">来自需求单填写内容</span>
-            </div>
-            <div class="panel-body">
-              <table>
-                <thead>
-                  <tr>
-                    <th>阶段</th>
-                    <th>配置项</th>
-                    <th>值</th>
-                    <th>处理</th>
-                  </tr>
-                </thead>
-                <tbody id="previewRows">
-                  <tr>
-                    <td>未导入</td>
-                    <td>等待需求单</td>
-                    <td>空</td>
-                    <td><span class="tag amber">待解析</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="panel">
+              <div class="panel">
             <div class="panel-head">
               <h2 class="panel-title">执行日志</h2>
               <span class="panel-meta" id="logCount">0 条</span>
@@ -2344,6 +2476,49 @@
               </div>
             </div>
           </div>
+            </section>
+          </main>
+
+          <button
+            class="workbench-resizer"
+            data-workbench-resizer="support"
+            type="button"
+            role="separator" aria-orientation="vertical"
+            aria-label="调整配置预览宽度"
+            aria-valuemin="25"
+            aria-valuemax="50"
+            aria-valuenow="50"
+            title="拖动调整配置预览宽度，双击恢复默认"
+          ></button>
+
+          <aside class="support-rail" aria-label="配置预览">
+            <div class="panel">
+              <div class="panel-head">
+                <h2 class="panel-title">配置预览</h2>
+                <span class="panel-meta">来自需求单填写内容</span>
+              </div>
+              <div class="panel-body">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>阶段</th>
+                      <th>配置项</th>
+                      <th>值</th>
+                      <th>处理</th>
+                    </tr>
+                  </thead>
+                  <tbody id="previewRows">
+                    <tr>
+                      <td>未导入</td>
+                      <td>等待需求单</td>
+                      <td>空</td>
+                      <td><span class="tag amber">待解析</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </aside>
         </section>
 
         <section class="panel candidate-panel" id="candidateImportPanel" hidden>
@@ -2364,8 +2539,9 @@
                       <span>
                         <span class="candidate-upload-status">文件上传成功</span>
                         <span class="drop-title" id="candidateDropTitle">上传客户原始名单</span>
-                        <span class="drop-note">支持 .xlsx、.xls、.csv；固定字段映射后，可选择客户自定义字段一起保存。</span>
-                        <span class="candidate-help-box">支持 .xlsx、.xls、.csv 格式<br />必填字段：准考证号 / 姓名；选填字段：身份证号 / 科目编号 / 手机号 / 邮箱</span>
+                        <span class="drop-note">支持 .xlsx、.xls、.csv 格式。</span>
+                        <span class="candidate-help-box">上传后，请在下方选择需要导入易考的信息项以及对应字段，导入后自动生成信息项。</span>
+                        <span class="candidate-upload-warning">客户名单首行必须是基本信息项才可自动读取</span>
                       </span>
                       <input class="hidden-input" id="candidateFileInput" type="file" accept=".xlsx,.xls,.csv" />
                     </label>
@@ -2375,7 +2551,7 @@
                 <div class="candidate-card">
                   <div class="candidate-card-body">
                     <div class="candidate-card-head">
-                      <h3 class="panel-title">字段映射</h3>
+                      <h3 class="panel-title">易考字段选择</h3>
                       <span class="panel-meta">请选择文件中对应的字段</span>
                     </div>
                     <div class="mapping-grid" aria-label="字段映射确认">
@@ -2413,16 +2589,11 @@
                         <div class="custom-field-actions">
                           <button class="btn" id="selectAllCustomFieldsBtn" type="button">全选字段</button>
                           <button class="btn" id="clearCustomFieldsBtn" type="button">清空选择</button>
-                          <button class="btn" id="addCustomFieldBtn" type="button">添加自定义字段</button>
                         </div>
                       </div>
                       <div class="custom-field-list" id="candidateCustomFieldList">
                         <div class="custom-field-empty">上传名单后自动读取客户表头字段。</div>
                       </div>
-                    </div>
-                    <div class="candidate-actions" style="margin-top: 12px;">
-                      <button class="btn" id="candidateDownloadBtn" type="button" disabled>下载导入模板</button>
-                      <button class="btn" id="loadSessionsBtn" type="button" disabled>加载考试场次</button>
                     </div>
                   </div>
                 </div>
@@ -2444,6 +2615,9 @@
                         <span class="candidate-form-note">自动分班人数，可手动调整</span>
                         <input class="field-input" id="roomTargetSizeInput" type="number" min="1" step="1" value="30" />
                       </label>
+                    </div>
+                    <div class="load-sessions-action" id="loadSessionsAction">
+                      <button class="btn primary" id="loadSessionsBtn" type="button" disabled>加载考试场次</button>
                     </div>
                     <div class="candidate-session-actions">
                       <button class="btn primary" id="candidateImportBtn" type="button" disabled>确认导入到所选场次</button>
@@ -2569,6 +2743,19 @@
 
         <section class="task-view" id="projectManagementView" hidden>
           <div class="view-heading"><div><h1>项目管理</h1><p class="subtitle">管理已持久化的考试项目。</p></div><div class="view-actions"><button class="btn" id="refreshProjectsBtn" type="button">刷新</button><button class="btn primary" id="newProjectBtn" type="button">新建项目</button></div></div>
+          <div class="panel">
+            <div class="panel-head">
+              <div><h2 class="panel-title">功能介绍</h2><p class="subtitle">从客户需求到考试交付的本地工作台，覆盖需求收集、审核、自动配置、名单导入和结果回收。</p></div>
+            </div>
+            <div class="panel-body">
+              <div class="settings-grid">
+                <div class="field"><span class="field-label">需求入口</span><span class="settings-note">支持 Excel 需求单、需求中心和微信群采集，把客户信息沉淀成可审核记录。</span></div>
+                <div class="field"><span class="field-label">自动执行</span><span class="settings-note">创建正式考试、试考、科目、提示语、承诺书，并保留人工确认节点。</span></div>
+                <div class="field"><span class="field-label">项目追踪</span><span class="settings-note">按项目汇总考试任务、正式/试考场次、执行步骤、失败重试和人工待处理事项。</span></div>
+                <div class="field"><span class="field-label">交付结果</span><span class="settings-note">整理并导入考生名单，生成监考账号文件、成绩反馈单和项目共享表同步记录。</span></div>
+              </div>
+            </div>
+          </div>
           <div class="task-overview" id="projectStats"></div>
           <div class="panel"><div class="panel-body"><div class="settings-grid"><label class="field"><span class="field-label">搜索项目</span><input class="field-input" id="projectSearchInput" placeholder="项目名称 / 客户 / 账号" /></label><label class="field"><span class="field-label">项目状态</span><select class="field-input" id="projectStatusFilter"><option value="">全部状态</option><option value="running">进行中</option><option value="waiting_manual">待处理</option><option value="success">已完成</option><option value="failed">失败</option></select></label></div></div></div>
           <div class="project-grid" id="projectGrid"><div class="empty-state">暂无项目记录</div></div>
@@ -2602,17 +2789,38 @@
         </section>
 
         <section class="task-view" id="requirementsView" hidden>
-          <div class="view-heading"><div><h1>需求单记录</h1><p class="subtitle">查看 Dify 收集并持久化的考试服务需求。</p></div><button class="btn" id="refreshRequirementsBtn" type="button">刷新</button></div>
+          <div class="view-heading"><div><h1>需求单记录</h1><p class="subtitle">需求处理工作台：优先处理有变更、缺字段、待确认或待执行交接的需求。</p></div><button class="btn" id="refreshRequirementsBtn" type="button">刷新</button></div>
+          <div class="panel"><div class="panel-head"><div><h2 class="panel-title">需求处理工作台</h2><p class="subtitle">按下一步动作看需求，不按系统编号找需求。</p></div></div><div class="panel-body"><div class="view-actions" id="requirementWorkQueueFilters"></div></div></div>
           <div class="project-grid" id="requirementsList"></div>
         </section>
 
         <section class="task-view" id="requirementDetailView" hidden>
           <div class="view-heading"><div><button class="btn" id="backToRequirementsBtn" type="button">返回</button><h1 style="margin-top:12px;">需求详情</h1><p class="subtitle" id="requirementDetailSubtitle"></p></div><div class="view-actions"><button class="btn" id="refreshRequirementBtn" type="button">刷新</button></div></div>
           <div class="task-overview" id="requirementOverview"></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">最新需求</h2></div><div class="panel-body" id="requirementLatest"></div></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">缺失项与校验</h2></div><div class="panel-body" id="requirementIssues"></div></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">确认与变更记录</h2></div><div class="panel-body"><div class="log-list" id="requirementAuditTrail"></div></div></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">人工审核动作</h2></div><div class="panel-body"><div class="settings-grid"><label class="field"><span class="field-label">执行任务编号</span><input class="field-input" id="requirementTaskIdInput" placeholder="粘贴已创建的任务编号" /></label><label class="field"><span class="field-label">审核人</span><input class="field-input" id="requirementReviewerInput" placeholder="admin-op" /></label></div><div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="requirementMarkReadyBtn" type="button">标记可创建任务</button><button class="btn" id="requirementLinkTaskBtn" type="button">绑定任务</button></div><div class="task-meta" id="requirementActionState" style="margin-top:8px;"></div></div></div>
+          <div class="panel"><div class="panel-head"><div><h2 class="panel-title">当前处理建议</h2><p class="subtitle">系统根据解析结果、缺失项、客户变更和执行状态给出下一步建议。</p></div></div><div class="panel-body"><div class="log-list" id="requirementNextStep"></div></div></div>
+          <div class="panel"><div class="panel-head"><div><h2 class="panel-title">0. 解析结果确认</h2><p class="subtitle">规则解析和 LLM 候选解析都会在这里展示；候选结果只供人工确认，不会自动覆盖正式需求。</p></div></div><div class="panel-body"><div class="log-list" id="requirementAnalysisCandidates"></div></div></div>
+          <div class="panel"><div class="panel-head"><div><h2 class="panel-title">1. 核对需求内容</h2><p class="subtitle">先看最新需求、缺失项和原始来源；确认信息是否足够进入客户确认或执行交接。</p></div></div><div class="panel-body"><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">最新需求</h2></div><div class="panel-body" id="requirementLatest"></div></div><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">缺失项与校验</h2></div><div class="panel-body" id="requirementIssues"></div></div><div class="panel"><div class="panel-head"><h2 class="panel-title">来源与原始消息</h2></div><div class="panel-body"><div id="requirementSource"></div><div class="log" id="requirementAuditMessage" style="margin-top:10px;"></div></div></div></div></div>
+          <details open><summary>2. 当前可执行操作</summary><div class="panel"><div class="panel-head"><div><h2 class="panel-title">审核与交接动作</h2><p class="subtitle">微信群模式下，审核动作只处理需求单状态，不会反向操作微信群。要求客户补充：信息不完整时生成可复制的话术；内部审核通过，待客户确认：内容完整但还需要客户最终确认；标记可进入执行：客户确认后交给执行侧创建考试任务；关联执行任务编号：记录后续创建出的考试任务，便于从需求追踪到执行结果。</p></div></div><div class="panel-body"><div class="settings-grid"><label class="field"><span class="field-label">执行任务编号</span><input class="field-input" id="requirementTaskIdInput" placeholder="粘贴已创建的考试任务编号" /></label><label class="field"><span class="field-label">审核人</span><input class="field-input" id="requirementReviewerInput" placeholder="admin-op" /></label></div><label class="field" style="margin-top:12px;"><span class="field-label">发给客户的补充问题</span><textarea class="field-input" id="requirementClarificationQuestions" rows="3" placeholder="逐行填写需要客户补充的问题，例如：&#10;正式考试是否需要分批次？&#10;考生名单预计什么时候确认？"></textarea></label><div class="log" id="requirementClarificationPrompt" style="margin-top:10px;" hidden></div><div class="view-actions" style="margin-top:12px;"><button class="btn" id="requirementClarificationBtn" type="button">生成客户补充话术</button><button class="btn" id="requirementReviewedBtn" type="button">标记已发客户确认</button><button class="btn primary" id="requirementMarkReadyBtn" type="button">标记客户已确认，可进入执行</button><button class="btn" id="requirementLinkTaskBtn" type="button">记录已创建的考试任务编号</button></div><div class="task-meta" id="requirementActionState" style="margin-top:8px;"></div></div></div></details>
+          <details><summary>3. 变更与确认记录</summary><div class="panel"><div class="panel-head"><div><h2 class="panel-title">变更、确认与版本</h2><p class="subtitle">查看客户确认、待处理变更和需求版本，避免把未处理变更带入执行。</p></div></div><div class="panel-body"><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">需求变更记录</h2></div><div class="panel-body"><div class="log-list" id="requirementChanges"></div></div></div><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">客户确认记录</h2></div><div class="panel-body"><div class="log-list" id="requirementConfirmations"></div></div></div><div class="panel"><div class="panel-head"><h2 class="panel-title">版本历史</h2></div><div class="panel-body"><div class="log-list" id="requirementVersions"></div></div></div></div></div></details>
+          <details><summary>4. 审计记录</summary><div class="panel"><div class="panel-head"><div><h2 class="panel-title">审计记录</h2><p class="subtitle">按时间查看所有系统和人工动作，排查状态来源。</p></div></div><div class="panel-body"><div class="log-list" id="requirementTimeline"></div></div></div></details>
+        </section>
+        <section class="task-view" id="wechatCollectorView" hidden>
+          <div class="view-heading"><div><h1>微信群采集</h1><p class="subtitle">日常使用入口：维护微信群、查看采集运行情况、排查最近日志。系统初始化和上线开关已移到“系统配置”。</p></div><div class="view-actions"><button class="btn" id="refreshWechatCollectorBtn" type="button">刷新</button></div></div>
+          <div class="task-meta">采集边界：可见群聊 OCR · 需求中心人工确认 · 已下载附件按本群可见文件名关联 · 不自动下载群文件</div>
+          <div class="panel"><div class="panel-head"><div><h2 class="panel-title">1. 配置微信群</h2><p class="subtitle">每个微信群独立保存设置。平时看群卡片摘要，需要排查时展开查看任务执行状态和需求更新记录。</p></div><div class="view-actions"><button class="btn" id="addWechatGroupBtn" type="button">新增群</button></div></div><div class="panel-body"><div class="log-list" id="wechatCollectorConfig"><div class="empty-state">等待加载配置</div></div><div class="task-meta" id="wechatCollectorConfigState" style="margin-top:8px;"></div></div></div>
+          <details><summary>高级：配置备份与恢复</summary><div class="panel"><div class="panel-body"><p class="subtitle">保存微信群配置时会备份上一版，用于误改群名、误删群、关联需求单编号填错或采集间隔填错后的回滚。</p><div class="log-list" id="wechatCollectorConfigBackups"><div class="empty-state">暂无配置备份</div></div></div></div></details>
+          <div class="panel"><div class="panel-head"><div><h2 class="panel-title">2. 运行监控</h2><p class="subtitle">最近运行摘要：只保留最近摘要，详细排障看群卡片或日志。系统上线门槛在“系统配置”里维护。</p></div></div><div class="panel-body"><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">当前运行状态</h2></div><div class="panel-body"><div class="log-list" id="wechatCollectorReadiness"><div class="empty-state">等待加载当前运行状态</div></div></div></div><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">最近运行摘要</h2></div><div class="panel-body"><div class="task-meta" id="wechatCollectorRunMeta">等待加载状态</div><div class="log-list" id="wechatCollectorStatus"></div></div></div><div class="panel"><div class="panel-head"><h2 class="panel-title">运行历史</h2></div><div class="panel-body"><div class="log-list" id="wechatCollectorHistory"><div class="empty-state">等待加载运行历史</div></div></div></div></div></div>
+          <details><summary>3. 排障日志</summary><div class="panel"><div class="panel-body"><div class="log-list" id="wechatCollectorLogs"><div class="empty-state">等待加载运行日志</div></div></div></div></details>
+        </section>
+        <section class="task-view" id="systemConfigView" hidden>
+          <div class="view-heading"><div><h1>系统配置</h1><p class="subtitle">系统级初始化、链路验证、上线开关和高级维护集中管理。当前模块：微信采集配置。</p></div><div class="view-actions"><button class="btn" id="refreshSystemConfigBtn" type="button">刷新</button></div></div>
+          <div class="panel"><div class="panel-head"><div><h2 class="panel-title">微信采集配置</h2><p class="subtitle">部署、排障或上线自动采集时使用；日常维护微信群请回到“微信采集”。</p></div></div><div class="panel-body">
+            <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">微信采集上线状态</h2><p class="subtitle">先看总览，再决定是否需要预检、逐群验证或安装自动采集。</p></div></div><div class="panel-body"><div class="task-overview" id="wechatCollectorLaunchSummary"><div class="empty-state">等待加载上线状态</div></div></div></div>
+            <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">1. 初始化验证 / 上线前检查</h2><p class="subtitle">确认这台 Mac、微信可见窗口、需求中心链路是否可用。预检不推送需求；链路自检使用临时数据验证流转。</p></div></div><div class="panel-body"><div class="task-overview"><div><div class="task-overview-label">环境预检</div><div class="task-overview-value">部署或排障时使用</div><div class="view-actions" style="margin-top:10px;"><button class="btn" id="dryRunWechatCollectorBtn" type="button">检查本机采集环境</button></div></div><div><div class="task-overview-label">需求链路自检</div><div class="task-overview-value">验证需求中心写入</div><div class="view-actions" style="margin-top:10px;"><button class="btn" id="runWechatPipelineSmokeBtn" type="button">运行链路自检</button></div></div><div><div class="task-overview-label">按群真实验证</div><div class="task-overview-value">去微信采集页逐群验证</div><div class="task-meta">每个启用群上线前都需要在配置表对应行执行“立即采集本群”；识别到新需求或变更时会推送需求中心并更新 checkpoint。</div></div></div><details><summary>高级操作：批量真实采集</summary><div class="task-meta" style="margin-top:10px;">批量真实采集所有启用群会激活微信，适合上线前统一验证；日常建议回到微信采集页逐群操作。</div><div class="view-actions" style="margin-top:10px;"><button class="btn" id="runWechatCollectorOnceBtn" type="button">批量真实采集所有启用群</button></div></details><div class="panel" style="margin-top:12px;margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">最近一次预检</h2></div><div class="panel-body"><div class="task-meta" id="wechatCollectorPreflightMeta">等待加载预检状态</div><div class="log-list" id="wechatCollectorPreflight"></div></div></div><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">链路自检结果</h2></div><div class="panel-body"><div class="task-meta" id="wechatPipelineSmokeMeta">尚未自检</div><div class="log-list" id="wechatPipelineSmoke"><div class="empty-state">使用临时服务和临时数据库验证需求推送与变更单流程。</div></div></div></div><div class="panel"><div class="panel-head"><h2 class="panel-title">需求中心服务</h2></div><div class="panel-body"><div class="log-list" id="wechatCollectorRequirementCenter"><div class="empty-state">等待加载需求中心服务状态</div></div></div></div></div></div>
+            <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">LLM 候选解析</h2><p class="subtitle">默认关闭。启用后只生成候选结构化结果和原文证据，进入需求详情页人工确认，不会自动覆盖正式需求。API Key 只保存在本机运行时配置，页面不会回显明文。</p></div><div class="view-actions"><button class="btn" id="loadWechatLlmModelsBtn" type="button">验证并读取模型</button><button class="btn primary" id="saveWechatLlmConfigBtn" type="button">保存 LLM 配置</button></div></div><div class="panel-body"><p class="subtitle">一般不用改 Endpoint；选择 OpenAI 或千问后会带出默认地址，只有使用代理或私有兼容接口时才需要修改。</p><div class="settings-grid"><label class="field"><span class="field-label">启用 LLM</span><select class="field-input" id="wechatLlmEnabled"><option value="false">否</option><option value="true">是</option></select></label><label class="field"><span class="field-label">服务商</span><select class="field-input" id="wechatLlmProvider"><option value="openai">OpenAI</option><option value="qwen">千问</option></select></label><label class="field"><span class="field-label">模型</span><select class="field-input" id="wechatLlmModel"><option value="">请先验证并读取模型</option></select></label><label class="field"><span class="field-label">Endpoint</span><input class="field-input" id="wechatLlmEndpoint" placeholder="https://api.openai.com/v1/responses" /></label><label class="field"><span class="field-label">API Key</span><input class="field-input" id="wechatLlmApiKey" type="password" placeholder="留空则保留已保存密钥" /></label><label class="field"><span class="field-label">密钥操作</span><select class="field-input" id="wechatLlmClearApiKey"><option value="false">保留/更新密钥</option><option value="true">清空已保存密钥</option></select></label></div><div class="task-meta" id="wechatLlmConfigState" style="margin-top:8px;">等待加载 LLM 配置</div></div></div>
+            <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">2. 上线自动采集</h2><p class="subtitle">只有“上线前必须完成”全部通过后，才安装定时自动采集。</p></div><div class="view-actions"><button class="btn" id="installWechatCollectorAutomationBtn" type="button" disabled title="等待上线前检查">安装整套自动采集</button><button class="btn" id="uninstallWechatCollectorAutomationBtn" type="button">卸载整套自动采集</button></div></div><div class="panel-body"><div class="log-list" id="wechatCollectorGoLive"><div class="empty-state">等待加载上线前检查</div></div></div></div>
+          <details><summary>高级维护：服务与定时任务</summary><div class="panel"><div class="panel-head"><div><h2 class="panel-title">3. 高级维护</h2><p class="subtitle">正常上线优先使用“安装整套自动采集”。只有排障或单独维护 LaunchAgent 时才操作本区按钮。</p></div></div><div class="panel-body"><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">本机服务</h2><div class="view-actions"><button class="btn" id="installWechatCollectorServiceBtn" type="button">安装服务</button><button class="btn" id="uninstallWechatCollectorServiceBtn" type="button">卸载服务</button></div></div><div class="panel-body"><div class="log-list" id="wechatCollectorService"><div class="empty-state">等待加载本机服务状态</div></div></div></div><div class="panel"><div class="panel-head"><h2 class="panel-title">定时任务</h2><div class="view-actions"><button class="btn" id="installWechatCollectorSchedulerBtn" type="button" disabled title="等待上线前检查">安装定时</button><button class="btn" id="uninstallWechatCollectorSchedulerBtn" type="button">卸载定时</button></div></div><div class="panel-body"><div class="log-list" id="wechatCollectorScheduler"><div class="empty-state">等待加载定时任务状态</div></div></div></div></div></div></details>
+          </div></div>
         </section>
         <section class="task-view" id="userManagementView" hidden>
           <div class="view-heading"><div><h1>用户管理</h1><p class="subtitle">添加同事邮箱并设置临时密码，开通控制台访问权限。</p></div><button class="btn" id="refreshUsersBtn" type="button">刷新用户</button></div>
@@ -2623,26 +2831,6 @@
         <section class="task-view" id="logsView" hidden><div class="view-heading"><div><h1>执行日志</h1><p class="subtitle">汇总展示已持久化的项目步骤日志。</p></div></div><div class="log-list" id="allTaskLogs"></div></section>
       </main>
     </div>
-
-    <div class="modal-backdrop" id="shotModal" role="dialog" aria-modal="true" aria-labelledby="shotModalTitle">
-      <div class="modal">
-        <div class="modal-head">
-          <div>
-            <div class="modal-title" id="shotModalTitle">确认页截图</div>
-            <p class="subtitle" id="shotModalSubtitle">易考后台配置核对截图</p>
-          </div>
-          <button class="icon-btn" id="closeShotModal" type="button" title="关闭截图预览" aria-label="关闭截图预览">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="large-shot" id="largeShot"></div>
-        </div>
-      </div>
-    </div>
-
     <script type="module">
       import { createRouter } from "/web/router.mjs";
       import { AppLayout } from "/web/layout.mjs";
@@ -2677,20 +2865,23 @@
       const dropNote = document.querySelector("#dropNote");
       const fileState = document.querySelector("#fileState");
       const loginState = document.querySelector("#loginState");
-      const loginUrlInput = document.querySelector("#loginUrlInput");
       const loginUsernameInput = document.querySelector("#loginUsernameInput");
       const backendLoginPasswordInput = document.querySelector("#loginPasswordInput");
       const tenantApiKeyInput = document.querySelector("#tenantApiKeyInput");
       const secretToggleButtons = Array.from(document.querySelectorAll("[data-secret-toggle]"));
       const saveLoginBtn = document.querySelector("#saveLoginBtn");
+      const customerServiceSchedulerState = document.querySelector("#customerServiceSchedulerState");
+      const customerServiceSchedulerProfiles = document.querySelector("#customerServiceSchedulerProfiles");
+      const customerServiceSchedulerRunBtn = document.querySelector("#customerServiceSchedulerRunBtn");
       const runBtn = document.querySelector("#runBtn");
       const demoBtn = document.querySelector("#demoBtn");
       const resetBtn = document.querySelector("#resetBtn");
       const previewRows = document.querySelector("#previewRows");
       const logList = document.querySelector("#logList");
       const logCount = document.querySelector("#logCount");
-      const barFill = document.querySelector("#barFill");
+      const progressCircle = document.querySelector("#progressCircle");
       const progressNumber = document.querySelector("#progressNumber");
+      const workflowSummary = document.querySelector(".workflow-summary");
       const progressCaption = document.querySelector("#progressCaption");
       const stageText = document.querySelector("#stageText");
       const metricFields = document.querySelector("#metricFields");
@@ -2698,19 +2889,19 @@
       const metricTime = document.querySelector("#metricTime");
       const metricStatus = document.querySelector("#metricStatus");
       const steps = Array.from(document.querySelectorAll(".step"));
+      const autoWorkbench = document.querySelector("#autoWorkbench");
+      const workbenchResizers = Array.from(document.querySelectorAll("[data-workbench-resizer]"));
       const captureState = document.querySelector("#captureState");
       const captureGrid = document.querySelector("#captureGrid");
-      const shotModal = document.querySelector("#shotModal");
-      const shotModalTitle = document.querySelector("#shotModalTitle");
-      const shotModalSubtitle = document.querySelector("#shotModalSubtitle");
-      const closeShotModal = document.querySelector("#closeShotModal");
-      const largeShot = document.querySelector("#largeShot");
       const autoNavItem = document.querySelector("#autoNavItem");
       const projectNavBtn = document.querySelector("#projectNavBtn");
       const examNavBtn = document.querySelector("#examNavBtn");
       const candidateNavBtn = document.querySelector("#candidateNavBtn");
       const requirementsNavBtn = document.querySelector("#requirementsNavBtn");
       const usersNavBtn = document.querySelector("#usersNavBtn");
+      const wechatCollectorNavBtn = document.querySelector("#wechatCollectorNavBtn");
+      const systemConfigNavBtn = document.querySelector("#systemConfigNavBtn");
+
       const templatesNavBtn = document.querySelector("#templatesNavBtn");
       const logsNavBtn = document.querySelector("#logsNavBtn");
       const autoTopbar = document.querySelector("#autoTopbar");
@@ -2723,8 +2914,49 @@
       const requirementsView = document.querySelector("#requirementsView");
       const requirementDetailView = document.querySelector("#requirementDetailView");
       const userManagementView = document.querySelector("#userManagementView");
+      const wechatCollectorView = document.querySelector("#wechatCollectorView");
+      const systemConfigView = document.querySelector("#systemConfigView");
+
       const templatesView = document.querySelector("#templatesView");
       const logsView = document.querySelector("#logsView");
+      const wechatCollectorConfig = document.querySelector("#wechatCollectorConfig");
+      const wechatCollectorStatus = document.querySelector("#wechatCollectorStatus");
+      const wechatCollectorHistory = document.querySelector("#wechatCollectorHistory");
+      const wechatCollectorPreflight = document.querySelector("#wechatCollectorPreflight");
+      const wechatPipelineSmoke = document.querySelector("#wechatPipelineSmoke");
+      const wechatCollectorLogs = document.querySelector("#wechatCollectorLogs");
+      const wechatCollectorReadiness = document.querySelector("#wechatCollectorReadiness");
+      const wechatCollectorGoLive = document.querySelector("#wechatCollectorGoLive");
+      const wechatCollectorLaunchSummary = document.querySelector("#wechatCollectorLaunchSummary");
+      const wechatCollectorConfigBackups = document.querySelector("#wechatCollectorConfigBackups");
+      const wechatCollectorService = document.querySelector("#wechatCollectorService");
+      const wechatCollectorScheduler = document.querySelector("#wechatCollectorScheduler");
+      const wechatCollectorRequirementCenter = document.querySelector("#wechatCollectorRequirementCenter");
+      const wechatCollectorRunMeta = document.querySelector("#wechatCollectorRunMeta");
+      const wechatCollectorPreflightMeta = document.querySelector("#wechatCollectorPreflightMeta");
+      const wechatPipelineSmokeMeta = document.querySelector("#wechatPipelineSmokeMeta");
+      const refreshWechatCollectorBtn = document.querySelector("#refreshWechatCollectorBtn");
+      const refreshSystemConfigBtn = document.querySelector("#refreshSystemConfigBtn");
+      const dryRunWechatCollectorBtn = document.querySelector("#dryRunWechatCollectorBtn");
+      const runWechatCollectorOnceBtn = document.querySelector("#runWechatCollectorOnceBtn");
+      const runWechatPipelineSmokeBtn = document.querySelector("#runWechatPipelineSmokeBtn");
+      const installWechatCollectorAutomationBtn = document.querySelector("#installWechatCollectorAutomationBtn");
+      const uninstallWechatCollectorAutomationBtn = document.querySelector("#uninstallWechatCollectorAutomationBtn");
+      const addWechatGroupBtn = document.querySelector("#addWechatGroupBtn");
+      const installWechatCollectorServiceBtn = document.querySelector("#installWechatCollectorServiceBtn");
+      const uninstallWechatCollectorServiceBtn = document.querySelector("#uninstallWechatCollectorServiceBtn");
+      const installWechatCollectorSchedulerBtn = document.querySelector("#installWechatCollectorSchedulerBtn");
+      const uninstallWechatCollectorSchedulerBtn = document.querySelector("#uninstallWechatCollectorSchedulerBtn");
+      const wechatCollectorConfigState = document.querySelector("#wechatCollectorConfigState");
+      const wechatLlmEnabled = document.querySelector("#wechatLlmEnabled");
+      const wechatLlmProvider = document.querySelector("#wechatLlmProvider");
+      const wechatLlmModel = document.querySelector("#wechatLlmModel");
+      const wechatLlmEndpoint = document.querySelector("#wechatLlmEndpoint");
+      const wechatLlmApiKey = document.querySelector("#wechatLlmApiKey");
+      const wechatLlmClearApiKey = document.querySelector("#wechatLlmClearApiKey");
+      const wechatLlmConfigState = document.querySelector("#wechatLlmConfigState");
+      const loadWechatLlmModelsBtn = document.querySelector("#loadWechatLlmModelsBtn");
+      const saveWechatLlmConfigBtn = document.querySelector("#saveWechatLlmConfigBtn");
       const projectGrid = document.querySelector("#projectGrid");
       const examListRows = document.querySelector("#examListRows");
       const examStats = document.querySelector("#examStats");
@@ -2751,13 +2983,25 @@
       const projectDetailSessionRows = document.querySelector("#projectDetailSessionRows");
       const projectLogs = document.querySelector("#projectLogs");
       const requirementsList = document.querySelector("#requirementsList");
+      const requirementWorkQueueFilters = document.querySelector("#requirementWorkQueueFilters");
       const requirementDetailSubtitle = document.querySelector("#requirementDetailSubtitle");
       const requirementOverview = document.querySelector("#requirementOverview");
+      const requirementNextStep = document.querySelector("#requirementNextStep");
+      const requirementSource = document.querySelector("#requirementSource");
+      const requirementAuditMessage = document.querySelector("#requirementAuditMessage");
+      const requirementAnalysisCandidates = document.querySelector("#requirementAnalysisCandidates");
       const requirementLatest = document.querySelector("#requirementLatest");
       const requirementIssues = document.querySelector("#requirementIssues");
-      const requirementAuditTrail = document.querySelector("#requirementAuditTrail");
+      const requirementVersions = document.querySelector("#requirementVersions");
+      const requirementConfirmations = document.querySelector("#requirementConfirmations");
+      const requirementChanges = document.querySelector("#requirementChanges");
+      const requirementTimeline = document.querySelector("#requirementTimeline");
       const requirementTaskIdInput = document.querySelector("#requirementTaskIdInput");
       const requirementReviewerInput = document.querySelector("#requirementReviewerInput");
+      const requirementClarificationQuestions = document.querySelector("#requirementClarificationQuestions");
+      const requirementClarificationPrompt = document.querySelector("#requirementClarificationPrompt");
+      const requirementClarificationBtn = document.querySelector("#requirementClarificationBtn");
+      const requirementReviewedBtn = document.querySelector("#requirementReviewedBtn");
       const requirementMarkReadyBtn = document.querySelector("#requirementMarkReadyBtn");
       const requirementLinkTaskBtn = document.querySelector("#requirementLinkTaskBtn");
       const requirementActionState = document.querySelector("#requirementActionState");
@@ -2785,9 +3029,8 @@
       const candidateCustomFieldList = document.querySelector("#candidateCustomFieldList");
       const selectAllCustomFieldsBtn = document.querySelector("#selectAllCustomFieldsBtn");
       const clearCustomFieldsBtn = document.querySelector("#clearCustomFieldsBtn");
-      const addCustomFieldBtn = document.querySelector("#addCustomFieldBtn");
-      const candidateDownloadBtn = document.querySelector("#candidateDownloadBtn");
       const loadSessionsBtn = document.querySelector("#loadSessionsBtn");
+      const loadSessionsAction = document.querySelector("#loadSessionsAction");
       const candidateIssues = document.querySelector("#candidateIssues");
       const candidateTotal = document.querySelector("#candidateTotal");
       const candidateEmpty = document.querySelector("#candidateEmpty");
@@ -2809,7 +3052,12 @@
         pending: "未开始", running: "进行中", success: "已完成", failed: "失败",
         waiting_manual: "待人工确认", skipped: "已跳过",
         collecting: "收集中", pending_internal_review: "待内部审核",
-        customer_confirmed: "客户已确认", ready_to_create_task: "可创建任务",
+        need_customer_clarification: "需客户补充",
+        reviewed_waiting_customer_confirmation: "已审核待客户确认",
+        customer_confirmed: "客户已确认",
+        ready_for_manual_execution: "可人工执行交接",
+        linked_to_execution_task: "已记录执行任务",
+        ready_to_create_task: "可创建任务",
         task_created: "已绑定任务", change_requested: "客户变更",
       };
 
@@ -2834,7 +3082,8 @@
         return `<span class="status-chip ${safeText(status)}">${taskStatusLabels[status] || safeText(status)}</span>`;
       }
 
-      const taskViewState = { tasks: [], sessions: [], requirements: [], users: [], currentTaskId: "", currentProjectId: "", currentRequirementId: "" };
+      const taskViewState = { tasks: [], sessions: [], requirements: [], users: [], currentTaskId: "", currentProjectId: "", currentRequirementId: "", wechatRequirementDetails: {} };
+
 
       async function fetchJson(url, options) {
         const response = await fetch(`${runtime.apiBase}${url}`, { cache: "no-store", ...options });
@@ -2932,6 +3181,12 @@
         }
 
         return { load, login, logout, requireForRoute };
+      }
+
+      async function fetchWechatPipelineSmoke() {
+        const response = await fetch(`${runtime.apiBase}/api/wechat-collector/pipeline-smoke-test`, { method: "POST", cache: "no-store" });
+        const data = await response.json();
+        return { httpOk: response.ok, status: response.status, data };
       }
 
       function renderProjectList() {
@@ -3092,6 +3347,191 @@
         return `<div class="task-step-actions"><a class="task-step-action" href="https://docs.qq.com/sheet/DR3NiT296WmtpWXVM?tab=BB08J2" target="_blank" rel="noopener noreferrer">打开在线表</a><button class="task-step-action" data-shared-sheet-fill="${safeText(task.taskId)}" type="button" ${status === "running" ? "disabled" : ""}>${actionText}</button></div>`;
       }
 
+      function buildSharedSheetDetail(sharedSheetStep) {
+        const status = sharedSheetStep?.status || "pending";
+        if (status === "running") return "填写中";
+        if (status === "success") return `填写完成：${formatTaskTime(sharedSheetStep.completedAt)}`;
+        if (status === "failed") return `填写失败：${formatTaskTime(sharedSheetStep.completedAt)}`;
+        return "待填写";
+      }
+
+      function notificationTextValue(value) {
+        return String(value ?? "").trim();
+      }
+
+      const smsCandidateMobileAliases = ["mobile", "phone", "mobile_phone", "telephone", "手机号码", "手机号", "手机", "联系电话", "电话"];
+
+      function smsCandidateMobile(candidate) {
+        const direct = notificationTextValue(candidate?.mobile || candidate?.phone || candidate?.mobile_phone || candidate?.telephone);
+        if (direct) return direct;
+        const customFields = candidate?.custom_fields || candidate?.customFields || {};
+        for (const key of smsCandidateMobileAliases) {
+          const value = notificationTextValue(customFields[key]);
+          if (value) return value;
+        }
+        return "";
+      }
+
+      function smsCandidateRows(candidates = []) {
+        const seen = new Set();
+        return (Array.isArray(candidates) ? candidates : [])
+          .map((candidate) => ({
+            name: notificationTextValue(candidate?.full_name || candidate?.fullName || candidate?.name),
+            mobile: smsCandidateMobile(candidate),
+          }))
+          .filter((row) => row.name && row.mobile)
+          .filter((row) => {
+            const key = `${row.name}\n${row.mobile}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+      }
+
+      function buildSmsCandidateTable(candidates = []) {
+        const rows = smsCandidateRows(candidates);
+        if (!rows.length) return `<div class="sms-candidate-empty">暂无可用手机号</div>`;
+        const payload = safeText(JSON.stringify(rows));
+        return `<button class="sms-candidate-download" data-download-sms-candidates="${payload}" type="button">考生手机号下载</button>`;
+      }
+
+      function csvCell(value) {
+        return `"${String(value ?? "").replace(/"/g, '""')}"`;
+      }
+
+      function downloadSmsCandidatesCsv(rows = []) {
+        const csv = [
+          ["考生姓名", "手机号码"].map(csvCell).join(","),
+          ...rows.map((row) => [row.name, row.mobile].map(csvCell).join(",")),
+        ].join("\n");
+        const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "考生手机号.csv";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      async function copyTextToClipboard(text) {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try {
+          if (!document.execCommand("copy")) throw new Error("浏览器未允许复制");
+        } finally {
+          textarea.remove();
+        }
+      }
+
+      function parseNotificationDate(value) {
+        const normalized = notificationTextValue(value).replace("T", " ");
+        const match = normalized.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
+        if (!match) return null;
+        return new Date(
+          Number(match[1]),
+          Number(match[2]) - 1,
+          Number(match[3]),
+          Number(match[4] || 0),
+          Number(match[5] || 0),
+        );
+      }
+
+      function normalizeNotificationTime(value) {
+        return notificationTextValue(value).replace(/-/g, "/");
+      }
+
+      function notificationWeekdayText(value) {
+        const parsed = parseNotificationDate(value);
+        if (!parsed) return "";
+        return "日一二三四五六"[parsed.getDay()] || "";
+      }
+
+      function fullNotificationDateTime(value, includeWeekday = false) {
+        const normalized = normalizeNotificationTime(value);
+        const match = normalized.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}:\d{2})/);
+        if (!match) return "";
+        const date = `${match[1]}年${Number(match[2])}月${Number(match[3])}日`;
+        return includeWeekday ? `${date}(周${notificationWeekdayText(value)})${match[4]}` : `${date}${match[4]}`;
+      }
+
+      function notificationTimeOnly(value) {
+        const normalized = normalizeNotificationTime(value);
+        const match = normalized.match(/\s+(\d{1,2}:\d{2})/);
+        return match ? match[1] : "";
+      }
+
+      function notificationMonthDayTime(value) {
+        const normalized = normalizeNotificationTime(value);
+        const match = normalized.match(/^\d{4}\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}:\d{2})/);
+        return match ? `${Number(match[1])}月${Number(match[2])}日${match[3]}` : "";
+      }
+
+      function notificationExamTitle(value) {
+        return notificationTextValue(value).replace(/-试考$/, "");
+      }
+
+      function unifiedExamCodeFromNotificationUrl(value) {
+        const match = notificationTextValue(value).match(/\/exam\/(\d+)\/uniform\/login\/?/i);
+        return match ? `E${match[1]}` : "";
+      }
+
+      function notificationExamPassword(config, session) {
+        const sessionId = notificationTextValue(session?.session_id || session?.id);
+        const explicitCode = notificationTextValue(
+          config.unifiedExamCode ||
+          config.unifiedExamPassword ||
+          config.examPassword ||
+          config.examCode ||
+          session?.unified_exam_code ||
+          session?.unifiedExamCode ||
+          session?.exam_code ||
+          session?.examCode,
+        );
+        if (explicitCode) return explicitCode;
+        const unifiedCode = unifiedExamCodeFromNotificationUrl(session?.url) || unifiedExamCodeFromNotificationUrl(config.examUrl);
+        if (unifiedCode) return unifiedCode;
+        return sessionId || "【考试口令】";
+      }
+
+      function buildNotificationMessage(task) {
+        const config = task.config || {};
+        const formalSession = getTaskSessionByType(task, "formal") || {};
+        const customContent = notificationTextValue(config.notificationContent);
+        if (customContent) return customContent;
+        const formalStart = notificationTextValue(config.startTimeDisplay || formalSession.start);
+        const formalEnd = notificationTextValue(config.endTimeDisplay || formalSession.end);
+        const trialStart = notificationTextValue(config.mockStartTimeDisplay);
+        const trialEnd = notificationTextValue(config.mockEndTimeDisplay);
+        const examTitle = notificationExamTitle(config.examName || formalSession.name || task.projectName);
+        const formalRange = `${fullNotificationDateTime(formalStart, true)}-${notificationTimeOnly(formalEnd)}`;
+        const trialRange = trialStart && trialEnd
+          ? `${fullNotificationDateTime(trialStart)}-${notificationMonthDayTime(trialEnd)}`
+          : "XXX年XX月XX日XX:XX-X月XX日XX:XX";
+        const sessionId = notificationTextValue(formalSession.session_id || formalSession.id);
+        const examCode = notificationExamPassword(config, formalSession);
+        const clientDownload = notificationTextValue(
+          config.clientDownloadUrl ||
+          config.clientDownload ||
+          (sessionId
+            ? `https://eztest.org/exam/session/${encodeURIComponent(sessionId)}/client/download`
+            : "【客户端下载】"),
+        );
+        return `考生您好！${examTitle}将于北京时间${formalRange}举行。本次考试为在线考试，要求使用电脑下载安装考试客户端作答，并自行准备第二台移动设备作为第二视角监控，客户端下载地址：${clientDownload} 。本次考试设置试考环节，请提前参加试考调试考试设备。试考时间为${trialRange}，请在上述时间内完成考前测试。正式考试和试考时，打开考试客户端输入口令和您的准考证号即可登录参加考试，考试口令统一为：${examCode}，准考证号均为个人手机号。正式考试可提前30分钟登录系统，迟到20分钟后系统将无法登录。若遇系统问题，请联系考试系统界面上的技术支持。祝您考试顺利！（蜀道集团）`;
+      }
+
       function buildGroupedCandidateStep(task, stepMap, sessionType) {
         const importKey = sessionType === "formal" ? "formal_candidate_import" : "trial_candidate_import";
         const subKey = sessionType === "formal" ? "formalExamStatus" : "trialExamStatus";
@@ -3128,6 +3568,9 @@
         ["requirement_parse", "formal_session_create", "trial_session_create", "course_create"].forEach((key) => {
           if (stepMap.has(key)) display.push(cloneTaskStep(stepMap.get(key)));
         });
+        if (stepMap.has("trial_paper_bind")) {
+          display.push(cloneTaskStep(stepMap.get("trial_paper_bind"), { stepName: "试考试卷绑定" }));
+        }
         if (stepMap.has("paper_bind")) {
           display.push(cloneTaskStep(stepMap.get("paper_bind"), { stepName: "正式场次绑定科目" }));
         }
@@ -3153,9 +3596,16 @@
           stepName: "项目共享大表",
           status: sharedSheetStep?.status || "pending",
           triggerActionHtml: buildSharedSheetAction(task, sharedSheetStep),
-          extraDetail: sharedSheetStep?.result?.updatedRows
-            ? `已填写场次：${sharedSheetStep.result.updatedRows} 个`
-            : "",
+          extraDetail: buildSharedSheetDetail(sharedSheetStep),
+          hideLogs: true,
+        }));
+        const notificationMessage = buildNotificationMessage(task);
+        display.push(cloneTaskStep(sharedSheetStep, {
+          stepKey: "sms_notification",
+          stepName: "短信通知",
+          status: sharedSheetStep?.status || "pending",
+          extraHtml: `<div class="sms-notification-preview"><div class="sms-action-row"><button class="sms-copy-button" data-copy-sms="${safeText(notificationMessage)}" type="button">复制短信</button>${buildSmsCandidateTable(task.candidates || [])}<a class="sms-platform-link" href="https://home.danmi.com/#/login" target="_blank" rel="noopener noreferrer">旦米</a></div><div class="sms-message-text">${safeText(notificationMessage)}</div><button class="sms-expand-button" data-sms-toggle="message" type="button" aria-expanded="false">展开全部</button></div>`,
+          hideDetail: true,
         }));
         const scoreStep = stepMap.get("score_process");
         display.push(cloneTaskStep(scoreStep, {
@@ -3166,6 +3616,26 @@
           extraDetail: scoreStep?.result?.fileName ? `成绩反馈单文件：${scoreStep.result.fileName}` : "",
         }));
         return display;
+      }
+
+      function shouldShowRetryStepAction(step) {
+        return step.status === "failed" ||
+          ((step.stepKey === "paper_bind" || step.stepKey === "trial_paper_bind") && step.status === "waiting_manual") ||
+          (step.stepKey === "trial_paper_bind" && step.status === "pending");
+      }
+
+      function shouldShowInlineRetryStepAction(step) {
+        return step.stepKey === "trial_paper_bind" && (step.status === "pending" || step.status === "waiting_manual");
+      }
+
+      function retryStepActionLabel(step) {
+        if (step.stepKey === "paper_bind" && step.status === "waiting_manual") return "继续绑定正式场次科目";
+        if (step.stepKey === "trial_paper_bind" && (step.status === "pending" || step.status === "waiting_manual")) return "继续绑定试考试卷";
+        return "重试此步骤";
+      }
+
+      function retryStepActionHtml(step) {
+        return `<button class="retry-step" data-retry-step="${safeText(step.stepKey)}" type="button">${retryStepActionLabel(step)}</button>`;
       }
 
       function renderTaskDetail(task) {
@@ -3202,14 +3672,15 @@
           const sub = step.subStatus || {};
           const subHtml = Object.keys(sub).length
             ? `<div>正式考试：${taskStatusLabels[sub.formalExamStatus] || "未开始"}<br>试考：${taskStatusLabels[sub.trialExamStatus] || "未开始"}</div>` : "";
-          const logs = (step.logs || []).map((log) => `${formatTaskTime(log.time)} ${log.message}`).join("\n") || "暂无执行日志";
           const stepStatus = statusChip(step.status);
           return `<article class="task-step-card ${safeText(step.status)}" data-step-key="${safeText(step.stepKey)}">
             <div class="task-step-head"><div class="task-step-name">${safeText(step.stepName)}</div>${stepStatus}</div>
             <div class="task-step-times">开始：${formatTaskTime(step.startedAt)}<br>完成：${formatTaskTime(step.completedAt)}<br>耗时：${formatDuration(step.durationMs)}</div>
             ${step.monitorActionHtml || ""}
             ${step.triggerActionHtml || ""}
-            <div class="task-step-detail">${subHtml}${step.extraDetail ? `<div>${safeText(step.extraDetail)}</div>` : ""}${step.errorMessage ? `<div style="color:#c62828;margin-top:8px;">${safeText(step.errorMessage)}</div>` : ""}<div style="margin-top:8px;">${safeText(logs)}</div>${step.status === "failed" || (step.stepKey === "paper_bind" && step.status === "waiting_manual") ? `<button class="retry-step" data-retry-step="${safeText(step.stepKey)}" type="button">${step.stepKey === "paper_bind" && step.status === "waiting_manual" ? "继续绑定正式场次科目" : "重试此步骤"}</button>` : ""}</div>
+            ${step.extraHtml || ""}
+            ${shouldShowInlineRetryStepAction(step) ? retryStepActionHtml(step) : ""}
+            ${!step.hideDetail ? `<div class="task-step-detail">${subHtml}${step.extraDetail ? `<div>${safeText(step.extraDetail)}</div>` : ""}${step.errorMessage ? `<div style="color:#c62828;margin-top:8px;">${safeText(step.errorMessage)}</div>` : ""}${shouldShowRetryStepAction(step) && !shouldShowInlineRetryStepAction(step) ? retryStepActionHtml(step) : ""}</div>` : ""}
           </article>`;
         }).join("");
         const syntheticLogs = task.config?.paperFormBind?.logs?.length
@@ -3295,14 +3766,705 @@
         renderProjectDetail(task);
       }
 
+      function requirementNextAction(item = {}) {
+        const pendingChanges = (item.changeRequests || []).filter((change) => change.status === "pending_internal_review").length;
+        const missingCount = (item.latest?.missingFields || item.missingFields || []).length;
+        if (pendingChanges) return { key: "pending-change", label: `有 ${pendingChanges} 条客户变更待处理`, button: "处理变更" };
+        if (missingCount) return { key: "missing-fields", label: `需补充 ${missingCount} 个字段`, button: "审核需求" };
+        if (item.status === "pending_customer_confirmation" || item.status === "reviewed_waiting_customer_confirmation") return { key: "waiting-customer", label: "已审核，等待客户确认", button: "查看确认状态" };
+        if (item.status === "ready_for_manual_execution" && !item.linkedTaskId) return { key: "ready-execution", label: "可进入执行，尚未关联任务", button: "进入执行交接" };
+        if (item.linkedTaskId) return { key: "linked-task", label: `已关联执行任务：${item.linkedTaskId}`, button: "查看详情" };
+        return { key: "review", label: "待内部审核", button: "审核需求" };
+      }
+
+      function renderRequirementWorkQueueFilters(items = []) {
+        const counts = items.reduce((acc, item) => {
+          const action = requirementNextAction(item);
+          acc[action.key] = (acc[action.key] || 0) + 1;
+          return acc;
+        }, {});
+        const filters = [
+          ["all", "全部", items.length],
+          ["review", "待内部审核", counts.review || 0],
+          ["missing-fields", "待客户补充", counts["missing-fields"] || 0],
+          ["waiting-customer", "待客户确认", counts["waiting-customer"] || 0],
+          ["pending-change", "有待处理变更", counts["pending-change"] || 0],
+          ["ready-execution", "可进入执行", counts["ready-execution"] || 0],
+          ["linked-task", "已关联执行任务", counts["linked-task"] || 0],
+        ];
+        requirementWorkQueueFilters.innerHTML = filters.map(([key, label, count]) => `<button class="btn" data-requirement-filter="${safeText(key)}" type="button">${safeText(label)} ${Number(count || 0)}</button>`).join("");
+      }
+
       async function loadRequirements() {
         const data = await fetchJson(`/api/requirements?_=${Date.now()}`);
         taskViewState.requirements = data.requirements || [];
-        requirementsList.innerHTML = taskViewState.requirements.length ? taskViewState.requirements.map((item) => `<article class="project-card requirement-card" data-request-id="${safeText(item.requestId)}">
-          <div class="project-card-head"><div><div class="project-title">${safeText(item.title)}</div><div class="task-meta">需求编号：${safeText(item.requestId)}<br>客户：${safeText(item.customer?.name || item.customer?.contact || "未记录")}<br>更新时间：${formatTaskTime(item.updatedAt)}</div></div>${statusChip(item.status)}</div>
-          <div class="task-meta" style="margin-top:10px;">绑定任务：${safeText(item.linkedTaskId || "未绑定")}</div>
-          <div class="view-actions" style="margin-top:12px;"><button class="btn requirement-action" data-action="view" type="button">查看</button></div>
-        </article>`).join("") : `<div class="empty-state">暂无需求单记录</div>`;
+        renderRequirementWorkQueueFilters(taskViewState.requirements);
+        requirementsList.innerHTML = taskViewState.requirements.length ? taskViewState.requirements.map((item) => {
+          const action = requirementNextAction(item);
+          const source = parseRequirementSource(item.latest?.source || item.source);
+          const groupText = source.groupName ? `微信群：${source.groupName}<br>` : "";
+          const projectText = source.projectName ? `项目：${source.projectName}<br>` : "";
+          return `<article class="project-card requirement-card" data-request-id="${safeText(item.requestId)}" data-next-action="${safeText(action.key)}">
+            <div class="project-card-head"><div><div class="project-title">${safeText(item.title)}</div><div class="task-meta">${projectText}${groupText}客户：${safeText(item.customer?.name || item.customer?.contact || "未记录")}<br>更新时间：${formatTaskTime(item.updatedAt)}<br>需求编号：${safeText(item.requestId)}</div></div>${statusChip(item.status)}</div>
+            <div class="log" style="margin-top:10px;"><div><strong>下一步：</strong>${safeText(action.label)}</div></div>
+            <div class="task-meta" style="margin-top:10px;">绑定任务：${safeText(item.linkedTaskId || "未绑定")}</div>
+            <div class="view-actions" style="margin-top:12px;"><button class="btn primary requirement-action" data-action="view" type="button">${safeText(action.button)}</button></div>
+          </article>`;
+        }).join("") : `<div class="empty-state">暂无需求单记录</div>`;
+      }
+
+      async function loadWechatCollector() {
+        const [configData, statusData] = await Promise.all([
+          fetchJson(`/api/wechat-collector/config?_=${Date.now()}`),
+          fetchJson(`/api/wechat-collector/status?_=${Date.now()}`),
+        ]);
+        const groups = configData.config?.groups || [];
+        taskViewState.wechatGroupStatuses = statusData.groups || [];
+        taskViewState.wechatHistory = statusData.history || [];
+        renderWechatCollectorConfig(groups, taskViewState.wechatGroupStatuses, taskViewState.wechatHistory);
+        renderWechatLlmConfig(configData.config?.llm_parse || {});
+        loadWechatGroupRequirementChanges(groups, taskViewState.wechatGroupStatuses);
+        renderWechatCollectorConfigBackups(statusData.configBackups || []);
+        renderWechatCollectorReadiness(statusData.readiness || {});
+        renderWechatCollectorLaunchSummary(statusData);
+        renderWechatCollectorGoLive(statusData);
+        renderWechatCollectorService(statusData.service || {});
+        renderWechatCollectorRequirementCenter(statusData.requirementCenter || {});
+        renderWechatCollectorScheduler(statusData.scheduler || {});
+        renderWechatCollectorLogs(statusData.logs || {});
+        renderWechatCollectorHistory(statusData.history || []);
+        renderWechatCollectorPreflight(statusData.preflight || {});
+        renderWechatPipelineSmoke(statusData.pipelineSmoke || {});
+
+        const status = statusData.status || {};
+        const runGroups = status.groups || [];
+        wechatCollectorRunMeta.textContent = status.finishedAt
+          ? `开始：${formatTaskTime(status.startedAt)} · 完成：${formatTaskTime(status.finishedAt)}`
+          : "暂无定时运行记录";
+        wechatCollectorStatus.innerHTML = renderWechatCollectorRunGroups(runGroups, "暂无采集运行状态");
+      }
+
+      function renderWechatCollectorPreflight(preflight) {
+        const runGroups = preflight.groups || [];
+        wechatCollectorPreflightMeta.textContent = preflight.finishedAt
+          ? `预检开始：${formatTaskTime(preflight.startedAt)} · 完成：${formatTaskTime(preflight.finishedAt)}`
+          : "暂无预检记录";
+        wechatCollectorPreflight.innerHTML = renderWechatCollectorRunGroups(runGroups, "暂无预检运行状态");
+      }
+
+      function renderWechatPipelineSmoke(result) {
+        const requirement = result.requirement || {};
+        const latest = requirement.latest?.requirement || {};
+        const changes = requirement.changeRequests || [];
+        const pendingChanges = changes.filter((item) => item.status === "pending_internal_review").length;
+        const errorText = result.error ? `<br><span class="task-meta">${safeText(result.error)}</span>` : "";
+        const freshnessText = result.ok ? (result.fresh ? "有效" : (result.stale ? "已过期" : "待确认")) : "未通过";
+        const finishedText = result.finishedAt ? `完成：${formatTaskTime(result.finishedAt)} · ` : "";
+        wechatPipelineSmokeMeta.textContent = result.ok
+          ? `${finishedText}状态：${freshnessText} · 需求编号：${safeText(result.requestId || "--")} · 变更单：${Number(changes.length)}`
+          : "链路自检未通过";
+        wechatPipelineSmoke.innerHTML = `<div class="log ${result.ok && result.fresh ? "" : "warn"}"><div>${result.ok ? "链路自检通过" : "链路自检失败"} · ${freshnessText}<br><span class="task-meta">考试：${safeText(latest.exam_name || "--")} · 待审核变更：${Number(pendingChanges)}</span>${result.apiBase ? `<br><span class="task-meta">临时服务：${safeText(result.apiBase)}</span>` : ""}${result.finishedAt ? `<br><span class="task-meta">完成：${formatTaskTime(result.finishedAt)}</span>` : ""}${errorText}</div></div>`;
+      }
+
+      function wechatCollectorStatusLabel(status) {
+        const labels = {
+          pushed: "已推送",
+          collected: "已采集",
+          skipped_interval: "未到间隔",
+          no_new_messages: "无新消息",
+          dry_run: "预检",
+          failed: "失败",
+          skipped: "已跳过",
+          not_run: "未运行",
+          unknown: "未知",
+        };
+        return labels[status] || status || "--";
+      }
+
+      function renderWechatCollectorRunGroups(runGroups, emptyText) {
+        return runGroups.length ? runGroups.map((group) => {
+          const intervalText = group.status === "skipped_interval"
+            ? `<br><span class="task-meta">上次运行：${formatTaskTime(group.lastRunAt)} · 下次运行：${formatTaskTime(group.nextRunAt)}</span>`
+            : "";
+          const captureRegionText = group.captureRect
+            ? ` · 截图区域：${safeText(group.captureRect)}`
+            : (group.captureInsets ? ` · 截图边距：${safeText(JSON.stringify(group.captureInsets))}` : "");
+          const captureText = group.captureMode
+            ? `<br><span class="task-meta">采集方式：${safeText(group.captureMode)}${group.screenshotPath ? ` · 截图：${safeText(group.screenshotPath)}` : ""}${captureRegionText}${group.ocrCommand ? ` · OCR：${safeText(group.ocrCommand)}` : ""}</span>`
+            : "";
+          const attachmentText = Number(group.attachmentCandidateCount || 0) || Number(group.attachmentCount || 0) || group.attachmentModifiedSince
+            ? `<br><span class="task-meta">附件候选：${Number(group.attachmentCandidateCount || 0)} · 已关联：${Number(group.attachmentCount || 0)}${group.attachmentModifiedSince ? ` · 附件过滤：${formatTaskTime(group.attachmentModifiedSince)}` : ""}</span>`
+            : "";
+          return `<div class="log ${group.status === "failed" ? "warn" : ""}">
+            <div>${safeText(group.groupName)} · ${safeText(wechatCollectorStatusLabel(group.status))}<br><span class="task-meta">需求编号：${safeText(group.requestId || "--")} · 消息：${Number(group.messageCount || 0)} · 变更：${Number(group.changeCount || 0)}</span>${captureText}${attachmentText}${intervalText}${group.error ? `<br><span class="task-meta">${safeText(group.error)}</span>` : ""}</div>
+          </div>`;
+        }).join("") : `<div class="empty-state">${safeText(emptyText)}</div>`;
+      }
+
+      function renderWechatCollectorHistory(history) {
+        wechatCollectorHistory.innerHTML = history.length ? history.map((item) => {
+          const groups = item.groups || [];
+          const counts = groups.reduce((acc, group) => {
+            const key = group.status || "unknown";
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {});
+          const fallbackStatus = item.status || "unknown";
+          const groupStatusText = Object.entries(counts).map(([key, count]) => `${wechatCollectorStatusLabel(key)}:${count}`).join(" · ");
+          const statusText = groups.length ? groupStatusText : wechatCollectorStatusLabel(fallbackStatus);
+          const failed = fallbackStatus === "failed" || fallbackStatus === "skipped" || groups.some((group) => group.status === "failed");
+          return `<div class="log ${failed ? "warn" : ""}"><div>${formatTaskTime(item.finishedAt || item.startedAt)}<br><span class="task-meta">群数：${Number(groups.length || 0)} · ${safeText(statusText)}</span>${item.error ? `<br><span class="task-meta">${safeText(item.error)}</span>` : ""}</div></div>`;
+        }).join("") : `<div class="empty-state">暂无运行历史</div>`;
+      }
+
+      function renderWechatCollectorScheduler(scheduler) {
+        const installed = scheduler.installed ? "已安装" : "未安装";
+        const loaded = scheduler.loaded ? "已加载" : "未加载";
+        const warnClass = scheduler.installed && scheduler.loaded ? "" : " warn";
+        wechatCollectorScheduler.innerHTML = `<div class="log${warnClass}">
+          <div>${safeText(scheduler.label || "com.ata.easy-exam-wechat-collector")} · ${installed} · ${loaded}<br><span class="task-meta">${safeText(scheduler.plistPath || "--")}</span>${scheduler.detail ? `<br><span class="task-meta">${safeText(scheduler.detail)}</span>` : ""}</div>
+        </div>`;
+      }
+
+      function renderWechatCollectorReadiness(readiness) {
+        const checks = readiness.checks || [];
+        const headline = readiness.ready ? "自动采集链路已就绪" : "自动采集链路未就绪";
+        wechatCollectorReadiness.innerHTML = `<div class="log ${readiness.ready ? "" : "warn"}"><div>${headline}</div></div>${checks.length ? checks.map((item) => `<div class="log ${item.ok ? "" : "warn"}"><div>${safeText(item.label || item.key || "--")} · ${item.ok ? "通过" : "待处理"}<br><span class="task-meta">${safeText(item.detail || "")}</span></div></div>`).join("") : ""}`;
+      }
+
+      function renderWechatCollectorLaunchSummary(statusData = {}) {
+        const checks = statusData.readiness?.checks || [];
+        const check = (key) => checks.find((item) => item.key === key) || {};
+        const enabledGroups = (statusData.groups || []).filter((group) => group.enabled !== false);
+        const passedGroups = enabledGroups.filter((group) => group.latestStatus === "pushed");
+        const items = [
+          ["本机服务", statusData.service?.httpReachable || check("local_service").ok, statusData.service?.detail || check("local_service").detail || "--"],
+          ["OCR", statusData.ocr?.available || check("ocr_capture").ok, statusData.ocr?.detail || check("ocr_capture").detail || "--"],
+          ["需求中心", statusData.requirementCenter?.available || check("requirement_center").ok, statusData.requirementCenter?.detail || check("requirement_center").detail || "--"],
+          ["群验证", enabledGroups.length > 0 && passedGroups.length === enabledGroups.length, `${passedGroups.length}/${enabledGroups.length} 个启用群最近完成真实采集推送`],
+          ["链路自检", check("pipeline_smoke").ok, check("pipeline_smoke").detail || "--"],
+          ["自动采集", statusData.scheduler?.loaded, statusData.scheduler?.loaded ? "定时已安装并加载" : "未安装或未加载"],
+        ];
+        wechatCollectorLaunchSummary.innerHTML = items.map(([label, ok, detail]) => `<div><div class="task-overview-label">${safeText(label)}</div><div class="task-overview-value">${ok ? "正常" : "待处理"}</div><div class="task-meta">${safeText(detail)}</div></div>`).join("");
+      }
+
+      function renderWechatCollectorGoLive(statusData) {
+        const readinessChecks = statusData.readiness?.checks || [];
+        const configValidCheck = readinessChecks.find((item) => item.key === "config_valid") || {};
+        const configValid = Boolean(configValidCheck.ok);
+        const smokeCheck = readinessChecks.find((item) => item.key === "pipeline_smoke") || {};
+        const smokeOk = Boolean(smokeCheck.ok);
+        const realPushCheck = readinessChecks.find((item) => item.key === "requirement_push") || {};
+        const realPushOk = Boolean(realPushCheck.ok);
+        setWechatCollectorInstallAvailability([
+          { label: "合法微信群配置", ok: configValid },
+          { label: "有效链路自检", ok: smokeOk },
+          { label: "逐群真实微信试跑", ok: realPushOk },
+        ]);
+        const serviceLoaded = Boolean(statusData.service?.loaded);
+        const schedulerLoaded = Boolean(statusData.scheduler?.installed && statusData.scheduler?.loaded);
+        const checklist = [
+          {
+            label: "配置合法",
+            ok: configValid,
+            detail: configValid ? "运行时微信群配置已通过校验。" : (configValidCheck.detail || "先保存合法的微信群配置。"),
+          },
+          {
+            label: "链路自检",
+            ok: smokeOk,
+            detail: smokeOk ? "临时服务和临时数据库已验证需求推送与变更单流程。" : (smokeCheck.detail || "先运行链路自检，确认不操作真实微信时的需求/变更流程可用。"),
+          },
+          {
+            label: "真实微信试跑",
+            ok: realPushOk,
+            detail: realPushOk
+              ? "最近 24 小时内的真实采集已成功推送到需求中心。"
+              : (realPushCheck.detail || "点击“立即试跑”并确认，让脚本激活微信、OCR 当前可见群聊并推送到需求中心。"),
+          },
+          {
+            label: "本机服务已加载",
+            ok: serviceLoaded,
+            detail: serviceLoaded ? "easy-exam 本机服务 LaunchAgent 已加载。" : "安装服务后，需求中心才能在定时采集时常驻响应。",
+          },
+          {
+            label: "定时已安装并加载",
+            ok: schedulerLoaded,
+            detail: schedulerLoaded ? "微信群采集 LaunchAgent 已加载，会按配置间隔运行。" : "安装定时前需确认允许这台 Mac 周期性激活微信采集。",
+          },
+        ];
+        const ready = checklist.every((item) => item.ok);
+        wechatCollectorGoLive.innerHTML = `<div class="log ${ready ? "" : "warn"}"><div>${ready ? "上线前必须完成已满足" : "上线前必须完成未满足"}</div></div>${checklist.map((item) => `<div class="log ${item.ok ? "" : "warn"}"><div>${safeText(item.label)} · ${item.ok ? "通过" : "待处理"}<br><span class="task-meta">${safeText(item.detail)}</span></div></div>`).join("")}`;
+      }
+
+      function setWechatCollectorInstallAvailability(checks = []) {
+        const missingLabels = checks.filter((item) => !item.ok).map((item) => item.label);
+        const available = missingLabels.length === 0;
+        const title = available ? "上线前检查已满足，可以安装" : `需先完成：${missingLabels.join("、")}`;
+        installWechatCollectorSchedulerBtn.disabled = !available;
+        installWechatCollectorAutomationBtn.disabled = !available;
+        installWechatCollectorSchedulerBtn.title = title;
+        installWechatCollectorAutomationBtn.title = title;
+      }
+
+      function renderWechatCollectorLogs(logs) {
+        const items = [
+          ["本机服务 stdout", logs.serviceStdout],
+          ["本机服务 stderr", logs.serviceStderr],
+          ["微信采集 stdout", logs.collectorStdout],
+          ["微信采集 stderr", logs.collectorStderr],
+        ];
+        wechatCollectorLogs.innerHTML = items.map(([label, item]) => {
+          const text = item?.text || "";
+          const body = item?.exists ? (text ? safeText(text).replace(/\n/g, "<br>") : "日志为空") : "日志文件不存在";
+          return `<div class="log ${item?.exists ? "" : "warn"}"><div>${safeText(label)}<br><span class="task-meta">${safeText(item?.path || "--")}</span><br><span class="task-meta">${body}</span></div></div>`;
+        }).join("");
+      }
+
+      function renderWechatCollectorService(service) {
+        const installed = service.installed ? "已安装" : "未安装";
+        const loaded = service.loaded ? "已加载" : "未加载";
+        const warnClass = service.installed && service.loaded ? "" : " warn";
+        const httpReachable = service.httpReachable ? "手动服务可达" : "手动服务状态未知";
+        const launchdState = service.loaded ? "LaunchAgent 常驻" : "LaunchAgent 未加载";
+        wechatCollectorService.innerHTML = `<div class="log${warnClass}">
+          <div>${safeText(service.label || "com.ata.easy-exam-service")} · ${installed} · ${loaded}<br><span class="task-meta">${safeText(httpReachable)} · ${safeText(launchdState)}</span><br><span class="task-meta">${safeText(service.plistPath || "--")}</span>${service.detail ? `<br><span class="task-meta">${safeText(service.detail)}</span>` : ""}</div>
+        </div>`;
+      }
+
+      function renderWechatCollectorRequirementCenter(service) {
+        const available = service.available ? "可用" : "不可用";
+        const warnClass = service.available ? "" : " warn";
+        wechatCollectorRequirementCenter.innerHTML = `<div class="log${warnClass}">
+          <div>${safeText(service.apiBase || "http://127.0.0.1:8765")} · ${available}${service.detail ? `<br><span class="task-meta">${safeText(service.detail)}</span>` : ""}</div>
+        </div>`;
+      }
+
+      function wechatIntervalInputValue(group) {
+        if (group.interval_minutes === null || group.interval_minutes === undefined) return "";
+        return String(group.interval_minutes);
+      }
+
+      function requirementFieldLabel(field) {
+        const labels = {
+          exam_name: "考试名称",
+          formal_exam_time_range: "正式考试时间",
+          mock_exam_time_range: "试考时间",
+          early_login_minutes: "提前登录",
+          late_limit_minutes: "限制迟到",
+          exam_client_type: "考试类型",
+          subjects: "科目",
+          removedSubjects: "删除科目",
+          attachments: "附件",
+          changeRecords: "变更记录",
+          latestRequirement: "最新需求",
+        };
+        return labels[field] || field;
+      }
+
+      function formatRequirementValue(value) {
+        if (value === null || value === undefined || value === "") return "--";
+        if (Array.isArray(value)) return value.length ? value.map(formatRequirementValue).join("、") : "--";
+        if (typeof value === "object") return Object.entries(value).map(([key, item]) => `${requirementFieldLabel(key)}：${formatRequirementValue(item)}`).join("；");
+        return String(value);
+      }
+
+      function isDisplayableRequirementChangeField(field, value) {
+        if (["watermark_enabled", "copy_forbidden"].includes(field) && value === true) return false;
+        return true;
+      }
+
+      function formatRequirementChangeFields(changes = {}) {
+        const records = Array.isArray(changes.changeRecords) ? changes.changeRecords : [];
+        const directChanges = Object.entries(changes).filter(([key, value]) => !["changeRecords", "attachments", "latestRequirement"].includes(key) && isDisplayableRequirementChangeField(key, value));
+        const rows = [];
+        for (const record of records) {
+          const fields = Object.entries(record.changes || {}).filter(([key, value]) => isDisplayableRequirementChangeField(key, value));
+          if (!fields.length) {
+            rows.push(`<div class="task-meta">变更类型：${safeText(requirementFieldLabel(record.type || "未识别"))}</div>`);
+            continue;
+          }
+          for (const [field, value] of fields) {
+            rows.push(`<div class="task-meta">字段变更 · ${safeText(requirementFieldLabel(field))}：${safeText(formatRequirementValue(value))}</div>`);
+          }
+        }
+        for (const [field, value] of directChanges) {
+          rows.push(`<div class="task-meta">字段变更 · ${safeText(requirementFieldLabel(field))}：${safeText(formatRequirementValue(value))}</div>`);
+        }
+        if (Array.isArray(changes.attachments) && changes.attachments.length) {
+          rows.push(`<div class="task-meta">附件：${safeText(changes.attachments.map((item) => item.fileName || item.path || item).join("、"))}</div>`);
+        }
+        return rows.length ? rows.join("") : `<div class="task-meta">字段变更：未记录结构化字段，请核对客户原文。</div>`;
+      }
+
+      function formatRequirementChangeRecord(item) {
+        const statusLabels = {
+          pending_internal_review: "待内部审核",
+          accepted: "已采纳",
+          rejected: "已驳回",
+        };
+        const customerMessage = item.customerMessage || "未记录客户原文";
+        return `<div>${safeText(customerMessage).replace(/\n/g, "<br>")}
+          <div class="task-meta">状态：${safeText(statusLabels[item.status] || item.status || "--")}</div>
+          ${formatRequirementChangeFields(item.changes || {})}
+        </div>`;
+      }
+
+      function renderWechatRequirementDetailButton(requestId) {
+        return requestId ? `<button class="btn" data-wechat-action="open-requirement" data-request-id="${safeText(requestId)}" type="button">查看需求单详情</button>` : "";
+      }
+
+      function renderWechatGroupRequirementUpdates(groupName, history = []) {
+        const items = [];
+        for (const run of history || []) {
+          for (const group of run.groups || []) {
+            if (group.groupName === groupName) {
+              items.push({
+                ...group,
+                finishedAt: run.finishedAt || group.finishedAt || run.startedAt,
+              });
+            }
+          }
+        }
+        return items.length ? items.slice(0, 5).map((item) => {
+          const attachmentText = Number(item.attachmentCandidateCount || 0) || Number(item.attachmentCount || 0) || item.attachmentModifiedSince
+            ? ` · 附件候选：${Number(item.attachmentCandidateCount || 0)} · 已关联：${Number(item.attachmentCount || 0)}${item.attachmentModifiedSince ? ` · 附件过滤：${formatTaskTime(item.attachmentModifiedSince)}` : ""}`
+            : "";
+          const captureText = item.screenshotPath || item.ocrCommand
+            ? `<br><span class="task-meta">截图：${safeText(item.screenshotPath || "--")} · OCR：${safeText(item.ocrCommand || "--")}</span>`
+            : "";
+          return `<div class="log ${item.status === "failed" ? "warn" : ""}"><div>${formatTaskTime(item.finishedAt)} · ${safeText(wechatCollectorStatusLabel(item.status))}<br><span class="task-meta">需求编号：${safeText(item.requestId || "--")} · 消息：${Number(item.messageCount || 0)} · 变更：${Number(item.changeCount || 0)}${attachmentText}</span>${captureText}${item.error ? `<br><span class="task-meta">错误：${safeText(item.error)}</span>` : ""}</div></div>`;
+        }).join("") : `<div class="empty-state">暂无本群需求更新记录。完成“立即采集本群”或定时采集后会显示最近记录。</div>`;
+      }
+
+      function renderWechatGroupRequirementChanges(requestId) {
+        if (!requestId) return `<div class="empty-state">本群尚未关联需求单，首次有效采集后会显示字段变更。</div>`;
+        const detail = taskViewState.wechatRequirementDetails[requestId];
+        if (!detail) return `<div class="empty-state">正在加载关联需求单变更...</div>`;
+        if (detail.error) return `<div class="empty-state">无法读取关联需求单：${safeText(detail.error)}</div>`;
+        const changes = detail.changeRequests || [];
+        return changes.length
+          ? `<div class="task-meta" style="margin-bottom:8px;">本群已关联需求单，可在这里核对最近客户变更。</div>${changes.slice(0, 3).map((item) => `<div class="log"><div>${formatRequirementChangeRecord(item)}</div><div class="log-time">${formatTaskTime(item.createdAt)}</div></div>`).join("")}`
+          : `<div class="empty-state">本群已关联需求单，但暂无客户变更记录。</div>`;
+      }
+
+      function renderWechatGroupRequirementTimeline(groupName, requestId, history = []) {
+        return `<div class="task-meta" style="margin-bottom:8px;">采集运行记录</div>
+          ${renderWechatGroupRequirementUpdates(groupName, history)}
+          <div class="task-meta" style="margin:12px 0 8px;">客户变更记录</div>
+          <div data-wechat-requirement-changes="${safeText(requestId)}">${renderWechatGroupRequirementChanges(requestId)}</div>`;
+      }
+
+      function renderWechatCollectorConfig(groups, groupStatuses = [], history = []) {
+        const rows = groups.length ? groups : [{
+          group_name: "",
+          project_name: "",
+          customer_name: "",
+          requirement_request_id: "",
+          enabled: true,
+          interval_minutes: 15,
+          initial_collection_mode: "ocr_current_window",
+          initial_collected_at: "",
+        }];
+        const statusByName = new Map(groupStatuses.map((item) => [item.groupName, item]));
+        wechatCollectorConfig.innerHTML = rows.map((group) => {
+          const status = statusByName.get(group.group_name || "") || {};
+          const statusText = status.latestStatus || "not_run";
+          const statusWarn = ["failed", "not_run"].includes(statusText);
+          const attachmentCandidateCount = Number(status.attachmentCandidateCount || 0);
+          const attachmentCount = Number(status.attachmentCount || 0);
+          const attachmentFilterText = status.attachmentModifiedSince ? ` · 附件过滤：${formatTaskTime(status.attachmentModifiedSince)}` : "";
+          const attachmentDetail = attachmentCandidateCount || attachmentCount || status.attachmentModifiedSince
+            ? `本群附件：候选 ${attachmentCandidateCount} · 已关联 ${attachmentCount}${attachmentFilterText}`
+            : "本群附件：本群最近一次采集未关联已下载附件";
+          const effectiveRequestId = status.requestId || group.requirement_request_id || "";
+          const latestRequirementText = `需求：${effectiveRequestId || "--"}`;
+          const statusDetail = [
+            latestRequirementText,
+            "采集方式：OCR 当前窗口/定时可见窗口",
+            status.latestRunAt ? `最近：${formatTaskTime(status.latestRunAt)}` : "最近：暂无",
+            status.latestError ? `错误：${status.latestError}` : "",
+            status.checkpointUpdatedAt ? `checkpoint：${formatTaskTime(status.checkpointUpdatedAt)}` : "checkpoint：暂无",
+            status.nextRunAt ? `下次运行：${formatTaskTime(status.nextRunAt)}` : "下次运行：待定",
+            attachmentDetail,
+          ].filter(Boolean).join(" · ");
+          return `<article class="panel wechat-group-card wechat-config-row">
+            <div class="panel-head wechat-group-summary">
+              <div>
+                <h2 class="panel-title">${safeText(group.group_name || "未填写微信群")}</h2>
+                <p class="subtitle">项目：${safeText(group.project_name || "未填写项目")} · 客户：${safeText(group.customer_name || "未填写客户")} · ${safeText(latestRequirementText)} · 采集：OCR 可见窗口 · ${safeText(attachmentDetail)}</p>
+              </div>
+              <div class="view-actions"><span class="status-chip ${statusWarn ? "warn" : ""}">${safeText(wechatCollectorStatusLabel(statusText))}</span><button class="btn primary" data-wechat-action="run-once" type="button">立即采集本群</button></div>
+            </div>
+            <div class="panel-body">
+              <details>
+                <summary>展开详情：群配置、任务执行状态、需求更新记录</summary>
+                <div class="settings-grid" style="margin-top:12px;">
+                  <label class="field"><span class="field-label">微信群</span><input class="field-input" data-wechat-field="group_name" value="${safeText(group.group_name || "")}" placeholder="微信群名称" /></label>
+                  <label class="field"><span class="field-label">项目名称</span><input class="field-input" data-wechat-field="project_name" value="${safeText(group.project_name || "")}" placeholder="项目名称" /></label>
+                  <label class="field"><span class="field-label">客户名称</span><input class="field-input" data-wechat-field="customer_name" value="${safeText(group.customer_name || "")}" placeholder="客户名称" /></label>
+                  <label class="field"><span class="field-label">关联需求单编号</span><input class="field-input" data-wechat-field="requirement_request_id" value="${safeText(group.requirement_request_id || "")}" placeholder="可留空，首次有效采集时新建需求" /><span class="task-meta">可留空。填入后，本群后续采集和变更会归到这张需求单；不填则首次有效采集时新建需求。</span></label>
+                  <label class="field"><span class="field-label">启用</span><select class="field-input" data-wechat-field="enabled"><option value="true"${group.enabled === false ? "" : " selected"}>是</option><option value="false"${group.enabled === false ? " selected" : ""}>否</option></select></label>
+                  <label class="field"><span class="field-label">采集间隔（分钟）</span><input class="field-input" data-wechat-field="interval_minutes" type="number" min="1" step="1" value="${safeText(wechatIntervalInputValue(group))}" /></label>
+                  <label class="field"><span class="field-label">历史补采方式</span><select class="field-input" data-wechat-field="initial_collection_mode"><option value="ocr_current_window"${(group.initial_collection_mode || "ocr_current_window") === "ocr_current_window" ? " selected" : ""}>OCR 当前窗口</option><option value="none"${group.initial_collection_mode === "none" ? " selected" : ""}>不补采，从当前开始</option></select></label>
+                  <label class="field"><span class="field-label">历史补采完成时间</span><input class="field-input" data-wechat-field="initial_collected_at" value="${safeText(group.initial_collected_at || status.initialCollectedAt || "")}" placeholder="完成历史补采后可记录 ISO 时间" /></label>
+                </div>
+                <div style="margin-top:12px;"><div class="task-meta">群设置操作</div><div class="view-actions" style="margin-top:8px;"><button class="btn primary" data-wechat-action="save-group" type="button">保存本群设置</button><button class="btn" data-wechat-action="show-attachments" type="button">查看附件状态</button><button class="btn" data-wechat-action="remove" type="button">删除</button></div><div class="task-meta" style="margin-top:8px;">保存只影响本群；删除前请确认该群不再采集。</div></div>
+                <div class="panel" style="margin-top:12px;"><div class="panel-head"><h2 class="panel-title">任务执行状态</h2></div><div class="panel-body"><div class="task-meta" data-wechat-attachment-detail="${safeText(attachmentDetail)}">${safeText(statusDetail)}</div></div></div>
+                <div class="panel" style="margin-top:12px;"><div class="panel-head"><div><h2 class="panel-title">需求更新记录</h2></div><div class="view-actions">${renderWechatRequirementDetailButton(effectiveRequestId)}</div></div><div class="panel-body"><div class="log-list">${renderWechatGroupRequirementTimeline(group.group_name || "", effectiveRequestId, history)}</div></div></div>
+              </details>
+            </div>
+          </article>`;
+        }).join("");
+      }
+
+      function renderWechatRequirementChangePanels() {
+        wechatCollectorConfig.querySelectorAll("[data-wechat-requirement-changes]").forEach((node) => {
+          node.innerHTML = renderWechatGroupRequirementChanges(node.dataset.wechatRequirementChanges || "");
+        });
+      }
+
+      async function loadWechatGroupRequirementChanges(groups = [], groupStatuses = []) {
+        const requestIds = new Set();
+        for (const group of groups) {
+          if (group.requirement_request_id) requestIds.add(group.requirement_request_id);
+        }
+        for (const status of groupStatuses) {
+          if (status.requestId) requestIds.add(status.requestId);
+        }
+        await Promise.all(Array.from(requestIds).map(async (requestId) => {
+          try {
+            taskViewState.wechatRequirementDetails[requestId] = await fetchJson(`/api/requirements/${encodeURIComponent(requestId)}?_=${Date.now()}`);
+          } catch (error) {
+            taskViewState.wechatRequirementDetails[requestId] = { error: error.message || String(error) };
+          }
+        }));
+        renderWechatRequirementChangePanels();
+      }
+
+      function showWechatGroupAttachmentStatus(button) {
+        const row = button.closest(".wechat-config-row");
+        const groupName = row?.querySelector('[data-wechat-field="group_name"]')?.value?.trim() || "本群";
+        const detail = row?.querySelector("[data-wechat-attachment-detail]")?.dataset.wechatAttachmentDetail || "本群附件：本群最近一次采集未关联已下载附件";
+        wechatCollectorConfigState.textContent = `${groupName}：${detail}。附件只在本群最近一次采集中按可见文件名关联；如果文件后来才人工下载，请把微信窗口停在包含该文件消息的位置，再点“立即采集本群”。`;
+      }
+
+      function renderWechatCollectorConfigBackups(backups = []) {
+        wechatCollectorConfigBackups.innerHTML = backups.length
+          ? backups.map((backup) => `<div class="log"><div>${safeText(backup.fileName || "配置备份")}<br><span class="task-meta">${safeText(backup.path || "--")}</span></div><div class="view-actions"><button class="btn" data-wechat-action="restore-config" data-backup-file="${safeText(backup.fileName || "")}" type="button">恢复</button></div></div>`).join("")
+          : `<div class="empty-state">暂无配置备份</div>`;
+      }
+
+      function removeWechatCollectorRow(button) {
+        const row = button.closest(".wechat-config-row");
+        if (!row) return;
+        row.remove();
+        if (!wechatCollectorConfig.querySelector(".wechat-config-row")) {
+          renderWechatCollectorConfig([]);
+        }
+        wechatCollectorConfigState.textContent = "已删除一行微信群配置";
+      }
+
+      function collectWechatCollectorConfig() {
+        const groups = Array.from(wechatCollectorConfig.querySelectorAll(".wechat-config-row")).map((row) => {
+          const value = (field) => row.querySelector(`[data-wechat-field="${field}"]`)?.value?.trim() || "";
+          const intervalText = value("interval_minutes");
+          return {
+            group_name: value("group_name"),
+            project_name: value("project_name"),
+            customer_name: value("customer_name"),
+            requirement_request_id: value("requirement_request_id"),
+            enabled: value("enabled") !== "false",
+            interval_minutes: intervalText === "" ? Number.NaN : Number(intervalText),
+            initial_collection_mode: value("initial_collection_mode"),
+            initial_collected_at: value("initial_collected_at"),
+          };
+        }).filter((group) => group.group_name);
+        return { groups, llmParse: collectWechatLlmConfig() };
+      }
+
+      function renderWechatLlmConfig(config = {}) {
+        wechatLlmEnabled.value = config.enabled ? "true" : "false";
+        wechatLlmProvider.value = config.provider === "qwen" ? "qwen" : "openai";
+        renderWechatLlmModelOptions(config.models || [], config.model || (wechatLlmProvider.value === "qwen" ? "qwen-plus" : "gpt-4.1-mini"));
+        wechatLlmEndpoint.value = config.endpoint || (wechatLlmProvider.value === "qwen" ? "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" : "https://api.openai.com/v1/responses");
+        wechatLlmApiKey.value = "";
+        wechatLlmClearApiKey.value = "false";
+        wechatLlmConfigState.textContent = config.apiKeyConfigured ? "API Key 已配置，留空保存会继续保留。" : "API Key 未配置。启用 LLM 前请填写。";
+      }
+
+      function renderWechatLlmModelOptions(models = [], selected = "") {
+        selected = String(selected || "").trim();
+        const values = Array.from(new Set([selected, ...models].map((item) => String(item || "").trim()).filter(Boolean)));
+        wechatLlmModel.innerHTML = values.length
+          ? values.map((model) => `<option value="${safeText(model)}"${model === selected ? " selected" : ""}>${safeText(model)}</option>`).join("")
+          : `<option value="">请先验证并读取模型</option>`;
+      }
+
+      function collectWechatLlmConfig() {
+        return {
+          enabled: wechatLlmEnabled.value === "true",
+          provider: wechatLlmProvider.value,
+          model: wechatLlmModel.value.trim(),
+          endpoint: wechatLlmEndpoint.value.trim(),
+          apiKey: wechatLlmApiKey.value.replace(/\s+/g, ""),
+          clearApiKey: wechatLlmClearApiKey.value === "true",
+        };
+      }
+
+      function validateWechatCollectorConfig(payload) {
+        const seen = new Set();
+        for (const group of payload.groups || []) {
+          if (seen.has(group.group_name)) {
+            return `微信群名称重复：${group.group_name}`;
+          }
+          seen.add(group.group_name);
+          if (!Number.isInteger(group.interval_minutes) || group.interval_minutes < 1) {
+            return `采集间隔必须是大于等于 1 的整数：${group.group_name}`;
+          }
+        }
+        return "";
+      }
+
+      async function saveWechatCollectorConfig(label = "配置") {
+        const payload = collectWechatCollectorConfig();
+        const validationError = validateWechatCollectorConfig(payload);
+        if (validationError) {
+          wechatCollectorConfigState.textContent = validationError;
+          return;
+        }
+        const result = await fetchJson("/api/wechat-collector/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const backupText = result.backupPath ? `已备份上一版配置：${result.backupPath}；` : "";
+        wechatCollectorConfigState.textContent = `${backupText}${label}已保存，正在刷新状态...`;
+        await loadWechatCollector();
+      }
+
+      async function saveWechatCollectorGroup(button) {
+        const row = button.closest(".wechat-config-row");
+        const groupName = row?.querySelector('[data-wechat-field="group_name"]')?.value?.trim() || "本群设置";
+        await saveWechatCollectorConfig(`微信群“${groupName}”设置`);
+      }
+
+      async function saveWechatLlmConfig() {
+        wechatLlmConfigState.textContent = "正在保存 LLM 配置...";
+        await saveWechatCollectorConfig("LLM 配置");
+        wechatLlmConfigState.textContent = "LLM 配置已保存";
+      }
+
+      async function loadWechatLlmModels() {
+        wechatLlmConfigState.textContent = "正在验证 API Key 并读取模型...";
+        const result = await fetchJson("/api/wechat-collector/llm/models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ llmParse: collectWechatLlmConfig() }),
+        });
+        const models = result.models || [];
+        renderWechatLlmModelOptions(models, wechatLlmModel.value || models[0] || "");
+        wechatLlmConfigState.textContent = `连通成功，读取到 ${Number(models.length)} 个模型，请选择后保存。`;
+      }
+
+      async function restoreWechatCollectorConfigBackup(button) {
+        const fileName = button.dataset.backupFile || "";
+        if (!fileName) return;
+        if (!confirmWechatSideEffect(`恢复配置备份会覆盖当前微信群配置，并先备份当前配置。确认恢复 ${fileName}？`)) return;
+        wechatCollectorConfigState.textContent = "正在恢复配置备份...";
+        const result = await fetchJson("/api/wechat-collector/config/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName }),
+        });
+        const backupText = result.currentBackupPath ? `已备份恢复前配置：${result.currentBackupPath}；` : "";
+        wechatCollectorConfigState.textContent = `${backupText}配置备份已恢复，正在刷新状态...`;
+        await loadWechatCollector();
+      }
+
+      function confirmWechatSideEffect(message) {
+        return window.confirm(message);
+      }
+
+      async function runWechatCollectorOnce(groupName = "") {
+        const targetText = groupName ? `“${groupName}”` : "配置的微信群";
+        if (!confirmWechatSideEffect(`立即采集会激活微信并切换到${targetText}，不会发送群消息；识别到新需求或变更时会推送需求中心并更新 checkpoint。确认继续？`)) return;
+        wechatCollectorRunMeta.textContent = "正在立即采集...";
+        const fetchOptions = groupName
+          ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ groupName }) }
+          : { method: "POST" };
+        const result = await fetchJson("/api/wechat-collector/run-once", fetchOptions);
+        const status = result.run?.status || {};
+        const runGroups = status.groups || [];
+        wechatCollectorRunMeta.textContent = status.finishedAt
+          ? `开始：${formatTaskTime(status.startedAt)} · 完成：${formatTaskTime(status.finishedAt)}`
+          : "采集完成，暂无运行摘要";
+        wechatCollectorStatus.innerHTML = renderWechatCollectorRunGroups(runGroups, result.run?.error || "暂无采集运行状态");
+        await loadWechatCollector();
+      }
+
+      async function runWechatCollectorGroupOnce(button) {
+        const row = button.closest(".wechat-config-row");
+        const groupName = row?.querySelector('[data-wechat-field="group_name"]')?.value?.trim() || "";
+        if (!groupName) {
+          wechatCollectorConfigState.textContent = "请先填写微信群名称，再立即采集本群";
+          return;
+        }
+        await runWechatCollectorOnce(groupName);
+      }
+
+      async function dryRunWechatCollector() {
+        wechatCollectorPreflightMeta.textContent = "正在预检采集脚本...";
+        const result = await fetchJson("/api/wechat-collector/dry-run", { method: "POST" });
+        const status = result.run?.status || {};
+        renderWechatCollectorPreflight(status);
+        if (result.run?.error) {
+          wechatCollectorPreflight.innerHTML = renderWechatCollectorRunGroups(status.groups || [], result.run.error);
+        }
+      }
+
+      async function runWechatPipelineSmoke() {
+        wechatPipelineSmokeMeta.textContent = "正在运行链路自检...";
+        const result = await fetchWechatPipelineSmoke();
+        renderWechatPipelineSmoke(result.data?.result || { ok: false, error: result.data?.error || `请求失败：${result.status}` });
+        await loadWechatCollector();
+      }
+
+      async function installWechatCollectorScheduler() {
+        if (!confirmWechatSideEffect("安装定时会写入并加载微信群采集 LaunchAgent，之后会定期激活微信采集。确认继续？")) return;
+        const result = await fetchJson("/api/wechat-collector/scheduler/install", { method: "POST" });
+        renderWechatCollectorScheduler(result.scheduler || {});
+      }
+
+      async function uninstallWechatCollectorScheduler() {
+        if (!confirmWechatSideEffect("卸载定时会卸载并删除微信群采集 LaunchAgent。确认继续？")) return;
+        const result = await fetchJson("/api/wechat-collector/scheduler/uninstall", { method: "POST" });
+        renderWechatCollectorScheduler(result.scheduler || {});
+      }
+
+      async function installWechatCollectorService() {
+        if (!confirmWechatSideEffect("安装服务会写入并加载本机 easy-exam LaunchAgent。确认继续？")) return;
+        const result = await fetchJson("/api/wechat-collector/service/install", { method: "POST" });
+        renderWechatCollectorService(result.service || {});
+      }
+
+      async function uninstallWechatCollectorService() {
+        if (!confirmWechatSideEffect("卸载服务会卸载并删除本机 easy-exam LaunchAgent。确认继续？")) return;
+        const result = await fetchJson("/api/wechat-collector/service/uninstall", { method: "POST" });
+        renderWechatCollectorService(result.service || {});
+      }
+
+      async function installWechatCollectorAutomation() {
+        if (!confirmWechatSideEffect("安装整套自动采集会写入并加载服务和微信群采集 LaunchAgent，之后会定期激活微信采集。确认继续？")) return;
+        const result = await fetchJson("/api/wechat-collector/automation/install", { method: "POST" });
+        renderWechatCollectorService(result.service || {});
+        renderWechatCollectorScheduler(result.scheduler || {});
+      }
+
+      async function uninstallWechatCollectorAutomation() {
+        if (!confirmWechatSideEffect("卸载整套自动采集会卸载并删除服务和微信群采集 LaunchAgent。确认继续？")) return;
+        const result = await fetchJson("/api/wechat-collector/automation/uninstall", { method: "POST" });
+        renderWechatCollectorScheduler(result.scheduler || {});
+        renderWechatCollectorService(result.service || {});
       }
 
       function renderRequirementLatest(requirement) {
@@ -3319,11 +4481,137 @@
         </div>`;
       }
 
+      function parseRequirementSource(source) {
+        if (!source) return {};
+        if (typeof source === "object") return source;
+        try {
+          return JSON.parse(source);
+        } catch {
+          return { type: String(source) };
+        }
+      }
+
+      function renderRequirementSource(requirement) {
+        const latest = requirement.latest || {};
+        const source = parseRequirementSource(latest.source);
+        const sourceType = source.type === "wechat_group" ? "微信群" : safeText(source.type || latest.source || "--");
+        requirementSource.innerHTML = `<div class="task-overview-grid">
+          <div><div class="task-overview-label">来源类型</div><div class="task-overview-value">${safeText(sourceType)}</div></div>
+          <div><div class="task-overview-label">微信群</div><div class="task-overview-value">${safeText(source.groupName || "--")}</div></div>
+          <div><div class="task-overview-label">项目</div><div class="task-overview-value">${safeText(source.projectName || "--")}</div></div>
+          <div><div class="task-overview-label">采集时间</div><div class="task-overview-value">${formatTaskTime(source.collectedAt || latest.createdAt)}</div></div>
+        </div>`;
+        const message = latest.message || "";
+        requirementAuditMessage.innerHTML = message
+          ? `<div><strong>原始可见消息</strong><br>${safeText(message).replace(/\n/g, "<br>")}</div>`
+          : `<div class="empty-state">暂无原始消息</div>`;
+      }
+
+      function parseClarificationQuestions(value) {
+        return String(value || "").split(/\n+/).map((item) => item.trim().replace(/^[-•、\s]+/, "")).filter(Boolean);
+      }
+
+      function latestClarificationEvent(requirement) {
+        return (requirement.events || []).find((item) => item.eventType === "customer_clarification_requested");
+      }
+
+      function renderClarificationPrompt(requirement) {
+        const event = latestClarificationEvent(requirement);
+        const prompt = event?.payload?.customerPrompt || "";
+        requirementClarificationPrompt.hidden = !prompt;
+        requirementClarificationPrompt.innerHTML = prompt
+          ? `<div><strong>客户补充话术</strong><br>${safeText(prompt).replace(/\n/g, "<br>")}</div>`
+          : "";
+      }
+
+      function formatRequirementEvent(item) {
+        const payload = item.payload || {};
+        if (item.eventType === "analysis_candidate_recorded") {
+          const candidates = payload.analysisCandidates || {};
+          const fieldCount = Object.keys(candidates.merged?.fields || {}).length;
+          const conflictCount = (candidates.merged?.conflicts || []).length;
+          return `解析候选已记录<br><span class="task-meta">候选字段：${Number(fieldCount)} · 冲突：${Number(conflictCount)}</span>`;
+        }
+        if (item.eventType === "customer_clarification_requested") {
+          const questions = payload.questions || [];
+          const prompt = payload.customerPrompt || payload.message || "需要客户补充信息";
+          return `需客户补充<br><span class="task-meta">${safeText(prompt).replace(/\n/g, "<br>")}</span>${questions.length ? `<br><span class="task-meta">问题数：${questions.length}</span>` : ""}`;
+        }
+        if (item.eventType === "requirement_upserted") {
+          return `需求已更新<br><span class="task-meta">状态：${safeText(payload.status || "--")} · 缺失项：${Number((payload.missingFields || []).length)}</span>`;
+        }
+        if (item.eventType === "customer_confirmed") return `客户已确认`;
+        if (item.eventType === "change_request_accepted") return `变更已接受<br><span class="task-meta">生成版本：${safeText(payload.version || "--")} · ${safeText(payload.message || "")}</span>`;
+        if (item.eventType === "change_request_rejected") return `变更已驳回<br><span class="task-meta">${safeText(payload.reason || "")}</span>`;
+        if (item.eventType === "reviewed_waiting_customer_confirmation") return `已审核，等待客户确认<br><span class="task-meta">${safeText(payload.message || "")}</span>`;
+        if (item.eventType === "ready_for_manual_execution") return `已标记人工执行交接`;
+        if (item.eventType === "execution_task_linked") return `已记录执行任务编号：${safeText(payload.taskId || "--")}`;
+        return `${safeText(item.eventType)}${payload.message ? `<br><span class="task-meta">${safeText(payload.message)}</span>` : ""}`;
+      }
+
+      function latestAnalysisCandidateEvent(requirement) {
+        return (requirement.events || []).find((item) => item.eventType === "analysis_candidate_recorded");
+      }
+
+      function renderRequirementAnalysisCandidates(requirement) {
+        const event = latestAnalysisCandidateEvent(requirement);
+        const candidates = event?.payload?.analysisCandidates || {};
+        const fields = candidates.merged?.fields || {};
+        const conflicts = candidates.merged?.conflicts || [];
+        if (!event) return `<div class="empty-state">暂无解析候选。未启用 LLM 候选解析时，这里只展示规则解析后的正式需求。</div>`;
+        const rows = Object.entries(fields).map(([field, item]) => {
+          const label = requirementFieldLabel(field);
+          const status = item.status === "consistent" ? "规则与 LLM 一致" : (item.status === "conflict" ? "规则与 LLM 冲突" : "LLM 候选");
+          return `<div class="log ${item.status === "conflict" ? "warn" : ""}"><div>${safeText(label)} · ${safeText(status)}<br><span class="task-meta">规则：${safeText(formatRequirementValue(item.ruleValue))} · LLM：${safeText(formatRequirementValue(item.llmValue))} · 置信度：${safeText(item.confidence ?? "--")}</span>${(item.evidence || []).length ? `<br><span class="task-meta">证据：${safeText((item.evidence || []).join(" / "))}</span>` : ""}</div></div>`;
+        }).join("");
+        const conflictRows = conflicts.length
+          ? `<div class="task-meta" style="margin:8px 0;">规则与 LLM 冲突：${Number(conflicts.length)} 项，需要人工确认。</div>`
+          : "";
+        return rows || conflictRows
+          ? `${conflictRows}${rows}`
+          : `<div class="empty-state">解析候选没有可展示字段；无证据或未知字段已被过滤。</div>`;
+      }
+
+      function renderRequirementChangeRequests(changes) {
+        return changes.length ? changes.map((item) => {
+          const pending = item.status === "pending_internal_review";
+          const notice = pending ? `<div class="task-meta">采纳后会生成新的需求版本；驳回后不会修改当前需求。</div>` : "";
+          const actions = pending ? `<div class="view-actions" style="margin-top:10px;"><button class="btn" data-change-action="accept" data-change-id="${safeText(item.changeId)}" type="button">采纳并生成新版本</button><button class="btn" data-change-action="reject" data-change-id="${safeText(item.changeId)}" type="button">驳回此次变更</button></div>` : "";
+          return `<div class="log"><div>${formatRequirementChangeRecord(item)}${notice}${actions}</div><div class="log-time">${formatTaskTime(item.createdAt)}</div></div>`;
+        }).join("") : `<div class="empty-state">暂无需求变更记录</div>`;
+      }
+
+      function renderRequirementNextStep(requirement) {
+        const latest = requirement.latest || {};
+        const missing = latest.missingFields || [];
+        const conflicts = latestAnalysisCandidateEvent(requirement)?.payload?.analysisCandidates?.merged?.conflicts || [];
+        const pendingChanges = (requirement.changeRequests || []).filter((item) => item.status === "pending_internal_review");
+        if (conflicts.length) {
+          return `<div class="log warn"><div><strong>先确认解析冲突</strong><br><span class="task-meta">规则解析和 LLM 有 ${Number(conflicts.length)} 项冲突。先核对“解析结果确认”，再继续审核。</span></div></div>`;
+        }
+        if (pendingChanges.length) {
+          return `<div class="log warn"><div><strong>优先处理客户变更</strong><br><span class="task-meta">有 ${Number(pendingChanges.length)} 条待处理变更。先在“变更与确认记录”里采纳或驳回，避免旧需求进入执行。</span></div></div>`;
+        }
+        if (missing.length) {
+          return `<div class="log warn"><div><strong>生成客户补充话术</strong><br><span class="task-meta">当前缺失 ${Number(missing.length)} 个字段。补充问题填写后，点击“生成客户补充话术”。</span></div></div>`;
+        }
+        if (requirement.status === "ready_for_manual_execution" && !requirement.linkedTaskId) {
+          return `<div class="log"><div><strong>记录已创建的考试任务编号</strong><br><span class="task-meta">需求已可进入执行。创建考试任务后在这里记录任务编号，便于追踪执行结果。</span></div></div>`;
+        }
+        if (requirement.status === "customer_confirmed") {
+          return `<div class="log"><div><strong>标记客户已确认，可进入执行</strong><br><span class="task-meta">客户确认已记录，可以进入执行交接。</span></div></div>`;
+        }
+        return `<div class="log"><div><strong>标记已发客户确认</strong><br><span class="task-meta">当前没有缺失项或待处理变更。核对内容后，可标记已发客户确认。</span></div></div>`;
+      }
+
       function renderRequirementDetail(requirement) {
         taskViewState.currentRequirementId = requirement.requestId;
         requirementDetailSubtitle.textContent = requirement.title || requirement.requestId;
         requirementTaskIdInput.value = requirement.linkedTaskId || "";
         requirementOverview.innerHTML = `<div class="task-summary"><div><div class="project-title">${safeText(requirement.title)}</div><div class="task-meta">需求编号：${safeText(requirement.requestId)}<br>客户：${safeText(requirement.customer?.name || requirement.customer?.contact || "未记录")}<br>更新时间：${formatTaskTime(requirement.updatedAt)}</div></div>${statusChip(requirement.status)}</div>`;
+        requirementNextStep.innerHTML = renderRequirementNextStep(requirement);
+        requirementAnalysisCandidates.innerHTML = renderRequirementAnalysisCandidates(requirement);
+        renderRequirementSource(requirement);
         renderRequirementLatest(requirement);
         const latest = requirement.latest || {};
         const missing = latest.missingFields || [];
@@ -3331,11 +4619,19 @@
         requirementIssues.innerHTML = missing.length || errors.length
           ? `<div class="log-list">${missing.map((field) => `<div class="log"><div>缺失字段：${safeText(field)}</div></div>`).join("")}${errors.map((item) => `<div class="log warn"><div>${safeText(item.field)}：${safeText(item.message)}</div></div>`).join("")}</div>`
           : `<div class="empty-state">当前版本没有缺失项</div>`;
-        const confirmations = (requirement.confirmations || []).map((item) => ({ type: "客户确认", message: item.customerReply, time: item.createdAt }));
-        const changes = (requirement.changeRequests || []).map((item) => ({ type: "变更请求", message: item.customerMessage, time: item.createdAt }));
-        const events = (requirement.events || []).map((item) => ({ type: item.eventType, message: JSON.stringify(item.payload || {}), time: item.createdAt }));
-        const audit = [...confirmations, ...changes, ...events].sort((a, b) => String(b.time).localeCompare(String(a.time)));
-        requirementAuditTrail.innerHTML = audit.length ? audit.map((item) => `<div class="log"><div>[${safeText(item.type)}] ${safeText(item.message || "--")}</div><div class="log-time">${formatTaskTime(item.time)}</div></div>`).join("") : `<div class="empty-state">暂无确认或变更记录</div>`;
+        const versions = requirement.versions || [];
+        requirementVersions.innerHTML = versions.length ? versions.slice().reverse().map((item) => {
+          const source = parseRequirementSource(item.source);
+          const label = source.type === "wechat_group" ? `微信群：${source.groupName || "--"}` : (source.type || item.source || "--");
+          return `<div class="log"><div>版本 ${Number(item.version || 0)} · 来源：${safeText(label)} · 缺失项：${Number((item.missingFields || []).length)}</div><div class="log-time">${formatTaskTime(item.createdAt)}</div></div>`;
+        }).join("") : `<div class="empty-state">暂无版本记录</div>`;
+        const confirmations = requirement.confirmations || [];
+        requirementConfirmations.innerHTML = confirmations.length ? confirmations.map((item) => `<div class="log"><div>${safeText(item.customerReply || "--")}<br><span class="task-meta">会话：${safeText(item.conversationId || "--")}</span></div><div class="log-time">${formatTaskTime(item.createdAt)}</div></div>`).join("") : `<div class="empty-state">暂无客户确认记录</div>`;
+        const changes = requirement.changeRequests || [];
+        requirementChanges.innerHTML = renderRequirementChangeRequests(changes);
+        const events = requirement.events || [];
+        requirementTimeline.innerHTML = events.length ? events.map((item) => `<div class="log"><div>${formatRequirementEvent(item)}<br><span class="task-meta">操作人：${safeText(item.actor || "--")}</span></div><div class="log-time">${formatTaskTime(item.createdAt)}</div></div>`).join("") : `<div class="empty-state">暂无时间线记录</div>`;
+        renderClarificationPrompt(requirement);
       }
 
       async function loadRequirementDetail(requestId) {
@@ -3441,6 +4737,7 @@
           password: "",
           tenantApiKey: "",
         },
+        customerServiceSchedulerProfiles: [],
       };
 
       const candidateUiState = {
@@ -3463,11 +4760,168 @@
         sessions: [],
         selectedSession: null,
         taskCourses: [],
+        taskScoped: false,
         rooms: [],
         roomProgressbar: null,
         monitorAccounts: [],
         logs: [],
       };
+
+      function installWorkbenchResizeControls() {
+        if (!autoWorkbench || workbenchResizers.length === 0) return;
+
+        const storageKey = "easyExam:autoWorkbenchSplit:v3";
+        const defaultSplit = { leftPercent: 50, rightPercent: 50 };
+        const limits = {
+          support: { minPercent: 25, maxPercent: 50 },
+        };
+        let widths = {};
+        let hasSavedSplit = false;
+        const chromeWidth = 28;
+
+        const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+        const workbenchWidth = () => {
+          const ownWidth = autoWorkbench.getBoundingClientRect().width;
+          const parentWidth = autoWorkbench.parentElement?.getBoundingClientRect().width;
+          return Math.max(1, ownWidth || parentWidth || document.documentElement.clientWidth);
+        };
+        const availableWidth = () => Math.max(1, workbenchWidth() - chromeWidth);
+        const splitToWidths = (split) => {
+          const width = availableWidth();
+          const rightPercent = clamp(Number(split.rightPercent) || defaultSplit.rightPercent, limits.support.minPercent, limits.support.maxPercent);
+          return {
+            left: width * (100 - rightPercent) / 100,
+            right: width * rightPercent / 100,
+          };
+        };
+        const defaultWidths = () => splitToWidths(defaultSplit);
+        const resetWidths = () => {
+          widths = defaultWidths();
+          autoWorkbench.style.removeProperty("--workbench-left-width");
+          autoWorkbench.style.removeProperty("--workbench-right-width");
+          workbenchResizers.forEach((resizer) => {
+            resizer.setAttribute("aria-valuemin", String(limits.support.minPercent));
+            resizer.setAttribute("aria-valuemax", String(limits.support.maxPercent));
+            resizer.setAttribute("aria-valuenow", String(defaultSplit.rightPercent));
+          });
+        };
+        const readSavedSplit = () => {
+          try {
+            const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
+            if (!Number.isFinite(Number(saved.rightPercent))) return null;
+            return saved;
+          } catch {
+            return null;
+          }
+        };
+
+        const fitToWorkbench = (nextWidths) => {
+          const width = availableWidth();
+          const minRight = width * limits.support.minPercent / 100;
+          const maxRight = width * limits.support.maxPercent / 100;
+          const right = clamp(Number(nextWidths.right) || width / 2, minRight, maxRight);
+          return {
+            left: width - right,
+            right,
+          };
+        };
+
+        const applyWidths = (nextWidths) => {
+          widths = fitToWorkbench(nextWidths);
+          autoWorkbench.style.setProperty("--workbench-left-width", `${Math.round(widths.left)}px`);
+          autoWorkbench.style.setProperty("--workbench-right-width", `${Math.round(widths.right)}px`);
+          const rightPercent = widths.right / availableWidth() * 100;
+          workbenchResizers.forEach((resizer) => {
+            const key = resizer.dataset.workbenchResizer;
+            const limit = limits[key];
+            if (!limit) return;
+            resizer.setAttribute("aria-valuemin", String(limit.minPercent));
+            resizer.setAttribute("aria-valuemax", String(limit.maxPercent));
+            resizer.setAttribute("aria-valuenow", String(Math.round(rightPercent)));
+          });
+        };
+
+        const saveWidths = () => {
+          const width = availableWidth();
+          const rightPercent = widths.right / width * 100;
+          const leftPercent = 100 - rightPercent;
+          localStorage.setItem(
+            storageKey,
+            JSON.stringify({
+              leftPercent: Math.round(leftPercent),
+              rightPercent: Math.round(rightPercent),
+            }),
+          );
+        };
+
+        const savedSplit = readSavedSplit();
+        if (savedSplit) applyWidths(splitToWidths(savedSplit));
+        else resetWidths();
+        hasSavedSplit = Boolean(savedSplit);
+
+        workbenchResizers.forEach((resizer) => {
+          const key = resizer.dataset.workbenchResizer;
+          if (!limits[key]) return;
+
+          const resizeBy = (delta) => {
+            const next = { ...widths };
+            next.right = widths.right + delta;
+            applyWidths(next);
+            saveWidths();
+            hasSavedSplit = true;
+          };
+
+          resizer.addEventListener("pointerdown", (event) => {
+            event.preventDefault();
+            const startX = event.clientX;
+            const startWidths = { ...widths };
+            resizer.setPointerCapture(event.pointerId);
+            resizer.classList.add("is-dragging");
+            autoWorkbench.classList.add("is-resizing");
+
+            const onMove = (moveEvent) => {
+              const deltaX = moveEvent.clientX - startX;
+              applyWidths({
+                ...startWidths,
+                right: startWidths.right - deltaX,
+              });
+            };
+
+            const onUp = () => {
+              resizer.classList.remove("is-dragging");
+              autoWorkbench.classList.remove("is-resizing");
+              resizer.removeEventListener("pointermove", onMove);
+              resizer.removeEventListener("pointerup", onUp);
+              resizer.removeEventListener("pointercancel", onUp);
+              saveWidths();
+              hasSavedSplit = true;
+            };
+
+            resizer.addEventListener("pointermove", onMove);
+            resizer.addEventListener("pointerup", onUp);
+            resizer.addEventListener("pointercancel", onUp);
+          });
+
+          resizer.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const step = event.shiftKey ? 60 : 20;
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            resizeBy(-step * direction);
+          });
+
+          resizer.addEventListener("dblclick", () => {
+            localStorage.removeItem(storageKey);
+            hasSavedSplit = false;
+            resetWidths();
+          });
+        });
+
+        window.addEventListener("resize", () => {
+          if (hasSavedSplit) applyWidths(splitToWidths(readSavedSplit() || defaultSplit));
+          else resetWidths();
+        }, { passive: true });
+      }
 
       function nowText() {
         return new Date().toLocaleTimeString("zh-CN", { hour12: false });
@@ -3546,7 +5000,11 @@
       const candidateEmailFieldAliases = new Set(["邮箱", "邮箱地址", "电子邮箱", "电子邮件", "邮件", "email", "mail"]);
 
       function normalizeCandidateHeader(value) {
-        return String(value || "").trim().replace(/\s+/g, "").toLowerCase();
+        return String(value || "")
+          .trim()
+          .replace(/\s+/g, "")
+          .replace(/[（(](?:必填|选填)[）)]$/u, "")
+          .toLowerCase();
       }
 
       function canonicalImportFieldName(value) {
@@ -3563,18 +5021,24 @@
         return String(row?.[sourceColumn] ?? "").trim();
       }
 
+      function mappedCandidateSourceColumns() {
+        return new Set(Object.values(candidateUiState.mapping || {}).map((value) => String(value || "").trim()).filter(Boolean));
+      }
+
       function isCustomFieldSourceAllowed(column) {
         const canonical = canonicalImportFieldName(column);
-        return !candidateDisallowedCustomFieldNames.has(canonical) && canonical !== "手机号码" && canonical !== "邮箱";
+        const fixedFieldNames = new Set([...candidateDisallowedCustomFieldNames].map((name) => normalizeCandidateHeader(name)));
+        return !fixedFieldNames.has(normalizeCandidateHeader(canonical)) && canonical !== "手机号码" && canonical !== "邮箱";
       }
 
       function normalizeCustomFields() {
+        const mappedColumns = mappedCandidateSourceColumns();
         candidateUiState.customFields = candidateUiState.customFields
-          .filter((field) => field.manual || isCustomFieldSourceAllowed(field.source_column))
+          .filter((field) => field.manual || (isCustomFieldSourceAllowed(field.source_column) && !mappedColumns.has(field.source_column)))
           .slice(0, 60);
         const existingSources = new Set(candidateUiState.customFields.map((field) => field.source_column).filter(Boolean));
         candidateUiState.columns.forEach((column) => {
-          if (!column || !isCustomFieldSourceAllowed(column) || existingSources.has(column)) return;
+          if (!column || !isCustomFieldSourceAllowed(column) || mappedColumns.has(column) || existingSources.has(column)) return;
           candidateUiState.customFields.push({ source_column: column, target_name: column, enabled: false, manual: false });
           existingSources.add(column);
         });
@@ -3635,6 +5099,78 @@
           .join("");
       }
 
+      function candidateFieldLabel(field) {
+        return (
+          {
+            permit: "准考证号",
+            full_name: "姓名",
+            identity_id: "证件号",
+            course_code: "科目编号",
+            mobile: "手机号码",
+            email: "邮箱",
+          }[field] || "字段"
+        );
+      }
+
+      function candidatePermitMappedFromMobile(mapping) {
+        const permitSource = normalizeCandidateHeader(mapping?.permit);
+        return Boolean(permitSource) && [...candidateMobileFieldAliases].some((alias) => normalizeCandidateHeader(alias) === permitSource);
+      }
+
+      function isValidCandidatePermit(value) {
+        return /^[A-Za-z0-9]+$/.test(String(value || "").trim());
+      }
+
+      const candidateIdentityWeights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+      const candidateIdentityCodes = "10X98765432";
+
+      function normalizeCandidateIdentityId(value) {
+        return String(value || "").trim().toUpperCase();
+      }
+
+      function candidateIdentityBirthDateIsValid(value) {
+        const birth = value.slice(6, 14);
+        const year = Number(birth.slice(0, 4));
+        const month = Number(birth.slice(4, 6));
+        const day = Number(birth.slice(6, 8));
+        const date = new Date(year, month - 1, day);
+        return (
+          date.getFullYear() === year &&
+          date.getMonth() === month - 1 &&
+          date.getDate() === day
+        );
+      }
+
+      function candidateIdentityChecksum(value) {
+        const total = candidateIdentityWeights.reduce((sum, weight, index) => sum + Number(value[index]) * weight, 0);
+        return candidateIdentityCodes[total % 11];
+      }
+
+      function validateCandidateIdentityId(value) {
+        const normalized = normalizeCandidateIdentityId(value);
+        if (!normalized) return "";
+        if (!/^\d{17}[\dX]$/.test(normalized)) return "身份证号格式不正确";
+        if (!candidateIdentityBirthDateIsValid(normalized)) return "身份证号出生日期不合法";
+        if (candidateIdentityChecksum(normalized) !== normalized.slice(-1)) return "身份证号校验码错误";
+        return "";
+      }
+
+      function normalizeCandidateMobile(value) {
+        return String(value || "").trim().replace(/[\s\u3000-]+/g, "");
+      }
+
+      function isValidCandidateMobile(value) {
+        return /^1[3-9]\d{9}$/.test(normalizeCandidateMobile(value));
+      }
+
+      function validateCandidateMobile(value, options = {}) {
+        const normalized = normalizeCandidateMobile(value);
+        if (!normalized) return options.required ? "手机号不能为空" : "";
+        if (!/^\d{11}$/.test(normalized)) return "手机号必须为 11 位数字";
+        if (!/^1[3-9]\d{9}$/.test(normalized)) return "手机号格式不正确";
+        return "";
+      }
+
       function rebuildCandidatesFromMapping() {
         candidateUiState.mapping = {
           full_name: candidateMapFullName.value,
@@ -3645,12 +5181,15 @@
           email: candidateMapEmail.value,
         };
         normalizeCustomFields();
+        const permitFromMobile = candidatePermitMappedFromMobile(candidateUiState.mapping);
         candidateUiState.candidates = candidateUiState.rawRows.map((row) => ({
-          permit: String(row[candidateUiState.mapping.permit] ?? "").trim(),
+          permit: permitFromMobile
+            ? normalizeCandidateMobile(row[candidateUiState.mapping.permit])
+            : String(row[candidateUiState.mapping.permit] ?? "").trim(),
           full_name: String(row[candidateUiState.mapping.full_name] ?? "").trim(),
-          identity_id: String(row[candidateUiState.mapping.identity_id] ?? "").trim(),
+          identity_id: normalizeCandidateIdentityId(row[candidateUiState.mapping.identity_id]),
           course_code: String(row[candidateUiState.mapping.course_code] ?? "").trim(),
-          mobile: String(row[candidateUiState.mapping.mobile] ?? "").trim(),
+          mobile: normalizeCandidateMobile(row[candidateUiState.mapping.mobile]),
           email: String(row[candidateUiState.mapping.email] ?? "").trim(),
           custom_fields: buildCustomFieldValues(row),
           __row: row.__row,
@@ -3664,8 +5203,12 @@
       function validateCandidatesClient(candidates, mapping) {
         const errors = [];
         const warnings = [];
+        const missingMappedFields = new Set();
         ["permit", "full_name"].forEach((field) => {
-          if (!mapping[field]) errors.push(`缺少字段映射：${field}`);
+          if (!mapping[field]) {
+            missingMappedFields.add(field);
+            errors.push(`缺少字段映射：${candidateFieldLabel(field)}`);
+          }
         });
         const taskCourses = Array.isArray(candidateUiState.taskCourses) ? candidateUiState.taskCourses : [];
         const isTrialSession = candidateUiState.selectedSession?.sessionType === "trial";
@@ -3674,21 +5217,41 @@
         }
         const permitRows = new Map();
         const identityRows = new Map();
+        const permitFromMobile = candidatePermitMappedFromMobile(mapping);
         candidates.forEach((candidate, index) => {
           const rowNum = candidate.__row || index + 2;
+          const permit = String(candidate.permit || "").trim();
           ["permit", "full_name"].forEach((field) => {
-            if (!String(candidate[field] || "").trim()) {
-              errors.push(`第 ${rowNum} 行缺少 ${field}`);
+            if (!missingMappedFields.has(field) && !String(candidate[field] || "").trim()) {
+              errors.push(`第 ${rowNum} 行缺少${candidateFieldLabel(field)}`);
             }
           });
+          if (permit && !isValidCandidatePermit(permit)) {
+            errors.push(`第 ${rowNum} 行准考证号只能包含英文字母和数字`);
+          }
+          const identityError = validateCandidateIdentityId(candidate.identity_id);
+          if (identityError) {
+            errors.push(`第 ${rowNum} 行${identityError}`);
+          }
+          const mobileError =
+            permitFromMobile && mapping.mobile === mapping.permit
+              ? ""
+              : validateCandidateMobile(candidate.mobile);
+          if (mobileError) {
+            errors.push(`第 ${rowNum} 行${mobileError}`);
+          }
+          if (permitFromMobile) {
+            const permitMobileError = validateCandidateMobile(permit, { required: true });
+            if (permitMobileError) errors.push(`第 ${rowNum} 行${permitMobileError}`);
+          }
           if (/^\s*\d+(?:\.\d+)?[eE]\+?\d+\s*$/.test(candidate.identity_id || "")) {
-            errors.push(`第 ${rowNum} 行 identity_id 为科学计数法格式，请修正原始文件后再导入`);
+            errors.push(`第 ${rowNum} 行${candidateFieldLabel("identity_id")}为科学计数法格式，请修正原始文件后再导入`);
           }
           if (/^\s*\d+(?:\.\d+)?[eE]\+?\d+\s*$/.test(candidate.permit || "")) {
-            errors.push(`第 ${rowNum} 行 permit 为科学计数法格式，请修正原始文件后再导入`);
+            errors.push(`第 ${rowNum} 行${candidateFieldLabel("permit")}为科学计数法格式，请修正原始文件后再导入`);
           }
           if (!isTrialSession && taskCourses.length > 1 && !String(candidate.course_code || "").trim()) {
-            errors.push(`第 ${rowNum} 行缺少科目编号；多科目考试需要填写对应 course_code。`);
+            errors.push(`第 ${rowNum} 行缺少${candidateFieldLabel("course_code")}；多科目考试需要填写对应科目编号。`);
           }
           if (candidate.permit) permitRows.set(candidate.permit, [...(permitRows.get(candidate.permit) || []), rowNum]);
           if (candidate.identity_id) {
@@ -3785,10 +5348,8 @@
           String(candidateUiState.mapping[field] || "").trim(),
         );
         const isValid = candidateUiState.candidates.length > 0 && mappingComplete && candidateUiState.errors.length === 0;
-        candidateDownloadBtn.disabled = !isValid;
         loadSessionsBtn.disabled = !isValid;
-        candidateDownloadBtn.classList.toggle("primary", isValid);
-        loadSessionsBtn.classList.toggle("primary", isValid);
+        renderLoadSessionsAction();
         candidateImportBtn.disabled = !isValid || !candidateUiState.selectedSession;
         candidateState.classList.toggle("is-ok", Boolean(candidateUiState.uploadId && isValid));
         candidateState.classList.toggle("is-error", Boolean(candidateUiState.uploadId && !isValid));
@@ -3849,36 +5410,6 @@
         candidateLog(candidateUiState.errors.length ? `[名单校验] 存在 ${candidateUiState.errors.length} 个错误` : "[名单校验] 校验通过", candidateUiState.errors.length ? "warn" : "success");
       }
 
-      async function downloadCandidateTemplate() {
-        const response = await fetch(`${runtime.apiBase}/api/candidates/generate-template`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            candidates: candidateUiState.candidates.map(({ permit, full_name, identity_id, course_code, mobile, email, custom_fields }) => ({
-              permit,
-              full_name,
-              identity_id,
-              course_code,
-              mobile,
-              email,
-              custom_fields,
-            })),
-          }),
-        });
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(data.error || "下载整理模板失败");
-        }
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "yikao_candidates_template.xlsx";
-        link.click();
-        URL.revokeObjectURL(url);
-        candidateLog("[名单整理] 已下载整理后的导入模板", "success");
-      }
-
       function renderSessions(message = "无可用未过期场次") {
         sessionSelect.innerHTML = candidateUiState.sessions.length
           ? '<option value="">请选择场次</option>' +
@@ -3893,6 +5424,11 @@
         if (candidateUiState.selectedSession) {
           sessionSelect.value = String(candidateUiState.selectedSession.session_id);
         }
+        renderLoadSessionsAction();
+      }
+
+      function renderLoadSessionsAction() {
+        loadSessionsAction.hidden = candidateUiState.taskScoped;
       }
 
       async function loadCandidateSessions() {
@@ -3946,6 +5482,8 @@
       async function loadCandidateTaskContext() {
         const params = new URLSearchParams(window.location.search);
         const taskId = String(params.get("taskId") || "").trim();
+        candidateUiState.taskScoped = Boolean(taskId);
+        renderLoadSessionsAction();
         if (!taskId) return;
         const sessionId = String(params.get("sessionId") || "").trim();
         candidateLog(`[场次选择] 正在加载考试任务 ${taskId}`);
@@ -4294,7 +5832,6 @@
           password: login?.password || "",
           tenantApiKey: login?.tenantApiKey || "",
         };
-        loginUrlInput.value = uiState.login.url;
         loginUsernameInput.value = uiState.login.username;
         backendLoginPasswordInput.value = uiState.login.password;
         tenantApiKeyInput.value = uiState.login.tenantApiKey;
@@ -4305,7 +5842,7 @@
 
       function collectLoginState() {
         return {
-          url: loginUrlInput.value.trim(),
+          url: "https://eztest.org/manager/accounts/login",
           username: loginUsernameInput.value.trim(),
           password: backendLoginPasswordInput.value,
           tenantApiKey: tenantApiKeyInput.value.trim(),
@@ -4321,9 +5858,89 @@
         button.setAttribute("aria-label", `${isHidden ? "隐藏" : "显示"}${input === backendLoginPasswordInput ? "密码" : "租户 API Key"}`);
       }
 
+      function renderCustomerServiceSchedulerProfiles(profiles = []) {
+        uiState.customerServiceSchedulerProfiles = profiles;
+        const enabledCount = profiles.filter((profile) => profile.customerServiceScheduler?.enabled !== false).length;
+        customerServiceSchedulerState.textContent = profiles.length ? `${enabledCount}/${profiles.length} 已启用` : "未配置";
+        customerServiceSchedulerState.className = profiles.length && enabledCount ? "tag green" : "tag amber";
+        customerServiceSchedulerRunBtn.disabled = enabledCount === 0;
+        if (!profiles.length) {
+          customerServiceSchedulerProfiles.innerHTML = '<div class="settings-note">保存租户 API Key 后会自动加入每小时在线客服定时。</div>';
+          return;
+        }
+        customerServiceSchedulerProfiles.innerHTML = profiles
+          .map((profile) => {
+            const enabled = profile.customerServiceScheduler?.enabled !== false;
+            const current = profile.current ? '<span class="tag green">当前</span>' : "";
+            const status = enabled ? '<span class="tag green">定时中</span>' : '<span class="tag amber">已暂停</span>';
+            const lastRun = profile.customerServiceScheduler?.lastRunAt
+              ? `最近运行 ${escapeHtml(profile.customerServiceScheduler.lastRunAt)}`
+              : "尚无运行记录";
+            return `
+              <div class="scheduler-profile" data-profile-id="${escapeHtml(profile.id)}">
+                <div>
+                  <strong>${escapeHtml(profile.label || profile.keyHint || "租户 API Key")} ${current}</strong>
+                  <span>${escapeHtml(profile.keyHint || "")} · ${escapeHtml(profile.apiBase || "https://eztest.cn")} · ${lastRun}</span>
+                </div>
+                <div class="scheduler-profile-actions">
+                  ${status}
+                  <button class="btn" type="button" data-customer-service-action="${enabled ? "pause" : "resume"}" data-profile-id="${escapeHtml(profile.id)}">${enabled ? "暂停" : "恢复"}</button>
+                  <button class="btn" type="button" data-customer-service-action="current" data-profile-id="${escapeHtml(profile.id)}" ${profile.current ? "disabled" : ""}>设为当前</button>
+                  <button class="btn" type="button" data-customer-service-action="delete" data-profile-id="${escapeHtml(profile.id)}">删除</button>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      async function loadCustomerServiceScheduler() {
+        const response = await fetch(`${runtime.apiBase}/api/customer-service-scheduler?_=${Date.now()}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "读取在线客服定时配置失败");
+        renderCustomerServiceSchedulerProfiles(data.profiles || []);
+      }
+
+      async function updateCustomerServiceSchedulerProfile(profileId, payload) {
+        const response = await fetch(`${runtime.apiBase}/api/customer-service-scheduler/profiles/${encodeURIComponent(profileId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "更新在线客服定时配置失败");
+        renderCustomerServiceSchedulerProfiles(data.profiles || []);
+      }
+
+      async function deleteCustomerServiceSchedulerProfile(profileId) {
+        const response = await fetch(`${runtime.apiBase}/api/customer-service-scheduler/profiles/${encodeURIComponent(profileId)}`, {
+          method: "DELETE",
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "删除在线客服定时配置失败");
+        renderCustomerServiceSchedulerProfiles(data.profiles || []);
+      }
+
+      async function runCustomerServiceSchedulerDryRun() {
+        const response = await fetch(`${runtime.apiBase}/api/customer-service-scheduler/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dryRun: true }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "在线客服定时试跑失败");
+        const summary = data.summary || {};
+        addLog(`在线客服定时试跑：${summary.totalProfiles || 0} 个 Key，计划调整 ${summary.planned || 0} 个场次。`, summary.failedProfiles ? "warn" : "success");
+      }
+
       function setProgress(percent, caption, stageIndex) {
-        barFill.style.width = `${percent}%`;
-        progressNumber.textContent = `${percent}%`;
+        const normalizedPercent = Math.max(0, Math.min(100, Number(percent) || 0));
+        const circumference = 2 * Math.PI * 38;
+        const progressOffset = circumference * (1 - normalizedPercent / 100);
+        progressCircle.style.setProperty("--progress-circumference", String(circumference));
+        progressCircle.style.setProperty("--progress-offset", String(progressOffset));
+        progressCircle.setAttribute("aria-label", `配置进度 ${normalizedPercent}%`);
+        progressNumber.textContent = `${normalizedPercent}%`;
         progressCaption.textContent = caption;
         steps.forEach((step, index) => {
           step.classList.toggle("done", stageIndex >= 0 && index < stageIndex);
@@ -4362,16 +5979,15 @@
         captureState.className = "tag green";
         captureGrid.innerHTML = uiState.captures
           .map(
-            (capture, index) => `
-              <button class="capture-card" type="button" data-shot="${index}" aria-label="查看${capture.title}">
-                <div class="capture-thumb" style="display:block;padding:0;height:118px;overflow:hidden;background:#e9edf3;">
-                  <img src="${capture.url}" alt="${capture.title}" style="width:100%;display:block;" />
+            (capture) => `
+              <div class="capture-card" role="img" aria-label="${escapeHtml(capture.title || "确认页截图")}">
+                <div class="capture-thumb">
+                  <img class="capture-image" src="${encodeURI(capture.url)}" alt="${escapeHtml(capture.title || "确认页截图")}" />
                 </div>
                 <div class="capture-info">
-                  <strong>${capture.title}</strong>
-                  <span>点击查看完整截图</span>
+                  <strong>${escapeHtml(capture.title || "确认页截图")}</strong>
                 </div>
-              </button>
+              </div>
             `,
           )
           .join("");
@@ -4574,37 +6190,6 @@
         `;
       }
 
-      function openShot(index) {
-        const capture = uiState.captures[index];
-        if (capture?.url) {
-          shotModalTitle.textContent = capture.title;
-          shotModalSubtitle.textContent = "易考后台确认截图";
-          largeShot.innerHTML = `
-            <div style="background:#eef2f7;padding:14px;display:grid;place-items:center;min-height:480px;">
-              <img src="${capture.url}" alt="${capture.title}" style="max-width:100%;height:auto;display:block;border:1px solid #d0d8e4;border-radius:6px;background:#fff;" />
-            </div>
-          `;
-        } else {
-          const type = String(index);
-          const shotTitles = {
-            0: ["基本信息完整页", "考试名称、时间、迟到限制、欢迎语"],
-            1: ["考试配置-开考前", "承诺书、资料审核、练习模式"],
-            2: ["考试配置-考试中", "视频监控、鹰眼、客户端、水印、禁止复制"],
-            3: ["考试配置-考试后", "成绩查看、重做、分数线、人工判分"],
-          };
-          const [title, subtitle] = shotTitles[type] ?? shotTitles[0];
-          shotModalTitle.textContent = title;
-          shotModalSubtitle.textContent = subtitle;
-          largeShot.innerHTML = largeShotTemplate(type);
-        }
-        shotModal.classList.add("open");
-        closeShotModal.focus();
-      }
-
-      function closeShot() {
-        shotModal.classList.remove("open");
-      }
-
       function applyImportResult(fileName, data) {
         dropZone.classList.add("is-ready");
         dropTitle.textContent = fileName;
@@ -4662,8 +6247,8 @@
 
       async function saveLoginSettings() {
         const login = collectLoginState();
-        if (!login.url || !login.username || !login.password) {
-          throw new Error("请完整填写登录网址、账号和密码。");
+        if (!login.username || !login.password) {
+          throw new Error("请完整填写账号和密码。");
         }
         const response = await fetch(`${runtime.apiBase}/api/settings`, {
           method: "POST",
@@ -4675,6 +6260,7 @@
           throw new Error(data.error || "保存登录配置失败");
         }
         applyLoginState(data.settings?.login || login);
+        await loadCustomerServiceScheduler();
         addLog("后台登录配置已保存，后续任务会自动登录易考后台。", "success");
       }
 
@@ -4699,6 +6285,34 @@
       saveLoginBtn.addEventListener("click", async () => {
         try {
           await saveLoginSettings();
+        } catch (error) {
+          addLog(error.message || String(error), "warn");
+        }
+      });
+
+      customerServiceSchedulerRunBtn.addEventListener("click", async () => {
+        try {
+          await runCustomerServiceSchedulerDryRun();
+        } catch (error) {
+          addLog(error.message || String(error), "warn");
+        }
+      });
+
+      customerServiceSchedulerProfiles.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-customer-service-action]");
+        if (!button) return;
+        const profileId = button.dataset.profileId;
+        const action = button.dataset.customerServiceAction;
+        try {
+          if (action === "pause") {
+            await updateCustomerServiceSchedulerProfile(profileId, { customerServiceScheduler: { enabled: false } });
+          } else if (action === "resume") {
+            await updateCustomerServiceSchedulerProfile(profileId, { customerServiceScheduler: { enabled: true } });
+          } else if (action === "current") {
+            await updateCustomerServiceSchedulerProfile(profileId, { current: true });
+          } else if (action === "delete") {
+            await deleteCustomerServiceSchedulerProfile(profileId);
+          }
         } catch (error) {
           addLog(error.message || String(error), "warn");
         }
@@ -4730,8 +6344,8 @@
 
       [candidateMapFullName, candidateMapIdentityId, candidateMapPermit, candidateMapCourseCode, candidateMapMobile, candidateMapEmail].forEach((select) => {
         select.addEventListener("change", () => {
-          rebuildCandidatesFromMapping();
           renderCustomFieldControls();
+          rebuildCandidatesFromMapping();
         });
       });
 
@@ -4769,24 +6383,6 @@
         renderCustomFieldControls();
         rebuildCandidatesFromMapping();
         candidateLog("[自定义字段] 已清空选择", "success");
-      });
-
-      addCustomFieldBtn.addEventListener("click", () => {
-        const targetName = window.prompt("请输入自定义字段导入名称");
-        const trimmed = String(targetName || "").trim();
-        if (!trimmed) return;
-        candidateUiState.customFields.push({ source_column: "", target_name: trimmed, enabled: true, manual: true });
-        renderCustomFieldControls();
-        rebuildCandidatesFromMapping();
-        candidateLog(`[自定义字段] 已添加手动字段：${trimmed}`, "success");
-      });
-
-      candidateDownloadBtn.addEventListener("click", async () => {
-        try {
-          await downloadCandidateTemplate();
-        } catch (error) {
-          candidateLog(`[名单整理] ${error.message || String(error)}`, "warn");
-        }
       });
 
       loadSessionsBtn.addEventListener("click", async () => {
@@ -4863,6 +6459,9 @@
         RequirementListPage({ root: requirementsView, loadRequirements }),
         RequirementDetailPage({ root: requirementDetailView, loadRequirement: loadRequirementDetail }),
         UserManagementPage({ root: userManagementView, loadUsers }),
+        staticPage("wechat-collector", wechatCollectorView, loadWechatCollector),
+        staticPage("system-config", systemConfigView, loadWechatCollector),
+
         staticPage("templates", templatesView),
         staticPage("logs", logsView, loadAllTaskLogs),
         staticPage("not-found", projectManagementView, loadProjects),
@@ -4874,6 +6473,9 @@
         { key: "candidate-import", element: candidateNavBtn },
         { key: "requirements", element: requirementsNavBtn },
         { key: "users", element: usersNavBtn },
+        { key: "wechat-collector", element: wechatCollectorNavBtn },
+        { key: "system-config", element: systemConfigNavBtn },
+
         { key: "templates", element: templatesNavBtn },
         { key: "logs", element: logsNavBtn },
       ];
@@ -4896,12 +6498,67 @@
       examNavBtn.addEventListener("click", () => router.navigate("/exams"));
       requirementsNavBtn.addEventListener("click", () => router.navigate("/requirements"));
       usersNavBtn.addEventListener("click", () => router.navigate("/users"));
+      wechatCollectorNavBtn.addEventListener("click", () => router.navigate("/wechat-collector"));
+      systemConfigNavBtn.addEventListener("click", () => router.navigate("/system-config"));
+
       templatesNavBtn.addEventListener("click", () => router.navigate("/templates"));
       logsNavBtn.addEventListener("click", () => router.navigate("/logs"));
       refreshProjectsBtn.addEventListener("click", () => loadProjects().catch((error) => { projectGrid.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
       refreshExamsBtn.addEventListener("click", () => loadExams().catch((error) => { examListRows.innerHTML = `<tr><td colspan="9">${safeText(error.message)}</td></tr>`; }));
       refreshTaskBtn.addEventListener("click", () => taskViewState.currentTaskId && openTaskDetail(taskViewState.currentTaskId));
       refreshRequirementsBtn.addEventListener("click", () => loadRequirements().catch((error) => { requirementsList.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      refreshWechatCollectorBtn.addEventListener("click", () => loadWechatCollector().catch((error) => { wechatCollectorStatus.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      refreshSystemConfigBtn.addEventListener("click", () => loadWechatCollector().catch((error) => { wechatCollectorPreflight.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      dryRunWechatCollectorBtn.addEventListener("click", () => dryRunWechatCollector().catch((error) => { wechatCollectorPreflight.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      runWechatCollectorOnceBtn.addEventListener("click", () => runWechatCollectorOnce().catch((error) => { wechatCollectorStatus.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      runWechatPipelineSmokeBtn.addEventListener("click", () => runWechatPipelineSmoke().catch((error) => { wechatPipelineSmoke.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      installWechatCollectorAutomationBtn.addEventListener("click", () => installWechatCollectorAutomation().catch((error) => { wechatCollectorReadiness.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      uninstallWechatCollectorAutomationBtn.addEventListener("click", () => uninstallWechatCollectorAutomation().catch((error) => { wechatCollectorReadiness.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      addWechatGroupBtn.addEventListener("click", () => {
+        const groups = collectWechatCollectorConfig().groups;
+        groups.push({ group_name: "", project_name: "", customer_name: "", requirement_request_id: "", enabled: true, interval_minutes: 15 });
+        renderWechatCollectorConfig(groups, taskViewState.wechatGroupStatuses || [], taskViewState.wechatHistory || []);
+        wechatCollectorConfigState.textContent = "已新增一行微信群配置";
+      });
+      wechatCollectorConfig.addEventListener("click", (event) => {
+        const button = event.target.closest('[data-wechat-action="remove"]');
+        if (button) removeWechatCollectorRow(button);
+      });
+      wechatCollectorConfig.addEventListener("click", (event) => {
+        const button = event.target.closest('[data-wechat-action="run-once"]');
+        if (button) runWechatCollectorGroupOnce(button).catch((error) => { wechatCollectorStatus.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; });
+      });
+      wechatCollectorConfig.addEventListener("click", (event) => {
+        const button = event.target.closest('[data-wechat-action="save-group"]');
+        if (button) saveWechatCollectorGroup(button).catch((error) => { wechatCollectorConfigState.textContent = error.message || String(error); });
+      });
+      wechatCollectorConfig.addEventListener("click", (event) => {
+        const button = event.target.closest('[data-wechat-action="show-attachments"]');
+        if (button) showWechatGroupAttachmentStatus(button);
+      });
+      wechatCollectorConfig.addEventListener("click", (event) => {
+        const button = event.target.closest('[data-wechat-action="open-requirement"]');
+        if (button?.dataset.requestId) router.navigate(`/requirements/${encodeURIComponent(button.dataset.requestId)}`);
+      });
+      wechatCollectorConfigBackups.addEventListener("click", (event) => {
+        const button = event.target.closest('[data-wechat-action="restore-config"]');
+        if (button) restoreWechatCollectorConfigBackup(button).catch((error) => { wechatCollectorConfigState.textContent = error.message || String(error); });
+      });
+      installWechatCollectorServiceBtn.addEventListener("click", () => installWechatCollectorService().catch((error) => { wechatCollectorService.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      uninstallWechatCollectorServiceBtn.addEventListener("click", () => uninstallWechatCollectorService().catch((error) => { wechatCollectorService.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      installWechatCollectorSchedulerBtn.addEventListener("click", () => installWechatCollectorScheduler().catch((error) => { wechatCollectorScheduler.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      uninstallWechatCollectorSchedulerBtn.addEventListener("click", () => uninstallWechatCollectorScheduler().catch((error) => { wechatCollectorScheduler.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      loadWechatLlmModelsBtn.addEventListener("click", () => loadWechatLlmModels().catch((error) => { wechatLlmConfigState.textContent = error.message || String(error); }));
+      saveWechatLlmConfigBtn.addEventListener("click", () => saveWechatLlmConfig().catch((error) => { wechatLlmConfigState.textContent = error.message || String(error); }));
+      wechatLlmProvider.addEventListener("change", () => {
+        if (wechatLlmProvider.value === "qwen") {
+          renderWechatLlmModelOptions([], "qwen-plus");
+          wechatLlmEndpoint.value = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
+        } else {
+          renderWechatLlmModelOptions([], "gpt-4.1-mini");
+          wechatLlmEndpoint.value = "https://api.openai.com/v1/responses";
+        }
+      });
       refreshRequirementBtn.addEventListener("click", () => taskViewState.currentRequirementId && loadRequirementDetail(taskViewState.currentRequirementId));
       refreshUsersBtn.addEventListener("click", () => loadUsers());
       saveUserBtn.addEventListener("click", () => saveUser().catch((error) => { userActionState.textContent = error.message || String(error); }));
@@ -4926,17 +6583,54 @@
         const card = event.target.closest("[data-request-id]");
         if (card) return router.navigate(`/requirements/${encodeURIComponent(card.dataset.requestId)}`);
       });
+      requirementClarificationBtn.addEventListener("click", async () => {
+        if (!taskViewState.currentRequirementId) return;
+        try {
+          const questions = parseClarificationQuestions(requirementClarificationQuestions.value);
+          const normalizedQuestions = questions.length ? questions : ["请补充人工审核指出的缺失或不明确需求。"];
+          requirementActionState.textContent = "正在标记要求客户补充...";
+          const result = await fetchJson(`/api/requirements/${encodeURIComponent(taskViewState.currentRequirementId)}/request-clarification`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              reviewer: requirementReviewerInput.value || "admin-op",
+              message: "人工审核后需客户补充信息",
+              questions: normalizedQuestions,
+              missingFields: normalizedQuestions,
+            }),
+          });
+          renderRequirementDetail(result.requirement);
+          requirementActionState.textContent = "已标记为要求客户补充";
+        } catch (error) {
+          requirementActionState.textContent = error.message || String(error);
+        }
+      });
+      requirementReviewedBtn.addEventListener("click", async () => {
+        if (!taskViewState.currentRequirementId) return;
+        try {
+          requirementActionState.textContent = "正在标记已审核...";
+          const result = await fetchJson(`/api/requirements/${encodeURIComponent(taskViewState.currentRequirementId)}/mark-reviewed`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reviewer: requirementReviewerInput.value || "admin-op", message: "人工审核通过，等待客户确认" }),
+          });
+          renderRequirementDetail(result.requirement);
+          requirementActionState.textContent = "已标记为内部审核通过，等待客户确认";
+        } catch (error) {
+          requirementActionState.textContent = error.message || String(error);
+        }
+      });
       requirementMarkReadyBtn.addEventListener("click", async () => {
         if (!taskViewState.currentRequirementId) return;
         try {
-          requirementActionState.textContent = "正在标记...";
+          requirementActionState.textContent = "正在标记可进入执行...";
           const result = await fetchJson(`/api/requirements/${encodeURIComponent(taskViewState.currentRequirementId)}/mark-ready`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ reviewer: requirementReviewerInput.value || "admin-op" }),
           });
           renderRequirementDetail(result.requirement);
-          requirementActionState.textContent = "已标记为可创建任务";
+          requirementActionState.textContent = "已标记为可进入执行";
         } catch (error) {
           requirementActionState.textContent = error.message || String(error);
         }
@@ -4944,14 +6638,47 @@
       requirementLinkTaskBtn.addEventListener("click", async () => {
         if (!taskViewState.currentRequirementId) return;
         try {
-          requirementActionState.textContent = "正在绑定...";
+          requirementActionState.textContent = "正在关联执行任务编号...";
           const result = await fetchJson(`/api/requirements/${encodeURIComponent(taskViewState.currentRequirementId)}/link-task`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ taskId: requirementTaskIdInput.value }),
           });
           renderRequirementDetail(result.requirement);
-          requirementActionState.textContent = "已绑定任务";
+          requirementActionState.textContent = "已关联执行任务编号";
+        } catch (error) {
+          requirementActionState.textContent = error.message || String(error);
+        }
+      });
+      requirementChanges.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-change-action]");
+        if (!button || !taskViewState.currentRequirementId) return;
+        const changeId = button.dataset.changeId;
+        const action = button.dataset.changeAction;
+        const reviewer = requirementReviewerInput.value || "admin-op";
+        try {
+          if (action === "accept") {
+            if (!confirm("采纳后会生成新的需求版本。确认采纳这条变更？")) return;
+            requirementActionState.textContent = "正在采纳变更并生成新版本...";
+            const result = await fetchJson(`/api/requirements/${encodeURIComponent(taskViewState.currentRequirementId)}/change-requests/${encodeURIComponent(changeId)}/accept`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ reviewer, message: "人工审核接受客户变更" }),
+            });
+            renderRequirementDetail(result.requirement);
+            requirementActionState.textContent = "已采纳变更并生成新版本";
+          }
+          if (action === "reject") {
+            if (!confirm("驳回后不会修改当前需求。确认驳回这条变更？")) return;
+            requirementActionState.textContent = "正在驳回变更...";
+            const result = await fetchJson(`/api/requirements/${encodeURIComponent(taskViewState.currentRequirementId)}/change-requests/${encodeURIComponent(changeId)}/reject`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ reviewer, reason: "人工审核驳回客户变更" }),
+            });
+            renderRequirementDetail(result.requirement);
+            requirementActionState.textContent = "已驳回变更";
+          }
         } catch (error) {
           requirementActionState.textContent = error.message || String(error);
         }
@@ -4997,6 +6724,48 @@
         }
       });
       taskStepGrid.addEventListener("click", async (event) => {
+        const smsCandidateDownload = event.target.closest("[data-download-sms-candidates]");
+        if (smsCandidateDownload) {
+          event.stopPropagation();
+          try {
+            const rows = JSON.parse(smsCandidateDownload.dataset.downloadSmsCandidates || "[]");
+            downloadSmsCandidatesCsv(Array.isArray(rows) ? rows : []);
+          } catch (error) {
+            alert(`下载失败：${error.message || String(error)}`);
+          }
+          return;
+        }
+        const smsCopy = event.target.closest("[data-copy-sms]");
+        if (smsCopy) {
+          event.stopPropagation();
+          if (smsCopy.disabled) return;
+          const originalText = smsCopy.textContent;
+          smsCopy.disabled = true;
+          try {
+            await copyTextToClipboard(smsCopy.dataset.copySms || "");
+            smsCopy.textContent = "已复制";
+            setTimeout(() => {
+              smsCopy.textContent = originalText;
+              smsCopy.disabled = false;
+            }, 1200);
+          } catch (error) {
+            smsCopy.textContent = originalText;
+            smsCopy.disabled = false;
+            alert(`复制失败：${error.message || String(error)}`);
+          }
+          return;
+        }
+        const smsToggle = event.target.closest("[data-sms-toggle]");
+        if (smsToggle) {
+          event.stopPropagation();
+          const smsPreview = smsToggle.closest(".sms-notification-preview");
+          if (!smsPreview) return;
+          const expanded = !smsPreview.classList.contains("is-expanded");
+          smsPreview.classList.toggle("is-expanded", expanded);
+          smsToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+          smsToggle.textContent = expanded ? "收起" : "展开全部";
+          return;
+        }
         const monitorDownload = event.target.closest("[data-monitor-download]");
         if (monitorDownload) {
           event.stopPropagation();
@@ -5097,19 +6866,6 @@
         }
         const card = event.target.closest(".task-step-card");
         if (card) card.classList.toggle("open");
-      });
-
-      captureGrid.addEventListener("click", (event) => {
-        const card = event.target.closest("[data-shot]");
-        if (card) openShot(Number(card.dataset.shot));
-      });
-
-      closeShotModal.addEventListener("click", closeShot);
-      shotModal.addEventListener("click", (event) => {
-        if (event.target === shotModal) closeShot();
-      });
-      window.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && shotModal.classList.contains("open")) closeShot();
       });
 
       dropZone.addEventListener("dragover", (event) => {
@@ -5250,6 +7006,7 @@
         candidateUiState.sessions = [];
         candidateUiState.selectedSession = null;
         candidateUiState.taskCourses = [];
+        candidateUiState.taskScoped = false;
         candidateUiState.rooms = [];
         candidateUiState.roomProgressbar = null;
         candidateUiState.monitorAccounts = [];
@@ -5278,12 +7035,14 @@
       renderSessions();
       renderSelectedSession();
       renderRoomAssignResult();
+      installWorkbenchResizeControls();
       await authController.load().catch((error) => {
         appShell.hidden = true;
         loginView.hidden = false;
         loginError.textContent = error.message || String(error);
       });
       loadSettings().catch((error) => addLog(error.message || String(error), "warn"));
+      loadCustomerServiceScheduler().catch((error) => addLog(error.message || String(error), "warn"));
       await router.start();
     </script>
   </body>

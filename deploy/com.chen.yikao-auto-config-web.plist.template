@@ -8,11 +8,11 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/bash</string>
-		<string>/Users/chen/Desktop/ai 易考/scripts/run_local_service.sh</string>
+		<string>/Users/chen/Library/Application Support/yikao-auto-config-web/scripts/run_local_service.sh</string>
 	</array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/chen/Desktop/ai 易考</string>
+    <string>/Users/chen/Library/Application Support/yikao-auto-config-web</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -21,10 +21,10 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/chen/Desktop/ai 易考/.easy_exam_runtime/logs/service.stdout.log</string>
+    <string>/Users/chen/Library/Application Support/yikao-auto-config-web/.easy_exam_runtime/logs/service.stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/chen/Desktop/ai 易考/.easy_exam_runtime/logs/service.stderr.log</string>
+    <string>/Users/chen/Library/Application Support/yikao-auto-config-web/.easy_exam_runtime/logs/service.stderr.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>

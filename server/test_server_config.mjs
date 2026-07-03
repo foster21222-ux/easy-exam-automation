@@ -61,6 +61,15 @@ test("session creation forwards manual scoring selection to tenant API", () => {
   assert.equal(buildPayloads.includes("manual_score: false"), false);
 });
 
+test("session creation enables monitor replay and anonymous monitor by default", () => {
+  const buildPayloads = serverSource.slice(
+    serverSource.indexOf("function buildSessionPayloads"),
+    serverSource.indexOf("async function runYikaoApiCreationJob"),
+  );
+  assert.ok(buildPayloads.includes("monitor_replay: true"));
+  assert.ok(buildPayloads.includes("anonymous_monitor: true"));
+});
+
 test("trial session disables pledge content by default", () => {
   const buildPayloads = serverSource.slice(
     serverSource.indexOf("function buildSessionPayloads"),
@@ -103,6 +112,54 @@ test("web exam session enables lock screen and forwards leave limit", () => {
 test("candidate import forwards optional course_code to EasyExam tenant API", () => {
   assert.ok(serverSource.includes("buildTenantCandidateEntries(candidates, customFieldMappings)"));
   assert.ok(serverSource.includes("candidate_tenant_payload.mjs"));
+});
+
+test("candidate payload validation messages use Chinese field labels", () => {
+  const validationBlock = serverSource.slice(
+    serverSource.indexOf("function validateCandidatePayload"),
+    serverSource.indexOf("const baseImportFieldDefinitions"),
+  );
+  assert.ok(validationBlock.includes("candidateFieldLabel"));
+  assert.ok(validationBlock.includes('`第 ${row} 行缺少${candidateFieldLabel("permit")}`'));
+  assert.ok(validationBlock.includes('`第 ${row} 行缺少${candidateFieldLabel("full_name")}`'));
+  assert.ok(validationBlock.includes('`第 ${row} 行${candidateFieldLabel("identity_id")}为科学计数法格式，请修正原始文件后再导入`'));
+  assert.ok(validationBlock.includes('`第 ${row} 行${candidateFieldLabel("permit")}为科学计数法格式，请修正原始文件后再导入`'));
+  assert.equal(validationBlock.includes("缺少 permit"), false);
+  assert.equal(validationBlock.includes("缺少 full_name"), false);
+  assert.equal(validationBlock.includes("identity_id 为科学计数法格式"), false);
+  assert.equal(validationBlock.includes("permit 为科学计数法格式"), false);
+});
+
+test("candidate payload validation rejects invalid permit and phone-mapped permit formats", () => {
+  const validationBlock = serverSource.slice(
+    serverSource.indexOf("function validateCandidatePayload"),
+    serverSource.indexOf("const baseImportFieldDefinitions"),
+  );
+  assert.ok(validationBlock.includes("isValidCandidatePermit"));
+  assert.ok(validationBlock.includes("candidatePermitMappedFromMobile"));
+  assert.ok(validationBlock.includes('`第 ${row} 行准考证号只能包含英文字母和数字`'));
+  assert.ok(validationBlock.includes("validateCandidateMobile(permit, { required: true })"));
+  assert.ok(validationBlock.includes('`第 ${row} 行${permitMobileError}`'));
+});
+
+test("candidate payload validation checks mainland identity and mobile numbers before tenant import", () => {
+  const validationBlock = serverSource.slice(
+    serverSource.indexOf("function validateCandidatePayload"),
+    serverSource.indexOf("const baseImportFieldDefinitions"),
+  );
+  assert.ok(serverSource.includes("function normalizeCandidateIdentityId"));
+  assert.ok(serverSource.includes("function validateCandidateIdentityId"));
+  assert.ok(serverSource.includes("function candidateIdentityChecksum"));
+  assert.ok(serverSource.includes("function normalizeCandidateMobile"));
+  assert.ok(serverSource.includes("function validateCandidateMobile"));
+  assert.ok(serverSource.includes("身份证号格式不正确"));
+  assert.ok(serverSource.includes("身份证号出生日期不合法"));
+  assert.ok(serverSource.includes("身份证号校验码错误"));
+  assert.ok(serverSource.includes("手机号不能为空"));
+  assert.ok(serverSource.includes("手机号格式不正确"));
+  assert.ok(serverSource.includes("手机号必须为 11 位数字"));
+  assert.ok(validationBlock.includes("validateCandidateIdentityId(identityId)"));
+  assert.ok(validationBlock.includes("validateCandidateMobile(mobile)"));
 });
 
 test("candidate import and auto rooms write back task detail state", () => {
@@ -202,6 +259,15 @@ test("project shared sheet trigger persists status and syncs formal plus optiona
   assert.ok(handler.includes('updateTaskStep(taskId, "project_shared_sheet", "failed"'));
   assert.ok(serverSource.includes("shared-sheet\\/fill$/"));
   assert.ok(serverSource.includes("handleProjectSharedSheetFill(decodeURIComponent(sharedSheetFillMatch[1]), req, res)"));
+});
+
+test("task detail includes stored candidates for SMS notification review", () => {
+  const handler = serverSource.slice(
+    serverSource.indexOf("async function handleTaskDetail"),
+    serverSource.indexOf("async function handleProjectSharedSheetFill"),
+  );
+  assert.ok(handler.includes('runTaskState("list_candidates"'));
+  assert.ok(handler.includes("syncedTask.candidates"));
 });
 
 test("candidate import configures selected import fields as visible personal fields before importing", () => {
