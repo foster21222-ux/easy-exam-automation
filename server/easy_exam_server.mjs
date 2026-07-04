@@ -47,6 +47,17 @@ import {
   verifyLogin,
 } from "./local_auth.mjs";
 import { handleRequirementRequest } from "./requirement_request_api.mjs";
+import {
+  businessDraftToCustomer,
+  businessDraftToRequirement,
+  businessTemplateMarkRegions,
+  businessTemplateOptionRegions,
+  businessTemplateTextRegions,
+  parseBusinessRequirementOcr,
+  parseBusinessRequirementTemplateRegions,
+  templateFrameFromTableBounds,
+  templateRectToImageRect,
+} from "./project_intake.mjs";
 import { deleteTaskSessionsFromTenant } from "./session_deletion.mjs";
 import {
   apiKeyProfilesForUser,
@@ -84,9 +95,12 @@ const candidateParserScript = path.join(__dirname, "candidate_list_parser.py");
 const monitorAccountExporterScript = path.join(__dirname, "monitor_account_exporter.py");
 const scoreFeedbackExporterScript = path.join(__dirname, "score_feedback_exporter.py");
 const taskStateScript = path.join(__dirname, "task_state_db.py");
+const requirementStateScript = path.join(__dirname, "requirement_request_db.py");
+const ocrImageScript = path.join(rootDir, "scripts", "ocr_image.swift");
 const scoreFeedbackTemplatePath = path.join(rootDir, "template", "成绩单模板.xlsx");
 const examRequestTemplatePath = path.join(rootDir, "template", "v2易考新建考试需求单.xlsx");
 const taskDbPath = path.join(runtimeDir, "task_state.sqlite3");
+const requirementDbPath = path.join(runtimeDir, "requirement_requests.sqlite3");
 const pythonBin =
   process.env.CODEX_PYTHON ||
   process.env.PYTHON ||
@@ -758,6 +772,98 @@ async function runTaskState(action, payload = {}) {
   return JSON.parse(stdout || "null");
 }
 
+async function runRequirementState(action, payload = {}) {
+  const child = spawn(pythonBin, [requirementStateScript, requirementDbPath, action], {
+    cwd: rootDir,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+  child.stdin.end(JSON.stringify(payload));
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  if (exitCode !== 0) throw new Error(stderr.trim() || `需求状态操作失败：${action}`);
+  return JSON.parse(stdout || "null");
+}
+
+async function runImageOcr(imagePath, rect = null) {
+  const args = rect
+    ? [ocrImageScript, "--rect-normalized", ...rect.map((item) => String(item)), imagePath]
+    : [ocrImageScript, imagePath];
+  const child = spawn("swift", args, {
+    cwd: rootDir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  if (exitCode !== 0) throw new Error(stderr.trim() || "截图 OCR 失败");
+  return stdout.trim();
+}
+
+async function runImageMarkMetrics(imagePath, rect) {
+  const child = spawn("swift", [ocrImageScript, "--mark-normalized", ...rect.map((item) => String(item)), imagePath], {
+    cwd: rootDir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  if (exitCode !== 0) throw new Error(stderr.trim() || "截图标记检测失败");
+  return JSON.parse(stdout || "{}");
+}
+
+async function runImageTemplateFrame(imagePath) {
+  const child = spawn("swift", [ocrImageScript, "--template-bounds", imagePath], {
+    cwd: rootDir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  if (exitCode !== 0) throw new Error(stderr.trim() || "截图模板边界检测失败");
+  const bounds = JSON.parse(stdout || "{}");
+  return templateFrameFromTableBounds(bounds);
+}
+
+async function runBusinessTemplateOcr(imagePath) {
+  const frame = await runImageTemplateFrame(imagePath).catch(() => null);
+  const regions = {};
+  for (const item of [...businessTemplateTextRegions(), ...businessTemplateOptionRegions()]) {
+    regions[item.field] = await runImageOcr(imagePath, templateRectToImageRect(item.rect, frame)).catch(() => "");
+  }
+  const markSelections = {};
+  const markMetrics = {};
+  for (const item of businessTemplateMarkRegions()) {
+    const metrics = await runImageMarkMetrics(imagePath, templateRectToImageRect(item.rect, frame)).catch(() => null);
+    markMetrics[`${item.field}:${item.label}`] = metrics;
+    if (metrics && Number(metrics.darkRatio || 0) >= 0.03) {
+      if (!markSelections[item.field]) markSelections[item.field] = [];
+      markSelections[item.field].push(item.label);
+    }
+  }
+  return { regions, markSelections, markMetrics, frame };
+}
+
 async function updateTaskStep(taskId, stepKey, status, result = {}) {
   if (!taskId) return null;
   return await runTaskState("update_step", { taskId, stepKey, status, result });
@@ -974,6 +1080,83 @@ async function handleImport(req, res) {
   const record = { id: importId, taskId: task.taskId, filename, uploadPath, parsed, createdAt: new Date().toISOString() };
   state.imports.set(importId, record);
   json(res, 200, { uploadId: importId, taskId: task.taskId, ...parsed, filename });
+}
+
+async function handleProjectIntakeScreenshot(req, res) {
+  const url = new URL(req.url, "http://localhost");
+  const filename = safeFileName(url.searchParams.get("filename") || "business-requirement.png");
+  const ext = path.extname(filename).toLowerCase();
+  if (![".png", ".jpg", ".jpeg"].includes(ext)) {
+    return badRequest(res, "业务需求表截图仅支持 .png、.jpg、.jpeg");
+  }
+  const body = await readBody(req);
+  if (!body.length) {
+    return badRequest(res, "未收到业务需求表截图");
+  }
+  const uploadId = randomUUID();
+  const uploadPath = path.join(uploadsDir, `${uploadId}-${filename}`);
+  await fs.writeFile(uploadPath, body);
+  const ocrText = await runImageOcr(uploadPath);
+  const template = await runBusinessTemplateOcr(uploadPath);
+  const draft = parseBusinessRequirementTemplateRegions(template.regions, ocrText, template.markSelections);
+  state.imports.set(uploadId, {
+    id: uploadId,
+    filename,
+    uploadPath,
+    parsed: { ocrText, regions: template.regions, markSelections: template.markSelections, markMetrics: template.markMetrics, templateFrame: template.frame, draft },
+    createdAt: new Date().toISOString(),
+  });
+  json(res, 200, { uploadId, filename, imagePath: uploadPath, ocrText, regions: template.regions, markSelections: template.markSelections, markMetrics: template.markMetrics, templateFrame: template.frame, draft });
+}
+
+async function handleProjectIntakeCreate(req, res) {
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const draft = businessDraftToRequirement(payload.draft || payload.requirement || {});
+  const projectName = String(draft.project_name || draft.exam_name || "").trim();
+  if (!projectName) {
+    return badRequest(res, "请先确认项目名称，再创建项目");
+  }
+  const source = {
+    type: "business_screenshot",
+    uploadId: payload.uploadId || "",
+    fileName: payload.filename || "",
+    projectName,
+  };
+  const requirement = await runRequirementState("upsert", {
+    customer: businessDraftToCustomer(draft),
+    requirement: draft,
+    message: payload.ocrText || payload.message || "",
+    source: JSON.stringify(source),
+  });
+  const authUser = getAuthUserFromRequest(auth, req);
+  const task = await runTaskState("create", {
+    projectName,
+    sourceAccount: "",
+    ownerEmail: auth.enabled ? authUser?.email || "" : "",
+    config: {
+      businessRequirement: draft,
+      requirementRequestId: requirement.requestId,
+      initialRequirementRequestId: requirement.requestId,
+      projectCode: draft.project_code || "",
+      customerName: draft.customer_name || "",
+      operationSerialNumber: draft.operation_serial_number || "",
+      projectIntake: {
+        source: "business_screenshot",
+        uploadId: payload.uploadId || "",
+        fileName: payload.filename || "",
+        createdAt: new Date().toISOString(),
+      },
+    },
+  });
+  const updated = await updateTaskStep(task.taskId, "requirement_parse", "success", {
+    message: `业务需求表已确认，初始需求单已生成：${requirement.requestId}`,
+    result: {
+      uploadId: payload.uploadId || "",
+      requestId: requirement.requestId,
+      source: "business_screenshot",
+    },
+  }) || task;
+  json(res, 200, { ok: true, task: updated, requirement, taskId: updated.taskId, requirementRequestId: requirement.requestId });
 }
 
 async function handleCandidateParse(req, res) {
@@ -3432,6 +3615,12 @@ async function requestHandler(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/import") {
       return await handleImport(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/project-intake/business-screenshot") {
+      return await handleProjectIntakeScreenshot(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/project-intake/projects") {
+      return await handleProjectIntakeCreate(req, res);
     }
     if (req.method === "GET" && url.pathname === "/api/templates/exam-request") {
       return await handleExamRequestTemplate(req, res);

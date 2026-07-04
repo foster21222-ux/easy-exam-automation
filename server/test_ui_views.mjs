@@ -275,11 +275,25 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes("captureMode"));
   assert.ok(html.includes("screenshotPath"));
   assert.ok(html.includes("captureRect"));
+  assert.ok(html.includes("scrollPageCount"));
+  assert.ok(html.includes("scrollStepCount"));
+  assert.ok(html.includes("翻动："));
+  assert.ok(html.includes("OCR页数"));
+  assert.ok(html.includes("幅度："));
+  assert.ok(html.includes("scrollBursts"));
+  assert.ok(html.includes("微信窗口："));
+  assert.ok(html.includes("聊天区："));
+  assert.ok(html.includes("窗口尺寸正常"));
+  assert.ok(html.includes("已自动放大窗口"));
+  assert.ok(html.includes("已找到checkpoint"));
+  assert.ok(html.includes("未找到checkpoint"));
   assert.equal(html.includes('data-wechat-field="incremental_source"'), false);
   assert.equal(html.includes('data-wechat-field="cc_connect_chat_id"'), false);
   assert.equal(html.includes('data-wechat-action="fill-chat-id"'), false);
   assert.equal(html.includes("ccConnectLastMessageId"), false);
   assert.ok(html.includes("采集：OCR 可见窗口"));
+  assert.ok(html.includes('data-wechat-field="interval_minutes" type="number" min="15"'));
+  assert.ok(html.includes("最小 15 分钟"));
   assert.ok(html.includes("采集方式：OCR 当前窗口/定时可见窗口"));
   assert.ok(html.includes("截图区域：${safeText(group.captureRect)}"));
   assert.ok(html.includes("ocrCommand"));
@@ -313,7 +327,7 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes("wechatIntervalInputValue"));
   assert.equal(html.includes("Number(group.interval_minutes || 15)"), false);
   assert.equal(html.includes('value("interval_minutes") || "15"'), false);
-  assert.ok(html.includes("采集间隔必须是大于等于 1 的整数"));
+  assert.ok(html.includes("采集间隔必须是大于等于 15 的整数"));
   assert.ok(html.includes("微信群名称重复"));
   assert.ok(html.includes("removeWechatCollectorRow"));
   assert.ok(html.includes("/api/wechat-collector/config"));
@@ -682,6 +696,34 @@ test("project management supports deleting projects", () => {
   assert.ok(html.includes("同步删除易考中的正式考试/试考场次"));
   assert.ok(html.includes('method: "DELETE"'));
   assert.ok(html.includes("/api/tasks/"));
+});
+
+test("project management supports screenshot-based project intake", () => {
+  assert.ok(html.includes('id="projectIntakePanel"'));
+  assert.ok(html.includes('id="projectIntakeFileInput"'));
+  assert.ok(html.includes('id="projectIntakeOcrBtn"'));
+  assert.ok(html.includes('id="projectIntakeCreateBtn"'));
+  assert.ok(html.includes("/api/project-intake/business-screenshot"));
+  assert.ok(html.includes("/api/project-intake/projects"));
+  assert.ok(html.includes("创建项目并生成初始需求单"));
+  assert.ok(html.includes("businessRequirementFields"));
+  assert.ok(html.includes("申请人部门"));
+  assert.ok(html.includes("运控流水号"));
+  assert.ok(html.includes("ATA集中监考场地"));
+  assert.ok(html.includes("试题类型"));
+  assert.ok(html.includes("newProjectBtn.addEventListener(\"click\", openProjectIntakePanel)"));
+  assert.equal(html.includes('newProjectBtn.addEventListener("click", () => router.navigate("/auto-config"))'), false);
+});
+
+test("project detail exposes initial requirement and project scoped WeChat entry", () => {
+  assert.ok(html.includes('id="projectBusinessRequirement"'));
+  assert.ok(html.includes('id="projectRequirementActions"'));
+  assert.ok(html.includes('id="projectWechatConfigBtn"'));
+  assert.ok(html.includes("配置本项目微信群"));
+  assert.ok(html.includes("在运控建立批次"));
+  assert.ok(html.includes("projectWechatGroupDraft"));
+  assert.ok(html.includes("pendingWechatProject"));
+  assert.ok(html.includes("已带入本项目配置，请填写微信群名称后保存本群设置"));
 });
 
 test("project card actions use a bounded two-column grid", () => {
