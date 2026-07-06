@@ -125,6 +125,92 @@ test("reports unresolved questions when required fields are missing", () => {
   assert.ok(messages.unresolvedQuestions.some((question) => question.includes("试考时间")));
 });
 
+test("uses the latest repeated requirement field while preserving source messages", () => {
+  const messages = parseWechatRequirementMessages([
+    "客户：考试名称是 初版认证考试。",
+    "客户：考试名称是 最终认证考试。",
+    "客户：考试时间改到 7 月 1 日 10:00-12:00。",
+    "客户：考试时间改到 7 月 3 日 10:00-12:00。",
+  ].join("\n"));
+
+  assert.equal(messages.requirement.exam_name, "最终认证考试");
+  assert.equal(messages.requirement.formal_exam_time_range, "7 月 3 日 10:00-12:00");
+  assert.equal(messages.messages.length, 4);
+  assert.deepEqual(
+    messages.changeRecords.map((record) => record.changes.formal_exam_time_range),
+    ["7 月 1 日 10:00-12:00", "7 月 3 日 10:00-12:00"],
+  );
+});
+
+test("parses conversational time and subject changes from visible WeChat text", () => {
+  const messages = parseWechatRequirementMessages([
+    "Leo",
+    "考试时间改一下，改到周天9点到11点",
+    "Leo",
+    "这次就考英语化学",
+  ].join("\n"));
+
+  assert.equal(messages.requirement.formal_exam_time_range, "周天9点到11点");
+  assert.deepEqual(messages.requirement.subjects, ["英语", "化学"]);
+  assert.deepEqual(messages.changeRecords.map((record) => record.type), [
+    "formal_exam_time_change",
+    "subject_change",
+  ]);
+});
+
+test("uses matched attachment previews as requirement parsing context", () => {
+  const config = loadWechatGroupConfig(sampleConfig);
+  const draft = buildWechatRequirementDraft({
+    config,
+    groupName: "AI赋能运营自动化小组",
+    text: "客户：请看附件。\n易考新建考试需求单_样例2.xlsx",
+    attachments: [{
+      name: "易考新建考试需求单_样例2.xlsx",
+      kind: "spreadsheet",
+      extension: ".xlsx",
+      sizeBytes: 16000,
+      modifiedAt: "2026-07-03T09:00:00.000Z",
+      preview: "考试名称：ATA校园招聘；正式考试时间：周天9点到11点；科目：英语、化学",
+    }],
+  });
+
+  assert.equal(draft.requirement.exam_name, "ATA校园招聘");
+  assert.equal(draft.requirement.formal_exam_time_range, "周天9点到11点");
+  assert.deepEqual(draft.requirement.subjects, ["英语", "化学"]);
+});
+
+test("parses table-style attachment previews with labels followed by values", () => {
+  const draft = buildWechatRequirementDraft({
+    config: loadWechatGroupConfig(sampleConfig),
+    groupName: "AI赋能运营自动化小组",
+    text: "客户：请看附件。\n易考新建考试需求单_样例2.xlsx",
+    attachments: [{
+      name: "易考新建考试需求单_样例2.xlsx",
+      kind: "spreadsheet",
+      sizeBytes: 16052,
+      modifiedAt: "2026-06-12T08:39:58.280Z",
+      preview: [
+        "考试名称",
+        "蜀道集团考试",
+        "考试日期时间",
+        "2026/6/23 09:00:00-2026/6/23 16:00:00",
+        "试考日期时间",
+        "2026/6/22 09:43:00-2026/6/22 16:48:00",
+        "提前登录时间",
+        "30分钟",
+        "限制迟到时间",
+        "20分钟",
+      ].join("\n"),
+    }],
+  });
+
+  assert.equal(draft.requirement.exam_name, "蜀道集团考试");
+  assert.equal(draft.requirement.formal_exam_time_range, "2026/6/23 09:00:00-2026/6/23 16:00:00");
+  assert.equal(draft.requirement.mock_exam_time_range, "2026/6/22 09:43:00-2026/6/22 16:48:00");
+  assert.equal(draft.requirement.early_login_minutes, "30分钟");
+  assert.equal(draft.requirement.late_limit_minutes, "20分钟");
+});
+
 test("filters copied WeChat text using the previous checkpoint hash", () => {
   const first = parseWechatRequirementMessages("客户：考试叫产品认证考试。\n客户：科目是语文。");
   const copiedAgain = [

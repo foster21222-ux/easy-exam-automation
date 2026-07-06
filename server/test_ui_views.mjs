@@ -34,7 +34,7 @@ test("URL page layout replaces shared showView content switching", () => {
 test("requirement center renders list and detail surfaces", () => {
   assert.ok(html.includes('id="requirementsList"'));
   assert.ok(html.includes('id="requirementWorkQueueFilters"'));
-  assert.ok(html.includes("需求处理工作台"));
+  assert.ok(html.includes("需求单记录已合并到项目配置"));
   assert.ok(html.includes("renderRequirementWorkQueueFilters"));
   assert.ok(html.includes("requirementNextAction"));
   assert.ok(html.includes("data-requirement-filter"));
@@ -102,7 +102,7 @@ test("requirement center renders list and detail surfaces", () => {
   assert.equal(html.includes("JSON.stringify(item.changes || {})"), false);
 });
 
-test("WeChat collector page renders config and scheduler status surfaces", () => {
+test("WeChat configuration lives in project management and monitoring lives in system config", () => {
   assert.ok(html.includes('id="wechatCollectorNavBtn"'));
   assert.ok(html.includes('id="systemConfigNavBtn"'));
   assert.ok(html.includes('id="wechatCollectorView"'));
@@ -135,10 +135,11 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes('data-wechat-action="run-once"'));
   assert.ok(html.includes("renderWechatCollectorReadiness"));
   assert.ok(html.includes("微信群配置"));
-  assert.ok(html.includes("1. 配置微信群"));
-  assert.ok(html.includes("采集边界：可见群聊 OCR · 需求中心人工确认 · 已下载附件按本群可见文件名关联 · 不自动下载群文件"));
+  assert.ok(html.includes("本项目微信群配置"));
+  assert.ok(html.includes("只维护当前项目关联微信群"));
+  assert.ok(html.includes("微信群采集已合并"));
+  assert.ok(html.includes("项目微信群配置请进入“项目管理 > 项目配置 > 本项目微信群”"));
   assert.equal(html.includes("<h2 class=\"panel-title\">当前能力</h2>"), false);
-  assert.ok(html.includes("每个微信群独立保存设置"));
   assert.equal(html.includes(">保存微信群配置<"), false);
   assert.ok(html.includes("wechat-group-card"));
   assert.ok(html.includes("wechat-group-summary"));
@@ -153,11 +154,11 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes('data-wechat-action="save-group"'));
   assert.ok(html.includes("群设置操作"));
   assert.equal(html.includes("<details><summary>群设置操作</summary>"), false);
-  assert.ok(html.includes("<details><summary>高级：配置备份与恢复</summary>"));
-  assert.ok(html.includes("<details><summary>3. 排障日志</summary>"));
-  assert.ok(html.includes("最近运行摘要"));
-  assert.ok(html.includes("只保留最近摘要，详细排障看群卡片或日志"));
-  assert.equal(html.includes("<h2 class=\"panel-title\">配置备份与恢复</h2>"), false);
+  assert.ok(html.includes("<summary>微信采集监控与排障</summary>"));
+  assert.ok(html.includes("只读查看全局采集队列"));
+  assert.ok(html.includes("调度器最近唤醒"));
+  assert.ok(html.includes("本次调度唤醒没有执行任何微信群"));
+  assert.ok(html.includes("<h2 class=\"panel-title\">配置备份与恢复</h2>"));
   assert.ok(html.includes("任务执行状态"));
   assert.ok(html.includes("需求更新记录"));
   assert.ok(html.includes("renderWechatGroupRequirementTimeline"));
@@ -175,8 +176,11 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes("changeCount"));
   assert.ok(html.includes("1. 初始化验证"));
   assert.ok(html.includes("环境预检"));
+  assert.ok(html.includes("一次性权限设置"));
+  assert.ok(html.includes("授权后通常不需要每次确认"));
+  assert.ok(html.includes("macOS 权限弹窗不能由系统自动点击允许"));
   assert.ok(html.includes("立即采集"));
-  assert.ok(html.includes("每个启用群上线前都需要在配置表对应行执行“立即采集本群”"));
+  assert.ok(html.includes("每个启用群上线前都需要在项目配置页对应群执行“立即采集本群”"));
   assert.ok(html.includes("识别到新需求或变更时会推送需求中心并更新 checkpoint"));
   assert.ok(html.includes("2. 上线自动采集"));
   assert.ok(html.includes("上线前必须完成"));
@@ -220,6 +224,9 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes("restoreWechatCollectorConfigBackup"));
   assert.ok(html.includes("latestStatus"));
   assert.ok(html.includes("status.latestError ? `错误：${status.latestError}` : \"\""));
+  assert.ok(html.includes("\"no_requirement_signal\""));
+  assert.ok(html.includes("status.latestDetail ? `说明：${status.latestDetail}` : \"\""));
+  assert.ok(html.includes("[\"failed\", \"not_run\", \"needs_initial_collection\", \"no_requirement_signal\"].includes(statusText)"));
   assert.ok(html.includes("checkpointUpdatedAt"));
   assert.ok(html.includes("下次运行"));
   assert.ok(html.includes("renderWechatCollectorPreflight"));
@@ -235,7 +242,7 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes("renderWechatCollectorLaunchSummary"));
   assert.ok(html.includes("上线前检查"));
   assert.ok(html.includes("检查本机采集环境"));
-  assert.ok(html.includes("去微信采集页逐群验证"));
+  assert.ok(html.includes("到项目配置页按群验证"));
   assert.ok(html.includes("批量真实采集所有启用群"));
   assert.ok(html.includes("<details><summary>高级操作：批量真实采集</summary>"));
   assert.ok(html.includes("<details><summary>高级维护：服务与定时任务</summary>"));
@@ -261,9 +268,9 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes('apiKey: wechatLlmApiKey.value.replace(/\\s+/g, "")'));
   assert.ok(html.includes("/api/wechat-collector/llm/models"));
   assert.ok(html.includes("apiKeyConfigured"));
-  assert.ok(html.includes("1. 配置微信群"));
-  assert.ok(html.includes("2. 运行监控"));
-  assert.ok(html.includes("3. 排障日志"));
+  assert.ok(html.includes("本项目微信群"));
+  assert.ok(html.includes("微信采集监控与排障"));
+  assert.ok(html.includes("排障日志"));
   assert.ok(html.includes("配置备份与恢复"));
   assert.ok(html.includes("附件只在本群最近一次采集中按可见文件名关联"));
   assert.ok(html.includes("staticPage(\"system-config\", systemConfigView, loadWechatCollector"));
@@ -295,6 +302,10 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes('data-wechat-field="interval_minutes" type="number" min="15"'));
   assert.ok(html.includes("最小 15 分钟"));
   assert.ok(html.includes("采集方式：OCR 当前窗口/定时可见窗口"));
+  assert.equal(html.includes("历史补采方式"), false);
+  assert.equal(html.includes("历史补采完成时间"), false);
+  assert.equal(html.includes('data-wechat-field="initial_collection_mode"'), false);
+  assert.equal(html.includes('data-wechat-field="initial_collected_at"'), false);
   assert.ok(html.includes("截图区域：${safeText(group.captureRect)}"));
   assert.ok(html.includes("ocrCommand"));
   assert.ok(html.includes("nextRunAt"));
@@ -718,12 +729,69 @@ test("project management supports screenshot-based project intake", () => {
 test("project detail exposes initial requirement and project scoped WeChat entry", () => {
   assert.ok(html.includes('id="projectBusinessRequirement"'));
   assert.ok(html.includes('id="projectRequirementActions"'));
+  assert.ok(html.includes('id="projectRequirementInline"'));
   assert.ok(html.includes('id="projectWechatConfigBtn"'));
+  assert.ok(html.includes("业务需求详情"));
+  assert.ok(html.includes("展开配置需求详情"));
+  assert.equal(html.includes("项目需求详情"), false);
+  assert.ok(html.includes("loadProjectRequirementForDetail"));
+  assert.ok(html.includes("renderProjectRequirementInline"));
+  assert.ok(html.includes("renderRequirementChangeRequests(changes, { actions: true })"));
+  assert.ok(html.includes("projectRequirementConfigFields"));
+  assert.ok(html.includes("formatProjectRequirementConfigValue"));
+  assert.ok(html.includes("需求确认提交"));
+  assert.ok(html.includes('data-requirement-submit-action="mark-reviewed"'));
+  assert.ok(html.includes('data-requirement-submit-action="mark-ready"'));
+  assert.ok(html.includes("handleProjectRequirementSubmitAction"));
+  assert.ok(html.includes('missingSet.has(field) ? "缺失"'));
+  assert.ok(html.includes("待补充"));
+  assert.ok(html.includes('["mock_exam_time_range", "试考时间"]'));
+  assert.ok(html.includes('["leave_limit_count", "离开限制次数"]'));
+  const inlineRequirementSource = html.slice(
+    html.indexOf("function renderProjectRequirementInline"),
+    html.indexOf("function renderProjectRequirementDetail"),
+  );
+  assert.equal(inlineRequirementSource.includes("const businessRows = businessRequirementFields"), false);
+  assert.equal(inlineRequirementSource.includes("缺失项与校验"), false);
+  assert.ok(inlineRequirementSource.includes("配置校验摘要"));
+  assert.ok(inlineRequirementSource.includes("缺失 ${missing.length} 项"));
+  assert.ok(inlineRequirementSource.includes("格式错误 ${errors.length} 项"));
+  const businessRequirementSource = html.slice(
+    html.indexOf("function renderProjectRequirementDetail"),
+    html.indexOf("async function loadProjectRequirementForDetail"),
+  );
+  assert.equal(businessRequirementSource.includes("renderRequirementChangeRequests"), false);
+  assert.equal(businessRequirementSource.includes("需求变更记录"), false);
+  assert.ok(html.includes("projectRequirementInline.addEventListener"));
+  assert.ok(html.includes("projectRequirementInlinePanel.open = true"));
+  assert.equal(html.includes('if (button && requestId) openRequirementInProjectContext(requestId);'), false);
+  assert.equal(html.includes("findProjectByRequirementRequestId"), false);
   assert.ok(html.includes("配置本项目微信群"));
   assert.ok(html.includes("在运控建立批次"));
   assert.ok(html.includes("projectWechatGroupDraft"));
+  assert.ok(html.includes("task_id: task.taskId || \"\""));
+  assert.ok(html.includes('data-wechat-field="task_id"'));
+  assert.ok(html.includes('if (task.taskId && group.task_id === task.taskId) return true;'));
   assert.ok(html.includes("pendingWechatProject"));
+  assert.ok(html.includes("mergeProjectWechatGroupsForSave"));
+  assert.ok(html.includes("visibleGroupNames.has(group.group_name) && group.enabled === false"));
   assert.ok(html.includes("已带入本项目配置，请填写微信群名称后保存本群设置"));
+});
+
+test("project configuration owns requirement and WeChat configuration entry points", () => {
+  const nav = html.slice(html.indexOf('<nav class="nav"'), html.indexOf("</nav>"));
+  assert.match(nav, /id="requirementsNavBtn"[^>]*hidden/);
+  assert.match(nav, /id="wechatCollectorNavBtn"[^>]*hidden/);
+  assert.ok(html.includes("项目配置"));
+  assert.ok(html.includes('id="projectConfigurationWorkflow"'));
+  assert.ok(html.includes('id="projectWechatConfigPanel"'));
+  assert.equal(html.includes('id="projectRequirementWorkQueue"'), false);
+  assert.equal(html.includes("配置需求处理工作台"), false);
+  assert.ok(html.includes("配置需求确认"));
+  assert.ok(html.includes("本项目微信群"));
+  assert.ok(html.includes("微信采集监控与排障"));
+  assert.equal(html.includes('router.navigate("/wechat-collector")'), false);
+  assert.ok(html.includes("projectWechatConfigPanel.open = true"));
 });
 
 test("project card actions use a bounded two-column grid", () => {

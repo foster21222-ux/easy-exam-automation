@@ -269,7 +269,8 @@ function firstValueAfterLabel(lines, label) {
 
 function parseSchedule(lines) {
   const schedules = [];
-  for (const line of lines) {
+  const dateOnlyIndexes = [];
+  for (const [index, line] of lines.entries()) {
     const match = line.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2}).{0,20}(上午|下午|晚上|\d{1,2}:\d{2}(?:\s*[-~至]\s*\d{1,2}:\d{2})?)/);
     if (match) {
       schedules.push({
@@ -277,7 +278,23 @@ function parseSchedule(lines) {
         exam_time: match[2],
         note: "",
       });
+      continue;
     }
+    if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(line)) {
+      dateOnlyIndexes.push(index);
+    }
+  }
+  for (const index of dateOnlyIndexes) {
+    const previousLabels = lines.slice(Math.max(0, index - 8), index);
+    if (!previousLabels.some((line) => line.includes("考试日期") || line.includes("考试时间"))) continue;
+    const examTime = normalizeValue(lines[index + 1] || "");
+    if (!/^(上午|下午|晚上|全天|\d{1,2}:\d{2}(?:\s*[-~至]\s*\d{1,2}:\d{2})?)$/.test(examTime)) continue;
+    const note = normalizeValue(lines[index + 2] || "");
+    schedules.push({
+      exam_date: lines[index].replace(/\//g, "-"),
+      exam_time: examTime,
+      note: isBusinessLabel(note) ? "" : note,
+    });
   }
   return schedules;
 }
@@ -485,11 +502,21 @@ export function normalizeBusinessRequirementDraft(input = {}) {
   return draft;
 }
 
+function firstExamScheduleTimeRange(schedule = []) {
+  const first = Array.isArray(schedule) ? schedule.find((item) => item?.exam_date || item?.exam_time) : null;
+  if (!first) return "";
+  return normalizeSpaces([first.exam_date, first.exam_time].filter(Boolean).join(" "));
+}
+
 export function businessDraftToRequirement(draft = {}) {
   const normalized = normalizeBusinessRequirementDraft(draft);
   const requirement = { ...normalized };
   if (normalized.project_name && !requirement.exam_name) {
     requirement.exam_name = normalized.project_name;
+  }
+  if (!requirement.formal_exam_time_range) {
+    const timeRange = firstExamScheduleTimeRange(normalized.exam_schedule);
+    if (timeRange) requirement.formal_exam_time_range = timeRange;
   }
   return requirement;
 }

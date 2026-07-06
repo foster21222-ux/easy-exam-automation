@@ -123,6 +123,25 @@ def normalize_requirement(payload):
     return result
 
 
+def is_present_value(value):
+    return value is not None and value != "" and value != []
+
+
+def merge_requirement_fields(base, updates):
+    merged = dict(base or {})
+    for key, value in (updates or {}).items():
+        if is_present_value(value):
+            if key == "subjects":
+                subjects = normalize_subjects(merged.get("subjects"))
+                for subject in normalize_subjects(value):
+                    if subject not in subjects:
+                        subjects.append(subject)
+                merged[key] = subjects
+            else:
+                merged[key] = value
+    return merged
+
+
 def validate_requirement(requirement):
     missing = []
     errors = []
@@ -207,30 +226,36 @@ class RequirementStore:
     def create_or_update_requirement(self, customer=None, requirement=None, message="", request_id=None, source="dify", analysis_candidates=None):
         request_id = request_id or str(uuid.uuid4())
         now = utc_now()
-        normalized = normalize_requirement(requirement or {})
-        missing, errors = validate_requirement(normalized)
-        status = "collecting" if missing or errors else "pending_internal_review"
-        title = str(normalized.get("exam_name") or "未命名考试需求")
+        incoming = normalize_requirement(requirement or {})
         customer_json = json.dumps(customer or {}, ensure_ascii=False)
         with self.connect() as db:
             current = db.execute(
                 "SELECT * FROM requirement_requests WHERE request_id=?", (request_id,)
             ).fetchone()
             if not current:
-                db.execute(
-                    """INSERT INTO requirement_requests
-                    (request_id, title, status, customer_json, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                    (request_id, title, status, customer_json, now, now),
-                )
+                normalized = incoming
+                customer_payload = customer_json
                 next_version = 1
             else:
                 customer_payload = customer_json if customer is not None else current["customer_json"]
                 latest = db.execute(
-                    "SELECT MAX(version) AS version FROM requirement_versions WHERE request_id=?",
+                    "SELECT * FROM requirement_versions WHERE request_id=? ORDER BY version DESC LIMIT 1",
                     (request_id,),
                 ).fetchone()
-                next_version = int(latest["version"] or 0) + 1
+                base_requirement = loads(latest["requirement_json"], {}) if latest else {}
+                normalized = normalize_requirement(merge_requirement_fields(base_requirement, incoming))
+                next_version = int(latest["version"] or 0) + 1 if latest else 1
+            missing, errors = validate_requirement(normalized)
+            status = "collecting" if missing or errors else "pending_internal_review"
+            title = str(normalized.get("exam_name") or "未命名考试需求")
+            if not current:
+                db.execute(
+                    """INSERT INTO requirement_requests
+                    (request_id, title, status, customer_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (request_id, title, status, customer_payload, now, now),
+                )
+            else:
                 db.execute(
                     """UPDATE requirement_requests
                     SET title=?, status=?, customer_json=?, updated_at=? WHERE request_id=?""",
@@ -544,14 +569,41 @@ class RequirementStore:
         return row
 
     def _requirement_from_change(self, base_requirement, changes):
-        if isinstance(changes, dict) and isinstance(changes.get("latestRequirement"), dict):
-            return changes["latestRequirement"]
         merged = dict(base_requirement or {})
         if isinstance(changes, dict):
-            for key, value in changes.items():
-                if key in {"changeRecords", "attachments"}:
+            for record in changes.get("changeRecords") or []:
+                record_changes = record.get("changes") if isinstance(record, dict) else {}
+                if not isinstance(record_changes, dict):
                     continue
-                merged[key] = value
+                if "subjects" in record_changes:
+                    base_subjects = normalize_subjects(merged.get("subjects"))
+                    removed = set(normalize_subjects(record_changes.get("removedSubjects")))
+                    additions = normalize_subjects(record_changes.get("subjects"))
+                    next_subjects = [subject for subject in base_subjects if subject not in removed]
+                    for subject in additions:
+                        if subject not in next_subjects:
+                            next_subjects.append(subject)
+                    merged["subjects"] = next_subjects
+                for key, value in record_changes.items():
+                    if key in {"subjects", "removedSubjects"}:
+                        continue
+                    if is_present_value(value):
+                        merged[key] = value
+            latest_requirement = changes.get("latestRequirement")
+            if isinstance(latest_requirement, dict):
+                for key, value in latest_requirement.items():
+                    if key == "subjects" and any(
+                        isinstance(record, dict) and "subjects" in (record.get("changes") or {})
+                        for record in (changes.get("changeRecords") or [])
+                    ):
+                        continue
+                    if is_present_value(value):
+                        merged[key] = value
+            for key, value in changes.items():
+                if key in {"changeRecords", "latestRequirement", "attachments"}:
+                    continue
+                if is_present_value(value):
+                    merged[key] = value
         return merged
 
     def _record_event(self, db, request_id, event_type, actor, payload):

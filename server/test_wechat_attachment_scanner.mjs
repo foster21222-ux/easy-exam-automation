@@ -7,7 +7,9 @@ import test from "node:test";
 
 import {
   defaultWechatFileRoots,
+  readWechatDownloadedFilePreview,
   scanWechatDownloadedFiles,
+  visibleTextMayContainAttachmentName,
 } from "./wechat_attachment_scanner.mjs";
 
 function makeTempDir() {
@@ -108,6 +110,13 @@ test("resolves existing WeChat downloaded file roots without requiring the direc
   assert.ok(roots.every((root) => root.includes("msg/file")));
 });
 
+test("detects whether visible chat text contains attachment filename clues", () => {
+  assert.equal(visibleTextMayContainAttachmentName("手机上不显示价格，获取 ChatGPT Pro"), false);
+  assert.equal(visibleTextMayContainAttachmentName("请看客户需求.docx"), true);
+  assert.equal(visibleTextMayContainAttachmentName("易考AI自动化项目周报 ...-26.docx"), true);
+  assert.equal(visibleTextMayContainAttachmentName("补充名单.xlsx 已发群里"), true);
+});
+
 test("extracts previews for text, CSV, XLSX, and image attachments", () => {
   const root = makeTempDir();
   const monthDir = path.join(root, "zhanglexiang_0a18", "msg", "file", "2026-06");
@@ -146,7 +155,8 @@ test("extracts previews for text, CSV, XLSX, and image attachments", () => {
   assert.match(result.files.find((file) => file.name === "客户说明.txt").preview, /正式考试 7 月 1 日/);
   assert.match(result.files.find((file) => file.name === "名单.csv").preview, /姓名,手机号/);
   assert.match(result.files.find((file) => file.name === "客户截图.png").preview, /截图需求：考试时间 7 月 3 日/);
-  assert.equal(result.files.find((file) => file.name === "客户需求.docx").preview, "");
+  assert.match(result.files.find((file) => file.name === "客户需求.docx").preview, /AI 运营认证考试/);
+  assert.match(result.files.find((file) => file.name === "客户需求.docx").preview, /正式考试时间：7 月 1 日/);
   assert.equal(result.files.find((file) => file.name === "考试方案.pdf").preview, "");
   assert.match(result.files.find((file) => file.name === "需求单.xlsx").preview, /业务需求单/);
   assert.match(result.files.find((file) => file.name === "需求单.xlsx").preview, /AI 运营考试/);
@@ -189,6 +199,65 @@ test("decodes GB18030 text attachments when UTF-8 would be garbled", () => {
   assert.match(result.files[0].preview, /商户API地址/);
   assert.match(result.files[0].preview, /应用ID：abc123/);
   assert.match(result.files[0].preview, /考试时间改到 7-1/);
+});
+
+test("can scan attachment metadata first and hydrate preview only after matching", () => {
+  const root = makeTempDir();
+  const monthDir = path.join(root, "zhanglexiang_0a18", "msg", "file", "2026-06");
+  mkdirSync(monthDir, { recursive: true });
+  const filePath = path.join(monthDir, "需求说明.txt");
+  writeFileSync(filePath, "考试时间改到 7-1\n");
+
+  const metadataOnly = scanWechatDownloadedFiles({ roots: [root], maxFiles: 10, previewChars: 0 });
+
+  assert.equal(metadataOnly.files[0].name, "需求说明.txt");
+  assert.equal(metadataOnly.files[0].preview, "");
+  assert.match(
+    readWechatDownloadedFilePreview(metadataOnly.files[0].path, { previewChars: 100 }),
+    /考试时间改到 7-1/,
+  );
+});
+
+test("filters downloaded attachments by visible OCR text before collecting previews", () => {
+  const root = makeTempDir();
+  const oldDir = path.join(root, "zhanglexiang_0a18", "msg", "file", "2026-06");
+  const currentDir = path.join(root, "zhanglexiang_0a18", "msg", "file", "2026-07");
+  mkdirSync(oldDir, { recursive: true });
+  mkdirSync(currentDir, { recursive: true });
+  writeFileSync(path.join(oldDir, "无关项目说明.txt"), "不应该进入本群采集\n");
+  const targetPath = path.join(currentDir, "易考新建考试需求单_样例2.xlsx");
+  writeMinimalXlsx(targetPath, [["考试名称", "蜀道集团考试"]]);
+
+  const result = scanWechatDownloadedFiles({
+    roots: [root],
+    maxFiles: 20,
+    previewChars: 0,
+    visibleText: "易考新建考试需求单_样例\n2.xlsx\n15.7K",
+  });
+
+  assert.deepEqual(result.files.map((file) => file.name), ["易考新建考试需求单_样例2.xlsx"]);
+  assert.equal(result.files[0].preview, "");
+  assert.match(readWechatDownloadedFilePreview(result.files[0].path, { previewChars: 100 }), /蜀道集团考试/);
+});
+
+test("matches downloaded attachments when WeChat truncates the visible file name", () => {
+  const root = makeTempDir();
+  const monthDir = path.join(root, "zhanglexiang_0a18", "msg", "file", "2026-06");
+  mkdirSync(monthDir, { recursive: true });
+  writeMinimalDocx(path.join(monthDir, "易考AI自动化项目周报_2026-06-22至2026-06-26.docx"), [
+    "考试名称：自动化项目周报测试",
+    "正式考试时间：7 月 5 日 10 点到 12 点",
+  ]);
+
+  const result = scanWechatDownloadedFiles({
+    roots: [root],
+    maxFiles: 20,
+    previewChars: 100,
+    visibleText: "易考 AI 自动化项目周报\n...-26.docx\n33.0K",
+  });
+
+  assert.deepEqual(result.files.map((file) => file.name), ["易考AI自动化项目周报_2026-06-22至2026-06-26.docx"]);
+  assert.match(result.files[0].preview, /自动化项目周报测试/);
 });
 
 test("keeps scanning when one downloaded text attachment cannot be read", () => {

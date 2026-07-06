@@ -76,7 +76,8 @@ import {
   syncExamConfigToTencentDocs,
   tencentDocsSettingsFromEnv,
 } from "./tencent_docs_sync.mjs";
-import { handleWechatCollector } from "./wechat_collector_api.mjs";
+import { createWechatCollectorHandler } from "./wechat_collector_api.mjs";
+import { disableWechatGroupsForDeletedTask } from "./wechat_project_cleanup.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -101,10 +102,16 @@ const scoreFeedbackTemplatePath = path.join(rootDir, "template", "成绩单模�
 const examRequestTemplatePath = path.join(rootDir, "template", "v2易考新建考试需求单.xlsx");
 const taskDbPath = path.join(runtimeDir, "task_state.sqlite3");
 const requirementDbPath = path.join(runtimeDir, "requirement_requests.sqlite3");
+const wechatGroupConfigPath = path.join(runtimeDir, "wechat-requirement-groups.json");
 const pythonBin =
   process.env.CODEX_PYTHON ||
   process.env.PYTHON ||
   "python3";
+
+const handleWechatCollector = createWechatCollectorHandler({
+  configPath: wechatGroupConfigPath,
+  groupActivityStatus: wechatGroupActivityStatus,
+});
 
 async function loadEnvFile() {
   const envPath = path.join(rootDir, ".env");
@@ -788,6 +795,51 @@ async function runRequirementState(action, payload = {}) {
   });
   if (exitCode !== 0) throw new Error(stderr.trim() || `需求状态操作失败：${action}`);
   return JSON.parse(stdout || "null");
+}
+
+function taskRequirementIds(task = {}) {
+  return [
+    task.config?.requirementRequestId,
+    task.config?.initialRequirementRequestId,
+    task.config?.businessRequirement?.requirementRequestId,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+async function wechatGroupActivityStatus(group = {}) {
+  const groupTaskId = String(group.task_id || group.taskId || "").trim();
+  const groupRequestId = String(group.requirement_request_id || group.requirementRequestId || "").trim();
+  const groupProjectName = String(group.project_name || group.projectName || "").trim();
+  if (!groupTaskId && !groupRequestId && !groupProjectName) return { active: true };
+
+  let summaries = [];
+  try {
+    summaries = await runTaskState("list_all", {});
+  } catch {
+    return { active: true };
+  }
+
+  if (groupTaskId) {
+    const summary = (summaries || []).find((item) => item.taskId === groupTaskId);
+    return summary && !summary.hiddenAt
+      ? { active: true }
+      : { active: false, reason: "关联项目已删除，已停止微信群自动采集" };
+  }
+
+  if (groupRequestId) {
+    for (const summary of summaries || []) {
+      const task = await runTaskState("get", { taskId: summary.taskId });
+      if (task?.hiddenAt) continue;
+      if (taskRequirementIds(task).includes(groupRequestId)) return { active: true };
+    }
+    return { active: false, reason: "关联项目已删除，已停止微信群自动采集" };
+  }
+
+  const hasVisibleProject = (summaries || []).some((task) => (
+    !task.hiddenAt && String(task.projectName || "").trim() === groupProjectName
+  ));
+  return hasVisibleProject
+    ? { active: true }
+    : { active: false, reason: "关联项目已删除，已停止微信群自动采集" };
 }
 
 async function runImageOcr(imagePath, rect = null) {
@@ -3345,11 +3397,16 @@ async function handleTaskHide(taskId, req, res) {
   });
   const result = await runTaskState("delete", { taskId });
   if (!result?.deleted) return notFound(res);
+  const wechatCleanup = await disableWechatGroupsForDeletedTask({
+    configPath: wechatGroupConfigPath,
+    task,
+  });
   return json(res, 200, {
     ok: true,
     deleted: true,
     taskId,
     deletedSessionIds: deletion.deletedSessionIds,
+    disabledWechatGroupNames: wechatCleanup.disabledGroups,
     logs,
   });
 }

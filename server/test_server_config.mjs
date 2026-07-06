@@ -186,6 +186,17 @@ test("candidate import and auto rooms write back task detail state", () => {
   assert.ok(detailHandler.includes("syncTaskDetailSessionState(req, task)"));
 });
 
+test("project deletion disables linked WeChat collector groups", () => {
+  assert.ok(serverSource.includes("disableWechatGroupsForDeletedTask"));
+  assert.ok(serverSource.includes('path.join(runtimeDir, "wechat-requirement-groups.json")'));
+  const handler = serverSource.slice(
+    serverSource.indexOf("async function handleTaskHide"),
+    serverSource.indexOf("async function updatePaperFormBindState"),
+  );
+  assert.ok(handler.includes("disableWechatGroupsForDeletedTask"));
+  assert.ok(handler.includes("disabledWechatGroupNames"));
+});
+
 test("monitor account export uses monitor session URL instead of exam URL", () => {
   assert.ok(serverSource.includes("function monitorSessionUrl"));
   assert.ok(serverSource.includes("https://eztest.org/monitor/session/"));

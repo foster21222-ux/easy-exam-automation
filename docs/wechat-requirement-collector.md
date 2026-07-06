@@ -39,7 +39,7 @@ cp config/wechat-requirement-groups.example.json .easy_exam_runtime/wechat-requi
 
 同一份运行时配置里，`group_name` 必须唯一；保存配置时如果微信群名重复，页面和 API 都会提示错误并拒绝写入，避免同一个群映射到多个项目或关联需求单编号。
 
-`interval_minutes` 必须是大于等于 1 的整数。通过页面或 `PUT /api/wechat-collector/config` 保存运行时配置时，系统会拒绝 `0`、小数或非数字间隔，避免定时采集语义不明确。
+`interval_minutes` 必须是大于等于 15 的整数。通过页面或 `PUT /api/wechat-collector/config` 保存运行时配置时，系统会拒绝小于 `15`、小数或非数字间隔，避免定时采集频率超过系统 15 分钟唤醒周期。
 
 即使运行时配置文件是手工编辑的，`dry-run`、`run-once`、安装定时任务和安装整套自动采集这些会触发采集脚本或定时运行的入口，也会重新校验 `group_name` 唯一性和 `interval_minutes` 合法性；配置不合法时会直接拒绝，不会启动采集脚本或修改 LaunchAgent。
 
@@ -149,7 +149,9 @@ node scripts/wechat_visible_collect.mjs \
   --captureMode clipboard
 ```
 
-`--state` 文件会记录每个群的 checkpoint。下一次采集时，脚本优先用最后一条消息 hash 定位新增内容；如果微信滚动导致旧末行已经离开可见区，则使用最近 200 条消息 hash 逐行剔除已处理内容，减少重复需求和重复变更单。旧 checkpoint 只有 `lastMessageHash` 时仍按原逻辑工作，下一次成功采集后会自然补齐哈希集合，不需要迁移。
+`--state` 文件会记录每个群的 checkpoint。下一次 OCR 采集时，如果本群已有 checkpoint，脚本会先打开群聊当前最新位置，再默认向上翻动 10 次寻找上次最后一条消息 hash；连同当前页在内会最多保留 11 页正文截图。找到后会把多屏 OCR 文本按时间顺序合并，只处理 checkpoint 之后的新消息。相邻滚动页之间只做边界去重，不做全局去重，避免误删客户后来重复发送的相同需求。可以用 `--scrollSteps <数量>` 调整最多向上翻动次数，也可以继续用 `--scrollPages <数量>` 调整最多 OCR 页数；翻动次数最大限制为 20 次。
+
+如果默认 10 次翻动后没有找到上次最后一条消息，脚本会使用最近 200 条消息 hash 逐行剔除已处理内容，减少重复需求和重复变更单，但这意味着更早、仍在窗口外的新消息可能没有被本轮看到。滚动幅度以本机校准窗口为基准：微信窗口约 `1200x860`，聊天正文截图区域约 `880x624`。采集前会先读取当前微信窗口，如果聊天正文截图高度低于 `480`，会尝试自动把微信窗口放大到 `1200x860`；当前窗口已经足够大时不会缩小。每次翻动默认以 `48x4` 为基准，并按实际聊天正文截图高度等比调整滚轮事件次数，目标是让上一张截图顶部附近的消息落到下一张截图底部附近，只保留少量重叠；不同消息气泡高度仍会影响实际位移，可用 `--scrollLines <数量>` 和 `--scrollBursts <数量>` 临时校准。运行摘要会记录 `wechatWindow`、`chatCaptureSize`、`windowAdjustment`、`scrollStepCount`、`scrollSteps`、`scrollLines`、`scrollBursts`、`scrollBaseHeight`、`scrollPageCount`、`scrollPages` 和 `checkpointLocated`，页面会显示窗口尺寸、聊天区尺寸、是否自动放大、翻动次数、OCR 页数以及是否找到 checkpoint。旧 checkpoint 只有 `lastMessageHash` 时仍按原逻辑工作，下一次成功采集后会自然补齐哈希集合，不需要迁移。
 
 定时采集会按每个群配置的 `interval_minutes` 判断是否到期。未到间隔的群会写入 `status: "skipped_interval"`，不会打开微信窗口。手动验证时可以加 `--force` 强制采集；页面上的“立即试跑”会自动使用强制采集，不受间隔限制。
 
@@ -169,9 +171,13 @@ OCR 文本非空、目标群标题已验证，但没有解析出任何需求字�
 
 锁文件默认 30 分钟后视为陈旧锁并自动清理，避免异常退出后长期阻塞定时采集。可以用 `--lockMaxAgeMs <毫秒>` 调整陈旧锁阈值。
 
+页面触发的采集入口还会进入本机服务内的 FIFO 队列：同一时间只执行一个群采集任务；如果用户在页面上连续点击多个“立即采集本群”，后续任务会显示为排队等待，不会并发操作微信窗口。队列状态会显示当前执行群、等待队列和最近任务结果。直接从命令行或 launchd 调用采集脚本时仍依赖上述运行锁，并由脚本按配置顺序逐群处理。
+
+打开微信群后，脚本会先用完整窗口 OCR 校验是否真的进入目标群聊。只要窗口仍停留在“搜一搜”等搜索页，即使页面里包含目标群名，也会判定为打开失败，不会继续裁剪聊天正文、解析需求或写入 checkpoint。
+
 带 `--push` 时，脚本会先检查 `--api` 指向的需求中心 `/api/requirements` 是否可达；不可达时会把本轮群状态写成 `failed`，不会激活微信窗口，也不会截图或复制聊天内容。检查通过后，脚本会把结构化需求草稿提交到 `POST /api/ai/requirements/dispatch`。不带 `--push` 时只输出 JSON，不写入需求中心。
 
-如果采集内容里识别到“变更、调整、增加、新增”等变更记录，脚本会向同一个 `requestId` 提交一条 `change_request`。当本轮内容只有变更消息时，脚本不会用这段不完整文本覆盖原需求草稿；需求中心会把变更放在人工审核流程中，不会自动进入执行。
+如果采集内容里识别到“变更、调整、增加、新增”等变更记录，脚本会向同一个 `requestId` 提交一条 `change_request`。当本轮内容只有变更消息时，脚本不会用这段不完整文本覆盖原需求草稿；需求中心会把变更放在人工审核流程中，不会自动进入执行。同一字段在本轮多条消息中反复出现时，解析出的最新需求字段以后出现的消息为准，原始消息和变更记录仍会保留在日志/变更单里，便于审核。
 
 默认情况下，微信群文本到需求字段的转换使用本地规则解析，不调用大模型。需要增强语义识别时，可以在“系统配置 → 微信采集配置 → LLM 候选解析”中启用页面配置，选择 OpenAI 或千问，填写模型、Endpoint 和 API Key。API Key 只写入本机运行时配置 `.easy_exam_runtime/wechat-requirement-groups.json`，页面和 API 返回值只显示是否已配置，不回显明文。
 
@@ -224,6 +230,17 @@ LLM 解析只输出候选结构化结果和原文证据，候选结果会作为 
       "requestId": "wechat-ai-ops",
       "captureMode": "ocr",
       "screenshotPath": ".easy_exam_runtime/wechat-screenshots/AI赋能运营自动化小组-2026-06-24T10-00-00-000Z.png",
+      "scrollSteps": 10,
+      "scrollStepCount": 10,
+      "scrollLines": 48,
+      "scrollBursts": 4,
+      "scrollBaseHeight": 624,
+      "scrollPages": 11,
+      "scrollPageCount": 11,
+      "wechatWindow": { "width": 1200, "height": 860 },
+      "chatCaptureSize": { "width": 880, "height": 624 },
+      "windowAdjustment": { "checked": true, "resized": false, "reason": "size_ok" },
+      "checkpointLocated": true,
       "messageCount": 4,
       "changeCount": 0
     }
@@ -454,7 +471,7 @@ http://127.0.0.1:8765/wechat-collector
 
 单个附件因权限或解析问题无法读取时，扫描会保留可确认的文件元数据、将该文件预览置空，并继续处理其他附件，不会用猜测内容补全预览。
 
-`scripts/wechat_visible_collect.mjs` 在实际采集时会先只读扫描最近的已下载附件，再用当前群 OCR/可见文本中的文件名做关联。文件名会进行 Unicode 规范化并忽略大小写和空白；只有文件名出现在当前群可见文本中的候选附件，才会把名称、类型、大小、修改时间和可用预览追加到推送给需求中心的原始消息上下文中。扫描页仍可展示全部已下载候选，但未匹配当前群文件名的附件不会进入该群需求，避免多个项目群之间串入附件。默认最多扫描 5 个候选附件、每个预览 500 字符；可以通过以下参数调整：
+`scripts/wechat_visible_collect.mjs` 在实际采集时会先只读扫描最近的已下载附件，再用当前群 OCR/可见文本中的文件名做关联。文件名会进行 Unicode 规范化并忽略大小写和空白；只有文件名出现在当前群可见文本中的候选附件，才会把名称、类型、大小、修改时间和可用预览追加到推送给需求中心的原始消息上下文中。扫描页仍可展示全部已下载候选，但未匹配当前群文件名的附件不会进入该群需求，避免多个项目群之间串入附件。默认最多扫描 20 个候选附件、每个预览 500 字符；可以通过以下参数调整：
 
 ```bash
 --attachmentRoot "$HOME/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files" \

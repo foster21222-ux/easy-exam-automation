@@ -76,6 +76,73 @@ async function writeJsonFile(filePath, payload) {
   await fs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
+function createCollectorQueue({ now = () => new Date(), historyLimit = 20 } = {}) {
+  let sequence = 0;
+  let tail = Promise.resolve();
+  let running = null;
+  let pending = [];
+  const history = [];
+
+  const publicTask = (task) => task ? {
+    id: task.id,
+    type: task.type,
+    groupName: task.groupName,
+    status: task.status,
+    createdAt: task.createdAt,
+    startedAt: task.startedAt || "",
+    finishedAt: task.finishedAt || "",
+    error: task.error || "",
+  } : null;
+
+  return {
+    snapshot() {
+      return {
+        running: publicTask(running),
+        pending: pending.map(publicTask),
+        history: history.map(publicTask),
+      };
+    },
+    enqueue({ type = "run", groupName = "", action }) {
+      const task = {
+        id: `wechat-collector-${++sequence}`,
+        type,
+        groupName: groupName || "所有启用群",
+        status: "pending",
+        createdAt: now().toISOString(),
+      };
+      pending.push(task);
+      const run = async () => {
+        pending = pending.filter((item) => item.id !== task.id);
+        task.status = "running";
+        task.startedAt = now().toISOString();
+        running = task;
+        try {
+          const result = await action();
+          if (result?.ok === false) {
+            task.status = "failed";
+            task.error = result.error || "微信群采集任务执行失败";
+          } else {
+            task.status = "success";
+          }
+          return result;
+        } catch (error) {
+          task.status = "failed";
+          task.error = error instanceof Error ? error.message : String(error);
+          throw error;
+        } finally {
+          task.finishedAt = now().toISOString();
+          history.unshift({ ...task });
+          history.splice(Math.max(1, Number(historyLimit || 20)));
+          if (running?.id === task.id) running = null;
+        }
+      };
+      const promise = tail.then(run, run);
+      tail = promise.catch(() => {});
+      return promise;
+    },
+  };
+}
+
 async function backupExistingJsonFile(filePath, backupDir, now = () => new Date()) {
   let raw = "";
   try {
@@ -298,21 +365,68 @@ async function runVisibleCollector({
     const result = await execFileImpl(nodePath, args, {
       cwd: rootDir,
       encoding: "utf8",
-      timeout: 120000,
+      timeout: 300000,
       maxBuffer: 10 * 1024 * 1024,
     });
     const status = await readJsonFile(statusPath || path.join(runtimeDir, "wechat-last-run.json"), { startedAt, finishedAt: new Date().toISOString(), groups: [] });
     return { ok: true, status, stdout: result.stdout || "", stderr: result.stderr || "" };
   } catch (error) {
     const status = await readJsonFile(statusPath || path.join(runtimeDir, "wechat-last-run.json"), { startedAt, finishedAt: new Date().toISOString(), groups: [] });
+    const detail = commandErrorDetail(error);
     return {
       ok: false,
-      status,
+      status: withCollectorFailureDetail(status, { groupName, error: detail }),
       stdout: error?.stdout || "",
       stderr: error?.stderr || "",
-      error: error instanceof Error ? error.message : String(error),
+      error: detail,
     };
   }
+}
+
+function commandErrorDetail(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const stderr = String(error?.stderr || "").trim();
+  const stdout = String(error?.stdout || "").trim();
+  const timeoutHint = error?.killed || error?.signal
+    ? "采集超过 5 分钟未完成，已自动停止；本次未更新需求单。请确认微信窗口可见、群内停留在包含需求内容的位置后重试。"
+    : "";
+  return [timeoutHint, message, stderr && `stderr: ${stderr}`, stdout && `stdout: ${stdout}`].filter(Boolean).join("\n").slice(0, 4000);
+}
+
+function withCollectorFailureDetail(status = {}, { groupName = "", error = "" } = {}) {
+  const groups = Array.isArray(status.groups) ? status.groups : [];
+  if (groups.length) {
+    return {
+      ...status,
+      groups: groups.map((group) => {
+        const isTarget = !groupName || group.groupName === groupName;
+        if (!isTarget) return group;
+        if (group.status === "failed" && group.error) return group;
+        return {
+          ...group,
+          groupName: group.groupName || groupName,
+          status: "failed",
+          error: group.error || error,
+          detail: group.detail || "本次采集失败，未更新需求单",
+        };
+      }),
+    };
+  }
+  return {
+    ...status,
+    groups: [{
+      groupName,
+      status: "failed",
+      error,
+    }],
+  };
+}
+
+function normalizeFailedCollectionStatus(run = {}, groupName = "") {
+  return withCollectorFailureDetail(run.status || {}, {
+    groupName,
+    error: run.error || "微信群采集任务执行失败",
+  });
 }
 
 async function defaultRunCollectorOnce(options = {}) {
@@ -343,6 +457,7 @@ function normalizeConfig(payload = {}) {
     groups: groups.map((group) => {
       const rawInterval = group.interval_minutes ?? group.intervalMinutes ?? 15;
       return {
+        task_id: String(group.task_id || group.taskId || "").trim(),
         group_name: String(group.group_name || group.groupName || "").trim(),
         project_name: String(group.project_name || group.projectName || "").trim(),
         customer_name: String(group.customer_name || group.customerName || "").trim(),
@@ -470,8 +585,8 @@ function validateConfig(config) {
     if (seen.has(name)) {
       return { ok: false, error: `微信群名称重复：${name}` };
     }
-    if (!Number.isInteger(group.interval_minutes) || group.interval_minutes < 1) {
-      return { ok: false, error: `采集间隔必须是正整数：${name}` };
+    if (!Number.isInteger(group.interval_minutes) || group.interval_minutes < 15) {
+      return { ok: false, error: `采集间隔必须是大于等于 15 的整数：${name}` };
     }
     seen.add(name);
   }
@@ -504,6 +619,40 @@ function validateEnabledGroups(config) {
     return { ok: false, error: "还没有启用的微信群配置" };
   }
   return { ok: true };
+}
+
+async function defaultGroupActivityStatus() {
+  return { active: true };
+}
+
+function groupDeletedStatus(group, activity) {
+  const groupName = group.group_name || group.groupName || "";
+  const requestId = group.requirement_request_id || group.requirementRequestId || "";
+  const reason = String(activity?.reason || "关联项目已删除，已停止采集").trim();
+  return {
+    groupName,
+    status: "project_deleted",
+    requestId,
+    messageCount: 0,
+    changeCount: 0,
+    attachmentCount: 0,
+    attachmentCandidateCount: 0,
+    detail: reason,
+  };
+}
+
+async function disableGroupsInConfig(configPath, config, groupNames = []) {
+  const names = new Set(groupNames.filter(Boolean));
+  if (!names.size) return;
+  const nextConfig = {
+    ...config,
+    groups: (config.groups || []).map((group) => (
+      names.has(group.group_name || group.groupName || "")
+        ? { ...group, enabled: false }
+        : group
+    )),
+  };
+  await writeJsonFile(configPath, nextConfig);
 }
 
 function normalizePipelineSmokeStatus(pipelineSmoke = {}, {
@@ -558,11 +707,17 @@ function normalizeRealPushStatus(status = {}, {
     .filter((group) => group.enabled !== false)
     .map((group) => group.group_name)
     .filter(Boolean);
+  const requestIdByGroup = new Map((config.groups || [])
+    .filter((group) => group.enabled !== false && group.group_name)
+    .map((group) => [group.group_name, String(group.requirement_request_id || "").trim()]));
   const recentPushByGroup = new Map();
   const stalePushGroups = new Set();
   for (const run of [status, ...history]) {
     for (const group of Array.isArray(run?.groups) ? run.groups : []) {
       if (group.status !== "pushed" || !group.groupName) continue;
+      const configuredRequestId = requestIdByGroup.get(group.groupName) || "";
+      const pushedRequestId = String(group.requestId || "").trim();
+      if (configuredRequestId && pushedRequestId !== configuredRequestId) continue;
       const finishedAt = group.finishedAt || group.lastRunAt || run.finishedAt || "";
       const finishedTime = new Date(finishedAt).getTime();
       const hasFreshnessTime = Number.isFinite(finishedTime) && Number.isFinite(currentTime);
@@ -683,7 +838,11 @@ function buildReadiness({ config, status, service, scheduler, requirementCenter,
       label: "最近运行",
       ok: lastRunOk,
       detail: hasRun
-        ? (lastRunOk ? "最近一次采集运行成功" : (allDryRun ? "最近一次是预检脚本，不算正式采集运行" : "最近一次运行包含失败或无结果"))
+        ? (lastRunOk
+          ? (runGroups.some((group) => group.status === "no_requirement_signal")
+            ? "最近一次采集完成，但未识别到需求内容，未更新需求单"
+            : "最近一次采集运行成功")
+          : (allDryRun ? "最近一次是预检脚本，不算正式采集运行" : "最近一次运行失败或未产生有效需求"))
         : "还没有运行记录",
     },
     {
@@ -691,10 +850,10 @@ function buildReadiness({ config, status, service, scheduler, requirementCenter,
       label: "最近推送",
       ok: pushOk,
       detail: pushOk
-        ? `最近 24 小时内 ${realPush.verifiedGroupNames.length} 个已启用群均已完成真实微信试跑`
+        ? `最近 24 小时内 ${realPush.verifiedGroupNames.length} 个已启用群均已识别当前项目需求并推送到需求中心`
         : (realPush?.missingGroupNames?.length
-          ? `以下已启用群尚未在最近 24 小时完成真实微信试跑：${realPush.missingGroupNames.join("、")}`
-          : "还没有完成真实微信试跑并推送到需求中心"),
+          ? `以下已启用群尚未识别到当前项目需求单并推送：${realPush.missingGroupNames.join("、")}。请把微信窗口停在包含需求内容的位置后，在项目配置中点击“立即采集本群”。`
+          : "还没有识别到当前项目需求并推送到需求中心。请把微信窗口停在包含需求内容的位置后，在项目配置中点击“立即采集本群”。"),
     },
     {
       key: "pipeline_smoke",
@@ -721,23 +880,59 @@ function isValidIntervalMinutes(value) {
   return Number.isInteger(value) && value >= 1;
 }
 
-function buildGroupStatusSummary({ config, status, state }) {
+function checkpointMatchesConfiguredRequirement(group, checkpoint) {
+  const configuredRequestId = String(group.requirement_request_id || "").trim();
+  const checkpointRequestId = String(checkpoint?.requestId || "").trim();
+  return !configuredRequestId || !checkpointRequestId || configuredRequestId === checkpointRequestId;
+}
+
+function requestMatchesConfiguredRequirement(group, runGroup) {
+  const configuredRequestId = String(group.requirement_request_id || "").trim();
+  const runRequestId = String(runGroup?.requestId || "").trim();
+  return !configuredRequestId || !runRequestId || configuredRequestId === runRequestId;
+}
+
+function latestMeaningfulGroupRun({ group, latestRun, checkpoint, history = [] }) {
+  if (latestRun?.status !== "needs_initial_collection" || checkpoint?.updatedAt) return latestRun || {};
+  const groupName = group.group_name || "";
+  for (const run of history || []) {
+    for (const runGroup of Array.isArray(run?.groups) ? run.groups : []) {
+      if (runGroup.groupName !== groupName) continue;
+      if (!requestMatchesConfiguredRequirement(group, runGroup)) continue;
+      if (runGroup.status === "needs_initial_collection" || runGroup.status === "skipped_interval") continue;
+      return {
+        ...runGroup,
+        finishedAt: runGroup.finishedAt || run.finishedAt || "",
+      };
+    }
+  }
+  return latestRun || {};
+}
+
+function buildGroupStatusSummary({ config, status, state, history = [] }) {
   const runGroups = Array.isArray(status.groups) ? status.groups : [];
   const runByName = new Map(runGroups.map((group) => [group.groupName, group]));
   const checkpoints = state?.groups || {};
   return (config.groups || []).map((group) => {
     const groupName = group.group_name || "";
-    const latestRun = runByName.get(groupName) || {};
-    const checkpoint = checkpoints[groupName] || {};
+    const rawCheckpoint = checkpoints[groupName] || {};
+    const checkpoint = checkpointMatchesConfiguredRequirement(group, rawCheckpoint) ? rawCheckpoint : {};
+    const latestRun = latestMeaningfulGroupRun({
+      group,
+      latestRun: runByName.get(groupName) || {},
+      checkpoint,
+      history,
+    });
     const intervalMinutes = Number(group.interval_minutes);
-    const latestRunAt = latestRun.lastRunAt || latestRun.finishedAt || status.finishedAt || checkpoint.updatedAt || "";
+    const enabled = group.enabled !== false;
+    const latestRunAt = latestRun.lastRunAt || latestRun.finishedAt || (latestRun.status ? status.finishedAt : "") || checkpoint.updatedAt || "";
     const checkpointUpdatedAt = checkpoint.updatedAt || "";
     return {
       groupName,
       projectName: group.project_name || "",
       customerName: group.customer_name || "",
       requirementRequestId: group.requirement_request_id || "",
-      enabled: group.enabled !== false,
+      enabled,
       intervalMinutes,
       initialCollectionMode: group.initial_collection_mode || "ocr_current_window",
       initialCollectedAt: group.initial_collected_at || checkpoint.ocr?.initialCollectedAt || "",
@@ -746,10 +941,23 @@ function buildGroupStatusSummary({ config, status, state }) {
       requestId: latestRun.requestId || checkpoint.requestId || group.requirement_request_id || "",
       messageCount: Number(latestRun.messageCount || 0),
       changeCount: Number(latestRun.changeCount || 0),
+      latestDetail: latestRun.detail || "",
+      scrollPageCount: Number(latestRun.scrollPageCount || 0),
+      scrollPages: Number(latestRun.scrollPages || 0),
+      scrollStepCount: Number(latestRun.scrollStepCount || 0),
+      scrollSteps: Number(latestRun.scrollSteps || 0),
+      scrollLines: Number(latestRun.scrollLines || 0),
+      scrollBursts: Number(latestRun.scrollBursts || 0),
+      scrollBaseHeight: Number(latestRun.scrollBaseHeight || 0),
+      ...(latestRun.scrollDirection ? { scrollDirection: latestRun.scrollDirection } : {}),
+      wechatWindow: latestRun.wechatWindow || null,
+      chatCaptureSize: latestRun.chatCaptureSize || null,
+      windowAdjustment: latestRun.windowAdjustment || null,
+      checkpointLocated: latestRun.checkpointLocated,
       latestError: latestRun.error || "",
       checkpointUpdatedAt,
-      nextRunAt: latestRun.nextRunAt || (isValidIntervalMinutes(intervalMinutes)
-        ? addMinutes(checkpointUpdatedAt || latestRunAt, intervalMinutes)
+      nextRunAt: !enabled ? "" : latestRun.nextRunAt || (checkpointUpdatedAt && isValidIntervalMinutes(intervalMinutes)
+        ? addMinutes(checkpointUpdatedAt, intervalMinutes)
         : ""),
     };
   });
@@ -775,6 +983,7 @@ export function createWechatCollectorHandler(options = {}) {
   const realPushMaxAgeMs = Number(options.realPushMaxAgeMs || 24 * 60 * 60 * 1000);
   const lastRunMaxAgeMs = Number(options.lastRunMaxAgeMs || 60 * 60 * 1000);
   const now = options.now || (() => new Date());
+  const collectorQueue = options.collectorQueue || createCollectorQueue({ now });
   const scanAttachments = options.scanAttachments || scanWechatDownloadedFiles;
   const schedulerStatus = options.schedulerStatus || getWechatCollectorLaunchdStatus;
   const serviceStatus = options.serviceStatus || getEasyExamServiceLaunchdStatus;
@@ -783,6 +992,7 @@ export function createWechatCollectorHandler(options = {}) {
   const installService = options.installService || installEasyExamServiceLaunchd;
   const uninstallService = options.uninstallService || uninstallEasyExamServiceLaunchd;
   const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const groupActivityStatus = options.groupActivityStatus || defaultGroupActivityStatus;
   const requirementCenterStatus = options.requirementCenterStatus || (() => defaultRequirementCenterStatus({
     apiBase,
     fetchImpl,
@@ -847,6 +1057,61 @@ export function createWechatCollectorHandler(options = {}) {
       };
     }
     return { ok: true, realPush };
+  };
+  const runQueuedRealCollection = async ({ config, groupName = "" } = {}) => {
+    const groups = groupName
+      ? (config.groups || []).filter((group) => group.group_name === groupName)
+      : (config.groups || []).filter((group) => group.enabled !== false);
+    const aggregate = {
+      startedAt: now().toISOString(),
+      finishedAt: "",
+      groups: [],
+    };
+    const runs = [];
+    const disabledGroupNames = [];
+    for (const group of groups) {
+      const targetGroupName = group.group_name || group.groupName || "";
+      const activity = await groupActivityStatus(group);
+      if (activity?.active === false) {
+        aggregate.groups.push(groupDeletedStatus(group, activity));
+        disabledGroupNames.push(targetGroupName);
+        runs.push({
+          groupName: targetGroupName,
+          ok: true,
+          skipped: "project_deleted",
+          error: "",
+        });
+        continue;
+      }
+      const run = await collectorQueue.enqueue({
+        type: "real_collection",
+        groupName: targetGroupName,
+        action: () => runCollectorOnce({ configPath, statePath, statusPath, apiBase, groupName: targetGroupName }),
+      });
+      runs.push({
+        groupName: targetGroupName,
+        ok: run?.ok === true,
+        error: run?.error || "",
+      });
+      const effectiveStatus = run?.ok === false
+        ? normalizeFailedCollectionStatus(run, targetGroupName)
+        : run?.status;
+      const runGroups = Array.isArray(effectiveStatus?.groups) ? effectiveStatus.groups : [];
+      if (runGroups.length) aggregate.groups.push(...runGroups);
+      else aggregate.groups.push({
+        groupName: targetGroupName,
+        status: run?.ok === false ? "failed" : "unknown",
+        error: run?.error || "",
+      });
+    }
+    await disableGroupsInConfig(configPath, config, disabledGroupNames);
+    aggregate.finishedAt = now().toISOString();
+    await writeJsonFile(statusPath, aggregate);
+    return {
+      ok: aggregate.groups.every((group) => group.status !== "failed"),
+      status: aggregate,
+      runs,
+    };
   };
 
   return async function handleWechatCollector(req, res, url = new URL(req.url, "http://127.0.0.1")) {
@@ -956,7 +1221,8 @@ export function createWechatCollectorHandler(options = {}) {
         requirementCenter,
         ocr,
         lock,
-        groups: buildGroupStatusSummary({ config, status, state }),
+        queue: collectorQueue.snapshot(),
+        groups: buildGroupStatusSummary({ config, status, state, history }),
         readiness: buildReadiness({ config, status, service, scheduler, requirementCenter, ocr, lock, pipelineSmoke, realPush, runFreshness }),
         logs: await readCollectorLogs(logPaths, logMaxChars),
         path: statusPath,
@@ -1122,7 +1388,8 @@ export function createWechatCollectorHandler(options = {}) {
         json(res, 400, { error: `需求中心不可用${detail}` });
         return true;
       }
-      json(res, 200, { ok: true, run: await runCollectorOnce({ configPath, statePath, statusPath, apiBase, groupName }) });
+      const run = await runQueuedRealCollection({ config, groupName });
+      json(res, 200, { ok: true, queued: true, queue: collectorQueue.snapshot(), run });
       return true;
     }
 
@@ -1133,7 +1400,12 @@ export function createWechatCollectorHandler(options = {}) {
         json(res, 400, { error: validation.error });
         return true;
       }
-      json(res, 200, { ok: true, run: await dryRunCollector({ configPath, statePath, statusPath: preflightStatusPath, apiBase }) });
+      const run = await collectorQueue.enqueue({
+        type: "preflight",
+        groupName: "环境预检",
+        action: () => dryRunCollector({ configPath, statePath, statusPath: preflightStatusPath, apiBase }),
+      });
+      json(res, 200, { ok: true, queued: true, queue: collectorQueue.snapshot(), run });
       return true;
     }
 

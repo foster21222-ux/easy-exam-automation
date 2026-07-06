@@ -62,6 +62,36 @@ test("project intake converts confirmed draft to requirement and customer payloa
   });
 });
 
+test("project intake maps bottom exam schedule into formal exam time", () => {
+  const requirement = businessDraftToRequirement({
+    project_name: "北京外企人力某单位校园招聘项目",
+    exam_schedule: [{ exam_date: "2026-07-02", exam_time: "全天", note: "这两天会开展测评，测完统一出报告" }],
+  });
+
+  assert.equal(requirement.formal_exam_time_range, "2026-07-02 全天");
+  assert.deepEqual(requirement.exam_schedule, [{ exam_date: "2026-07-02", exam_time: "全天", note: "这两天会开展测评，测完统一出报告" }]);
+});
+
+test("project intake parses bottom schedule table when OCR splits date time and note into separate lines", () => {
+  const draft = parseBusinessRequirementTemplateRegions({
+    project_name: "中国人民大学附属中学在线考试项目",
+  }, `
+考试日期
+考试时间
+场次安排说明
+序号
+1
+2026-07-14
+上午
+早培项目初筛活动
+附件
+`);
+
+  assert.deepEqual(draft.exam_schedule, [{ exam_date: "2026-07-14", exam_time: "上午", note: "早培项目初筛活动" }]);
+  const requirement = businessDraftToRequirement(draft);
+  assert.equal(requirement.formal_exam_time_range, "2026-07-14 上午");
+});
+
 test("project intake repairs common out-of-order OCR from table screenshots", () => {
   const draft = parseBusinessRequirementOcr(`
 标题

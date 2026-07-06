@@ -41,8 +41,8 @@ export function validateWechatGroupConfig(config, { requireEnabled = false } = {
     if (seen.has(name)) {
       return { ok: false, error: `微信群名称重复：${name}` };
     }
-    if (!Number.isInteger(group.intervalMinutes) || group.intervalMinutes < 1) {
-      return { ok: false, error: `采集间隔必须是正整数：${name}` };
+    if (!Number.isInteger(group.intervalMinutes) || group.intervalMinutes < 15) {
+      return { ok: false, error: `采集间隔必须是大于等于 15 的整数：${name}` };
     }
     if (group.enabled !== false) enabledCount += 1;
     seen.add(name);
@@ -53,10 +53,16 @@ export function validateWechatGroupConfig(config, { requireEnabled = false } = {
   return { ok: true };
 }
 
-export function buildWechatRequirementDraft({ config, groupName, text, checkpoint = null }) {
+export function buildWechatRequirementDraft({ config, groupName, text, checkpoint = null, attachments = [] }) {
   const group = findGroup(config, groupName);
   const filtered = filterWechatMessagesByCheckpoint(text, checkpoint);
-  const parsed = parseWechatRequirementMessages(filtered.text);
+  const parsed = parseWechatRequirementMessages(withAttachmentContext(filtered.text, attachments));
+  const visibleLines = normalizeText(filtered.text).split("\n").map((line) => line.trim()).filter(Boolean);
+  parsed.checkpoint = {
+    messageCount: visibleLines.length,
+    lastMessageHash: sha256(visibleLines.at(-1) || normalizeText(filtered.text)),
+    seenMessageHashes: visibleLines.map((line) => sha256(line)).slice(-200),
+  };
   parsed.checkpoint.seenMessageHashes = unique([
     ...(Array.isArray(checkpoint?.seenMessageHashes) ? checkpoint.seenMessageHashes : []),
     ...parsed.checkpoint.seenMessageHashes,
@@ -266,21 +272,22 @@ export function parseWechatRequirementMessages(text) {
   const requirement = {};
   const changeRecords = [];
 
-  requirement.exam_name = firstMatch(parsingText, [
+  requirement.exam_name = latestMatch(parsingLines, [
     /考试名称(?:是|为|叫|[:：])\s*([^。\n，,；;]+)/,
     /考试(?:叫|名为)\s*([^。\n，,；;]+)/,
   ]);
-  requirement.formal_exam_time_range = firstMatch(parsingText, [
-    /正式考试\s*([^。\n，,；;]+)/,
+  requirement.formal_exam_time_range = latestMatch(parsingLines, [
+    /正式考试(?!时间)\s*([^。\n，,；;]+)/,
     /正式(?:时间|考试时间)(?:是|为|[:：])?\s*([^。\n，,；;]+)/,
+    /(?:考试时间|正式考试时间|正式时间|时间)(?:改一下|变更一下|调整一下)?[，,\s]*(?:改到|改为|调整到|调整为)\s*([^。\n，,；;]+)/,
     /(?:考试时间|正式考试时间|正式时间|时间)(?:改到|改为|调整到|调整为)\s*([^。\n，,；;]+)/,
   ]);
-  requirement.mock_exam_time_range = firstMatch(parsingText, [
-    /试考\s*([^。\n，,；;]+)/,
+  requirement.mock_exam_time_range = latestMatch(parsingLines, [
+    /试考(?!日期时间)\s*([^。\n，,；;]+)/,
     /试考时间(?:是|为|[:：])?\s*([^。\n，,；;]+)/,
   ]);
 
-  const subjectText = firstMatch(parsingText, [
+  const subjectText = latestMatch(parsingLines, [
     /科目(?:是|为|[:：])\s*([^。\n；;]+)/,
     /考试科目(?:是|为|[:：])\s*([^。\n；;]+)/,
   ]);
@@ -305,20 +312,22 @@ export function parseWechatRequirementMessages(text) {
   if (/网页考试|浏览器考试/.test(normalizedText)) requirement.exam_client_type = "网页考试";
   else if (/客户端考试|锁定考试/.test(normalizedText)) requirement.exam_client_type = "客户端考试";
 
-  const leaveCount = firstNumberMatch(normalizedText, /允许离开\s*([0-9一二三四五六七八九十]+)\s*次/);
+  const leaveCount = latestNumberMatch(lines, /允许离开\s*([0-9一二三四五六七八九十]+)\s*次/);
   if (leaveCount !== null) requirement.leave_limit_count = leaveCount;
 
-  const earlyLogin = firstNumberMatch(normalizedText, /提前\s*([0-9一二三四五六七八九十]+)\s*分钟/);
+  const earlyLogin = latestNumberMatch(lines, /提前\s*([0-9一二三四五六七八九十]+)\s*分钟/);
   if (earlyLogin !== null) requirement.early_login_minutes = `${earlyLogin}分钟`;
 
-  const lateLimit = firstNumberMatch(normalizedText, /迟到\s*([0-9一二三四五六七八九十]+)\s*分钟/);
+  const lateLimit = latestNumberMatch(lines, /迟到\s*([0-9一二三四五六七八九十]+)\s*分钟/);
   if (lateLimit !== null) requirement.late_limit_minutes = `${lateLimit}分钟`;
 
-  const sharedLoginLimit = firstNumberMatch(parsingText, /提前(?:登录|登陆)[、和以及,，\s]*(?:迟到时间|迟到)(?:都是|均为|都为|改为|调整为)\s*([0-9一二三四五六七八九十]+)\s*分钟/);
+  const sharedLoginLimit = latestNumberMatch(parsingLines, /提前(?:登录|登陆)[、和以及,，\s]*(?:迟到时间|迟到)(?:都是|均为|都为|改为|调整为)\s*([0-9一二三四五六七八九十]+)\s*分钟/);
   if (sharedLoginLimit !== null) {
     requirement.early_login_minutes = `${sharedLoginLimit}分钟`;
     requirement.late_limit_minutes = `${sharedLoginLimit}分钟`;
   }
+
+  applyAdjacentRequirementValues(requirement, parsingLines);
 
   return {
     requirement,
@@ -331,6 +340,27 @@ export function parseWechatRequirementMessages(text) {
       seenMessageHashes: lines.map((line) => sha256(line)).slice(-200),
     },
   };
+}
+
+function applyAdjacentRequirementValues(requirement, lines) {
+  requirement.exam_name ||= latestAdjacentValue(lines, [/^考试名称$/]);
+  requirement.formal_exam_time_range ||= latestAdjacentValue(lines, [/^(?:考试日期时间|正式考试日期时间|正式考试时间)$/]);
+  requirement.mock_exam_time_range ||= latestAdjacentValue(lines, [/^(?:试考日期时间|试考时间)$/]);
+  requirement.early_login_minutes ||= latestAdjacentValue(lines, [/^(?:提前登录时间|提前登陆时间)$/]);
+  requirement.late_limit_minutes ||= latestAdjacentValue(lines, [/^(?:限制迟到时间|迟到限制时间)$/]);
+  const subjects = latestAdjacentValue(lines, [/^(?:考试科目|科目)$/]);
+  if (!requirement.subjects?.length && subjects) requirement.subjects = normalizeSubjects(subjects);
+}
+
+function latestAdjacentValue(lines, labelPatterns) {
+  let value = "";
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const label = String(lines[index] || "").trim().replace(/^预览[:：]\s*/, "");
+    if (!labelPatterns.some((pattern) => pattern.test(label))) continue;
+    const next = cleanupValue(lines[index + 1]);
+    if (next) value = next;
+  }
+  return value || undefined;
 }
 
 function findGroup(config, groupName) {
@@ -376,6 +406,15 @@ function firstMatch(text, patterns) {
   return undefined;
 }
 
+function latestMatch(lines, patterns) {
+  let value;
+  for (const line of lines) {
+    const matched = firstMatch(line, patterns);
+    if (matched) value = matched;
+  }
+  return value;
+}
+
 function cleanupValue(value) {
   return String(value || "").replace(/\s+/g, " ").replace(/[。；;，,]$/g, "").trim();
 }
@@ -383,14 +422,29 @@ function cleanupValue(value) {
 function normalizeSubjects(value) {
   const subjectOnly = String(value || "").split(/，需要|,需要|，不需要|,不需要|，网页|,网页|，客户端|,客户端/)[0];
   return unique(subjectOnly.split(/和|、|,|，|;|；|\s+/)
-    .map((item) => item.trim().replace(/[了吧呢呀啊]+$/g, ""))
+    .flatMap((item) => expandKnownSubjects(item.trim().replace(/[了吧呢呀啊]+$/g, "")))
     .filter(Boolean));
+}
+
+function expandKnownSubjects(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  const knownSubjects = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理", "政治", "行测", "申论"];
+  const parts = [];
+  let rest = text;
+  while (rest) {
+    const subject = knownSubjects.find((item) => rest.startsWith(item));
+    if (!subject) return [text];
+    parts.push(subject);
+    rest = rest.slice(subject.length);
+  }
+  return parts.length ? parts : [text];
 }
 
 function collectExplicitChangeRecords(lines, changeRecords, requirement) {
   for (const line of lines) {
     if (/变更|调整|增加|新增|改|不考/.test(line)) {
-      const timeMatch = line.match(/(?:考试时间|正式考试时间|正式时间|时间)(?:改到|改为|调整到|调整为)\s*([^。\n，,；;]+)/);
+      const timeMatch = line.match(/(?:考试时间|正式考试时间|正式时间|时间)(?:改一下|变更一下|调整一下)?[，,\s]*(?:改到|改为|调整到|调整为)\s*([^。\n，,；;]+)/);
       if (timeMatch?.[1]) {
         const value = cleanupValue(timeMatch[1]);
         requirement.formal_exam_time_range = value;
@@ -421,7 +475,7 @@ function collectExplicitChangeRecords(lines, changeRecords, requirement) {
 function collectSubjectChanges(lines, changeRecords) {
   const subjects = [];
   for (const line of lines) {
-    if (!/变更|调整|增加|新增|加|改|不考/.test(line)) continue;
+    if (!/变更|调整|增加|新增|加|改|不考|(?:(?:这次|本次|此次)(?:就|只)?|就|只)考(?!试)/.test(line)) continue;
     const replacement = line.match(/不考\s*([^。\n，,；;]+?)[，,\s]*(?:改成|改为|换成)\s*([^。\n，,；;]+)/);
     if (replacement?.[2]) {
       const removedSubjects = normalizeSubjects(replacement[1]);
@@ -432,6 +486,18 @@ function collectSubjectChanges(lines, changeRecords) {
         type: "subject_change",
         message: line,
         changes: { removedSubjects, subjects: added },
+      });
+      continue;
+    }
+    const directExamSubjects = line.match(/(?:(?:这次|本次|此次)(?:就|只)?|就|只)考(?!试)\s*([^。\n，,；;]+)/);
+    if (directExamSubjects?.[1]) {
+      const added = normalizeSubjects(directExamSubjects[1]);
+      if (!added.length) continue;
+      subjects.push(...added);
+      changeRecords.push({
+        type: "subject_change",
+        message: line,
+        changes: { subjects: added },
       });
       continue;
     }
@@ -462,6 +528,15 @@ function firstNumberMatch(text, pattern) {
   const match = text.match(pattern);
   if (!match?.[1]) return null;
   return parseChineseNumber(match[1]);
+}
+
+function latestNumberMatch(lines, pattern) {
+  let value = null;
+  for (const line of lines) {
+    const matched = firstNumberMatch(line, pattern);
+    if (matched !== null) value = matched;
+  }
+  return value;
 }
 
 function parseChineseNumber(value) {

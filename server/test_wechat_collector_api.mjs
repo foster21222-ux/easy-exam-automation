@@ -39,6 +39,7 @@ test("wechat collector API reads config and status from runtime files", async ()
   const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
   const configPath = path.join(dir, "wechat-requirement-groups.json");
   const statusPath = path.join(dir, "wechat-last-run.json");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
   writeFileSync(configPath, JSON.stringify({
     groups: [
       {
@@ -56,7 +57,7 @@ test("wechat collector API reads config and status from runtime files", async ()
     finishedAt: "2026-06-24T10:00:03.000Z",
     groups: [{ groupName: "AI赋能运营自动化小组", status: "pushed", requestId: "wechat-ai-ops" }],
   }));
-  const handler = createWechatCollectorHandler({ configPath, statusPath });
+  const handler = createWechatCollectorHandler({ configPath, statusPath, statePath });
 
   const config = await call(handler, "GET", "/api/wechat-collector/config");
   const status = await call(handler, "GET", "/api/wechat-collector/status");
@@ -104,6 +105,24 @@ test("wechat collector API summarizes configured groups with latest run and chec
         requestId: "wechat-ai-ops",
         messageCount: 4,
         changeCount: 1,
+        scrollPages: 6,
+        scrollPageCount: 3,
+        scrollSteps: 5,
+        scrollStepCount: 2,
+        scrollLines: 48,
+        scrollBursts: 4,
+        scrollBaseHeight: 624,
+        wechatWindow: { windowId: 99, x: 10, y: 20, width: 1200, height: 860 },
+        chatCaptureSize: { width: 880, height: 624 },
+        windowAdjustment: {
+          checked: true,
+          resized: false,
+          reason: "size_ok",
+          minChatCaptureHeight: 480,
+          targetWindow: { width: 1200, height: 860 },
+          originalWindow: { width: 1200, height: 860 },
+        },
+        checkpointLocated: true,
       },
       {
         groupName: "某客户考试项目群",
@@ -148,6 +167,25 @@ test("wechat collector API summarizes configured groups with latest run and chec
     requestId: "wechat-ai-ops",
     messageCount: 4,
     changeCount: 1,
+    latestDetail: "",
+    scrollPageCount: 3,
+    scrollPages: 6,
+    scrollStepCount: 2,
+    scrollSteps: 5,
+    scrollLines: 48,
+    scrollBursts: 4,
+    scrollBaseHeight: 624,
+    wechatWindow: { windowId: 99, x: 10, y: 20, width: 1200, height: 860 },
+    chatCaptureSize: { width: 880, height: 624 },
+    windowAdjustment: {
+      checked: true,
+      resized: false,
+      reason: "size_ok",
+      minChatCaptureHeight: 480,
+      targetWindow: { width: 1200, height: 860 },
+      originalWindow: { width: 1200, height: 860 },
+    },
+    checkpointLocated: true,
     latestError: "",
     checkpointUpdatedAt: "2026-06-25T08:01:00.000Z",
     nextRunAt: "2026-06-25T08:16:00.000Z",
@@ -161,6 +199,7 @@ test("wechat collector group summary includes latest failure detail", async () =
   const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
   const configPath = path.join(dir, "wechat-requirement-groups.json");
   const statusPath = path.join(dir, "wechat-last-run.json");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
   writeFileSync(configPath, JSON.stringify({
     groups: [{
       group_name: "AI赋能运营自动化小组",
@@ -177,13 +216,166 @@ test("wechat collector group summary includes latest failure detail", async () =
       error: "需求中心不可用：fetch failed",
     }],
   }));
-  const handler = createWechatCollectorHandler({ configPath, statusPath });
+  const handler = createWechatCollectorHandler({ configPath, statusPath, statePath });
 
   const status = await call(handler, "GET", "/api/wechat-collector/status");
 
   assert.equal(status.statusCode, 200);
   assert.equal(status.body.groups[0].latestStatus, "failed");
+  assert.equal(status.body.groups[0].latestRunAt, "2026-06-25T08:01:00.000Z");
   assert.equal(status.body.groups[0].latestError, "需求中心不可用：fetch failed");
+  assert.equal(status.body.groups[0].nextRunAt, "");
+});
+
+test("wechat collector group summary does not treat global scheduler heartbeat as a group run", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      enabled: true,
+      interval_minutes: 30,
+    }],
+  }));
+  writeFileSync(statusPath, JSON.stringify({
+    startedAt: "2026-07-05T09:31:34.267Z",
+    finishedAt: "2026-07-05T09:31:34.268Z",
+    status: "failed",
+    error: "还没有启用的微信群配置",
+    groups: [],
+  }));
+  writeFileSync(statePath, JSON.stringify({
+    groups: {
+      "AI赋能运营自动化小组": {
+        requestId: "wechat-ai-ops",
+        updatedAt: "2026-07-05T09:00:00.000Z",
+      },
+    },
+  }));
+  const handler = createWechatCollectorHandler({ configPath, statusPath, statePath });
+
+  const status = await call(handler, "GET", "/api/wechat-collector/status");
+
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.body.groups[0].latestStatus, "not_run");
+  assert.equal(status.body.groups[0].latestRunAt, "2026-07-05T09:00:00.000Z");
+  assert.equal(status.body.groups[0].nextRunAt, "2026-07-05T09:30:00.000Z");
+});
+
+test("wechat collector group summary keeps the last real OCR attempt visible after scheduler heartbeat", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const historyPath = path.join(dir, "wechat-run-history.jsonl");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      requirement_request_id: "request-1",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  writeFileSync(statusPath, JSON.stringify({
+    startedAt: "2026-07-05T19:15:17.156Z",
+    finishedAt: "2026-07-05T19:15:17.158Z",
+    groups: [{
+      groupName: "AI赋能运营自动化小组",
+      status: "needs_initial_collection",
+      requestId: "request-1",
+      detail: "本群还没有完成初始化，请先执行一次“立即采集本群”。",
+    }],
+  }));
+  writeFileSync(historyPath, `${JSON.stringify({
+    startedAt: "2026-07-05T19:08:43.905Z",
+    finishedAt: "2026-07-05T19:09:34.427Z",
+    groups: [{
+      groupName: "AI赋能运营自动化小组",
+      status: "no_requirement_signal",
+      requestId: "request-1",
+      screenshotPath: ".easy_exam_runtime/wechat-screenshots/group.png",
+      detail: "OCR 文本未识别到需求字段或需求变更，已禁止写入 checkpoint 和需求中心",
+    }],
+  })}\n${JSON.stringify(JSON.parse(readFileSync(statusPath, "utf8")))}\n`);
+  const handler = createWechatCollectorHandler({ configPath, statusPath, statePath, historyPath });
+
+  const status = await call(handler, "GET", "/api/wechat-collector/status");
+
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.body.groups[0].latestStatus, "no_requirement_signal");
+  assert.equal(status.body.groups[0].latestRunAt, "2026-07-05T19:09:34.427Z");
+  assert.equal(status.body.groups[0].latestDetail, "OCR 文本未识别到需求字段或需求变更，已禁止写入 checkpoint 和需求中心");
+  assert.equal(status.body.groups[0].nextRunAt, "");
+});
+
+test("wechat collector disabled groups do not show a next run time", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      enabled: false,
+      interval_minutes: 30,
+    }],
+  }));
+  writeFileSync(statusPath, JSON.stringify({ groups: [] }));
+  writeFileSync(statePath, JSON.stringify({
+    groups: {
+      "AI赋能运营自动化小组": {
+        updatedAt: "2026-07-05T09:00:00.000Z",
+      },
+    },
+  }));
+  const handler = createWechatCollectorHandler({ configPath, statusPath, statePath });
+
+  const status = await call(handler, "GET", "/api/wechat-collector/status");
+
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.body.groups[0].enabled, false);
+  assert.equal(status.body.groups[0].nextRunAt, "");
+});
+
+test("wechat collector group summary ignores checkpoint from a previous requirement binding", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      requirement_request_id: "new-request",
+      enabled: true,
+      interval_minutes: 30,
+    }],
+  }));
+  writeFileSync(statusPath, JSON.stringify({
+    startedAt: "2026-07-05T09:31:34.267Z",
+    finishedAt: "2026-07-05T09:31:34.268Z",
+    status: "failed",
+    error: "还没有启用的微信群配置",
+    groups: [],
+  }));
+  writeFileSync(statePath, JSON.stringify({
+    groups: {
+      "AI赋能运营自动化小组": {
+        requestId: "old-request",
+        updatedAt: "2026-07-05T09:00:00.000Z",
+      },
+    },
+  }));
+  const handler = createWechatCollectorHandler({ configPath, statusPath, statePath });
+
+  const status = await call(handler, "GET", "/api/wechat-collector/status");
+
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.body.groups[0].requestId, "new-request");
+  assert.equal(status.body.groups[0].latestRunAt, "");
+  assert.equal(status.body.groups[0].checkpointUpdatedAt, "");
+  assert.equal(status.body.groups[0].nextRunAt, "");
 });
 
 test("wechat collector status preserves invalid configured intervals for diagnosis", async () => {
@@ -639,6 +831,53 @@ test("wechat collector readiness treats no-requirement-signal runs as a successf
 
   assert.equal(status.body.readiness.checks.find((item) => item.key === "last_run").ok, true);
   assert.equal(status.body.readiness.checks.find((item) => item.key === "requirement_push").ok, false);
+  assert.match(status.body.readiness.checks.find((item) => item.key === "requirement_push").detail, /包含需求内容的位置/);
+});
+
+test("wechat collector readiness ignores pushed history from a previous requirement binding", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const historyPath = path.join(dir, "wechat-run-history.jsonl");
+  const pipelineSmokeStatusPath = path.join(dir, "wechat-pipeline-smoke.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      requirement_request_id: "new-request",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  writeFileSync(statusPath, JSON.stringify({
+    startedAt: "2026-06-25T08:00:00.000Z",
+    finishedAt: "2026-06-25T08:01:00.000Z",
+    groups: [{ groupName: "AI赋能运营自动化小组", status: "no_requirement_signal", requestId: "new-request" }],
+  }));
+  writeFileSync(historyPath, `${JSON.stringify({
+    startedAt: "2026-06-25T07:00:00.000Z",
+    finishedAt: "2026-06-25T07:01:00.000Z",
+    groups: [{ groupName: "AI赋能运营自动化小组", status: "pushed", requestId: "old-request" }],
+  })}\n`);
+  writeFileSync(pipelineSmokeStatusPath, JSON.stringify({ ok: true, finishedAt: "2026-06-25T07:30:00.000Z" }));
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    historyPath,
+    pipelineSmokeStatusPath,
+    now: () => new Date("2026-06-25T08:05:00.000Z"),
+    serviceStatus: () => ({ installed: true, loaded: true }),
+    schedulerStatus: () => ({ installed: true, loaded: true }),
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true }),
+    ocrStatus: async () => ({ available: true, detail: "ready" }),
+  });
+
+  const status = await call(handler, "GET", "/api/wechat-collector/status");
+
+  const pushCheck = status.body.readiness.checks.find((item) => item.key === "requirement_push");
+  assert.equal(pushCheck.ok, false);
+  assert.match(pushCheck.detail, /AI赋能运营自动化小组/);
+  assert.match(pushCheck.detail, /当前项目需求单/);
+  assert.equal(status.body.readiness.ready, false);
 });
 
 test("wechat collector readiness treats dry-run preflight as not a successful collection", async () => {
@@ -1002,7 +1241,7 @@ test("wechat collector API rejects scheduler install when runtime config is inva
 
   assert.equal(result.handled, true);
   assert.equal(result.statusCode, 400);
-  assert.match(result.body.error, /采集间隔必须是正整数/);
+  assert.match(result.body.error, /采集间隔必须是大于等于 15 的整数/);
   assert.deepEqual(calls, []);
 });
 
@@ -1294,6 +1533,179 @@ test("wechat collector API can run the visible collector once by explicit reques
   assert.equal(calls[0].statusPath, statusPath);
 });
 
+test("wechat collector queue marks completed failed collection as failed", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
+    runCollectorOnce: async () => ({
+      ok: false,
+      error: "OCR 采集超时：请确认微信主窗口可见",
+      status: {
+        startedAt: "2026-07-05T08:00:00.000Z",
+        finishedAt: "2026-07-05T08:02:00.000Z",
+        groups: [{ groupName: "AI赋能运营自动化小组", status: "failed", error: "OCR 采集超时：请确认微信主窗口可见" }],
+      },
+    }),
+  });
+
+  const result = await call(handler, "POST", "/api/wechat-collector/run-once", { groupName: "AI赋能运营自动化小组" });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.run.ok, false);
+  assert.equal(result.body.queue.history[0].status, "failed");
+  assert.match(result.body.queue.history[0].error, /OCR 采集超时/);
+  assert.match(result.body.run.runs[0].error, /OCR 采集超时/);
+});
+
+test("wechat collector run-once does not reuse stale non-failed status after collection failure", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      requirement_request_id: "request-1",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
+    runCollectorOnce: async () => ({
+      ok: false,
+      error: "采集超时：5 分钟内未完成 OCR",
+      status: {
+        startedAt: "2026-07-05T08:00:00.000Z",
+        finishedAt: "2026-07-05T08:05:00.000Z",
+        groups: [{
+          groupName: "AI赋能运营自动化小组",
+          status: "needs_initial_collection",
+          requestId: "request-1",
+          detail: "旧状态，不应被当成本次运行结果",
+        }],
+      },
+    }),
+  });
+
+  const result = await call(handler, "POST", "/api/wechat-collector/run-once", { groupName: "AI赋能运营自动化小组" });
+  const savedStatus = JSON.parse(readFileSync(statusPath, "utf8"));
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.run.ok, false);
+  assert.equal(result.body.run.status.groups[0].status, "failed");
+  assert.match(result.body.run.status.groups[0].error, /采集超时/);
+  assert.equal(savedStatus.groups[0].status, "failed");
+});
+
+test("wechat collector API queues simultaneous group collection requests", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const starts = [];
+  let firstStartedResolve;
+  let releaseFirst;
+  const firstStarted = new Promise((resolve) => { firstStartedResolve = resolve; });
+  const firstReleased = new Promise((resolve) => { releaseFirst = resolve; });
+  writeFileSync(configPath, JSON.stringify({
+    groups: [
+      { group_name: "群 A", enabled: true, interval_minutes: 15 },
+      { group_name: "群 B", enabled: true, interval_minutes: 15 },
+    ],
+  }));
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
+    runCollectorOnce: async (options) => {
+      starts.push(options.groupName);
+      if (starts.length === 1) {
+        firstStartedResolve();
+        await firstReleased;
+      }
+      return {
+        ok: true,
+        status: {
+          startedAt: "2026-07-03T08:00:00.000Z",
+          finishedAt: "2026-07-03T08:00:01.000Z",
+          groups: [{ groupName: options.groupName, status: "no_requirement_signal" }],
+        },
+      };
+    },
+  });
+
+  const first = call(handler, "POST", "/api/wechat-collector/run-once", { groupName: "群 A" });
+  await firstStarted;
+  const second = call(handler, "POST", "/api/wechat-collector/run-once", { groupName: "群 B" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.deepEqual(starts, ["群 A"]);
+
+  const running = await call(handler, "GET", "/api/wechat-collector/status");
+  assert.equal(running.body.queue.running.groupName, "群 A");
+  assert.deepEqual(running.body.queue.pending.map((item) => item.groupName), ["群 B"]);
+
+  releaseFirst();
+  const results = await Promise.all([first, second]);
+
+  assert.deepEqual(starts, ["群 A", "群 B"]);
+  assert.equal(results[0].statusCode, 200);
+  assert.equal(results[1].statusCode, 200);
+});
+
+test("wechat collector API splits batch collection into queued per-group tasks", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const calls = [];
+  writeFileSync(configPath, JSON.stringify({
+    groups: [
+      { group_name: "群 A", enabled: true, interval_minutes: 15 },
+      { group_name: "群 B", enabled: true, interval_minutes: 15 },
+    ],
+  }));
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    now: (() => {
+      let count = 0;
+      return () => new Date(`2026-07-03T08:00:${String(count++).padStart(2, "0")}.000Z`);
+    })(),
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
+    runCollectorOnce: async (options) => {
+      calls.push(options.groupName);
+      return {
+        ok: true,
+        status: {
+          startedAt: `2026-07-03T08:00:0${calls.length}.000Z`,
+          finishedAt: `2026-07-03T08:00:0${calls.length + 1}.000Z`,
+          groups: [{ groupName: options.groupName, status: "no_requirement_signal" }],
+        },
+      };
+    },
+  });
+
+  const result = await call(handler, "POST", "/api/wechat-collector/run-once");
+  const savedStatus = JSON.parse(readFileSync(statusPath, "utf8"));
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(calls, ["群 A", "群 B"]);
+  assert.deepEqual(result.body.run.status.groups.map((group) => group.groupName), ["群 A", "群 B"]);
+  assert.deepEqual(savedStatus.groups.map((group) => group.groupName), ["群 A", "群 B"]);
+});
+
 test("wechat collector run-once bypasses group intervals", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
   const configPath = path.join(dir, "wechat-requirement-groups.json");
@@ -1311,8 +1723,8 @@ test("wechat collector run-once bypasses group intervals", async () => {
     statusPath,
     nodePath: "node",
     requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
-    execFileImpl: async (command, args) => {
-      calls.push({ command, args });
+    execFileImpl: async (command, args, options) => {
+      calls.push({ command, args, options });
       writeFileSync(statusPath, JSON.stringify({
         startedAt: "2026-06-25T08:00:00.000Z",
         finishedAt: "2026-06-25T08:00:05.000Z",
@@ -1329,6 +1741,81 @@ test("wechat collector run-once bypasses group intervals", async () => {
   assert.ok(calls[0].args.includes("--force"));
   assert.ok(calls[0].args.includes("--captureMode"));
   assert.ok(calls[0].args.includes("ocr"));
+  assert.ok(calls[0].options.timeout >= 300000);
+});
+
+test("wechat collector run-once includes stderr details when visible collector command fails", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  const error = new Error("Command failed: node wechat_visible_collect.mjs");
+  error.stderr = "未找到可见微信主窗口";
+  error.stdout = "{\"results\":[]}";
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    nodePath: "node",
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
+    execFileImpl: async () => {
+      writeFileSync(statusPath, JSON.stringify({
+        startedAt: "2026-07-05T08:00:00.000Z",
+        finishedAt: "2026-07-05T08:02:00.000Z",
+        groups: [],
+      }));
+      throw error;
+    },
+  });
+
+  const result = await call(handler, "POST", "/api/wechat-collector/run-once", { groupName: "AI赋能运营自动化小组" });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.run.ok, false);
+  assert.match(result.body.run.runs[0].error, /未找到可见微信主窗口/);
+  assert.match(result.body.run.status.groups[0].error, /未找到可见微信主窗口/);
+});
+
+test("wechat collector run-once describes timeout failures clearly", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  const error = new Error("Command failed: node wechat_visible_collect.mjs");
+  error.killed = true;
+  error.signal = "SIGTERM";
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    nodePath: "node",
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
+    execFileImpl: async () => {
+      writeFileSync(statusPath, JSON.stringify({
+        startedAt: "2026-07-05T08:00:00.000Z",
+        finishedAt: "2026-07-05T08:05:00.000Z",
+        groups: [],
+      }));
+      throw error;
+    },
+  });
+
+  const result = await call(handler, "POST", "/api/wechat-collector/run-once", { groupName: "AI赋能运营自动化小组" });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.run.ok, false);
+  assert.match(result.body.run.runs[0].error, /超过 5 分钟/);
+  assert.match(result.body.run.status.groups[0].error, /未更新需求单/);
 });
 
 test("wechat collector run-once rejects when requirement center is unavailable before activating WeChat", async () => {
@@ -1603,7 +2090,7 @@ test("wechat collector API rejects dry-run when runtime config is invalid", asyn
 
   assert.equal(result.handled, true);
   assert.equal(result.statusCode, 400);
-  assert.match(result.body.error, /采集间隔必须是正整数/);
+  assert.match(result.body.error, /采集间隔必须是大于等于 15 的整数/);
   assert.deepEqual(calls, []);
 });
 
@@ -2119,6 +2606,71 @@ test("wechat collector API rejects duplicate group names", async () => {
   assert.match(result.body.error, /微信群名称重复/);
 });
 
+test("wechat collector config preserves project task id for deletion cleanup", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath: path.join(dir, "wechat-last-run.json"),
+  });
+
+  const result = await call(handler, "PUT", "/api/wechat-collector/config", {
+    groups: [{
+      group_name: "项目群",
+      task_id: "task-1",
+      project_name: "项目 A",
+      requirement_request_id: "request-1",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  });
+
+  const saved = JSON.parse(readFileSync(configPath, "utf8"));
+  assert.equal(result.statusCode, 200);
+  assert.equal(saved.groups[0].task_id, "task-1");
+});
+
+test("wechat collector stops enabled group when linked project no longer exists", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "已删除项目群",
+      project_name: "已删除项目",
+      requirement_request_id: "deleted-request",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  let collectorCalls = 0;
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    requirementCenterStatus: async () => ({ available: true }),
+    groupActivityStatus: async (group) => ({
+      active: false,
+      reason: `项目已删除：${group.project_name}`,
+    }),
+    runCollectorOnce: async () => {
+      collectorCalls += 1;
+      return { ok: true, status: { groups: [] } };
+    },
+  });
+
+  const result = await call(handler, "POST", "/api/wechat-collector/run-once");
+
+  const saved = JSON.parse(readFileSync(configPath, "utf8"));
+  const status = JSON.parse(readFileSync(statusPath, "utf8"));
+  assert.equal(result.handled, true);
+  assert.equal(result.statusCode, 200);
+  assert.equal(collectorCalls, 0);
+  assert.equal(saved.groups[0].enabled, false);
+  assert.equal(status.groups[0].groupName, "已删除项目群");
+  assert.equal(status.groups[0].status, "project_deleted");
+  assert.match(status.groups[0].detail, /项目已删除/);
+});
+
 test("wechat collector API rejects invalid group intervals", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
   const handler = createWechatCollectorHandler({
@@ -2126,13 +2678,13 @@ test("wechat collector API rejects invalid group intervals", async () => {
     statusPath: path.join(dir, "wechat-last-run.json"),
   });
 
-  for (const intervalMinutes of [0, "abc", 1.5]) {
+  for (const intervalMinutes of [0, "abc", 1.5, 14]) {
     const result = await call(handler, "PUT", "/api/wechat-collector/config", {
       groups: [{ groupName: "AI赋能运营自动化小组", intervalMinutes }],
     });
 
     assert.equal(result.handled, true);
     assert.equal(result.statusCode, 400);
-    assert.match(result.body.error, /采集间隔必须是正整数/);
+    assert.match(result.body.error, /采集间隔必须是大于等于 15 的整数/);
   }
 });
