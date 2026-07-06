@@ -20,6 +20,10 @@ test("navigation orders project management, exam list, then auto configuration",
   assert.ok(projectIndex < examIndex && examIndex < autoIndex);
 });
 
+test("platform pages do not render feature introduction panels", () => {
+  assert.equal(html.includes('<h2 class="panel-title">功能介绍</h2>'), false);
+});
+
 test("URL page layout replaces shared showView content switching", () => {
   assert.ok(html.includes('import { createRouter } from "/web/router.mjs"'));
   assert.ok(html.includes("ProjectListPage({ root: projectManagementView"));
@@ -339,10 +343,17 @@ test("auto config page renders customer service scheduler controls", () => {
 test("exam list is task-aggregated and exam detail owns dual session cards", () => {
   assert.ok(
     html.includes(
-      'import { aggregateExamSessions, matchesExamTask, resolveCandidateTaskContext } from "/web/exam_task_view_model.mjs"',
+      'import { aggregateExamSessions, isExamTaskEnded, matchesExamTask, resolveCandidateTaskContext } from "/web/exam_task_view_model.mjs"',
     ),
   );
   assert.ok(html.includes('id="taskSessionCards"'));
+  assert.ok(html.includes('id="endedExamsToggleBtn"'));
+  assert.ok(html.includes("查看已结束考试"));
+  assert.ok(html.includes('examListMode: "active"'));
+  assert.ok(html.includes('taskViewState.examListMode === "ended" ? endedExams : activeExams'));
+  assert.ok(html.includes("isExamTaskEnded(task)"));
+  assert.ok(html.includes('taskViewState.examListMode === "ended" ? `<span class="status-chip success">已结束</span>` : `<span class="status-chip pending">${formatProgressPercent(task.progress)}</span>`'));
+  assert.ok(html.includes("function formatProgressPercent(value)"));
   assert.ok(html.includes("data-candidate-task-id"));
   assert.equal(html.includes('id="examTypeFilter"'), false);
 });
@@ -728,6 +739,7 @@ test("exam detail shows project shared sheet before score processing with a manu
   assert.ok(html.includes("data-shared-sheet-fill"));
   assert.ok(html.includes("打开在线表"));
   assert.ok(html.includes("https://docs.qq.com/sheet/DR3NiT296WmtpWXVM?tab=BB08J2"));
+  assert.ok(html.includes(".task-step-action { border: 1px solid var(--line); background: #fff; color: var(--blue); border-radius: 9px; padding: 7px 10px; font-weight: 800; cursor: pointer; text-decoration: none; }"));
   assert.ok(html.includes("填写"));
   assert.equal(html.includes("触发填写"), false);
   assert.ok(html.includes("重新填写"));

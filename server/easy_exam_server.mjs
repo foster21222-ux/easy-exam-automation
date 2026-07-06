@@ -9,7 +9,7 @@ import {
   bindCoursesToFormalSession,
   createSessionsThenConfigureCourses,
 } from "./course_session_binding.mjs";
-import { bindPapersToFormalSession } from "./paper_binding.mjs";
+import { bindPapersToFormalSession, detectSessionPaperBindings } from "./paper_binding.mjs";
 import { bindDefaultTrialPaperToSession } from "./trial_default_paper.mjs";
 import {
   assignCourseCodesForExamConfig,
@@ -91,6 +91,8 @@ const pythonBin =
   process.env.CODEX_PYTHON ||
   process.env.PYTHON ||
   "python3";
+const PAPER_BIND_SCHEDULER_INTERVAL_MS = Number(process.env.PAPER_BIND_SCHEDULER_INTERVAL_MS || 60 * 60 * 1000);
+const PAPER_BIND_SCHEDULER_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 async function loadEnvFile() {
   const envPath = path.join(rootDir, ".env");
@@ -2644,6 +2646,26 @@ function getYikaoLoginForRequest(req) {
   };
 }
 
+function getYikaoLoginForTask(task = {}) {
+  const ownerEmail = normalizeEmail(task.ownerEmail || "");
+  const sourceAccount = normalizeEmail(task.sourceAccount || "");
+  const users = [ownerEmail, sourceAccount].filter(Boolean);
+  for (const email of users) {
+    const login = currentUserLogin({
+      user: { email },
+      userSettings: state.userSettings,
+      legacySettings: state.settings,
+    });
+    if (login?.tenantApiKey) return { ...login, allowEnvFallback: !auth.enabled };
+  }
+  const login = currentUserLogin({
+    user: null,
+    userSettings: state.userSettings,
+    legacySettings: state.settings,
+  });
+  return { ...login, allowEnvFallback: !auth.enabled };
+}
+
 function publicYikaoLogin(login) {
   return {
     url: login?.url || "",
@@ -3197,6 +3219,170 @@ async function updatePaperFormBindState(taskId, status, patch = {}) {
   return await runTaskState("get", { taskId });
 }
 
+function parseTaskStartTime(task = {}) {
+  const values = [
+    task.config?.startTimeIso,
+    task.config?.startTimeDisplay,
+    task.config?.startTime,
+    (task.sessions || []).find((session) => session.sessionType === "formal")?.start,
+  ];
+  for (const value of values) {
+    if (!value) continue;
+    const normalized = String(value).trim().replace(/\//g, "-").replace(" ", "T");
+    const date = new Date(normalized);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return null;
+}
+
+function shouldAttemptScheduledPaperBind(task = {}, now = new Date()) {
+  const current = task.config?.paperFormBind || {};
+  if (current.status === "success" || current.status === "running") return false;
+  const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
+  if (!formalSession?.session_id) return false;
+  const courses = normalizeCourseRecords(task.config || {});
+  if (!courses.length) return false;
+  const start = parseTaskStartTime(task);
+  if (!start) return false;
+  const msUntilStart = start.getTime() - now.getTime();
+  return msUntilStart > 0 && msUntilStart <= PAPER_BIND_SCHEDULER_WINDOW_MS;
+}
+
+async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) {
+  const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
+  const courses = normalizeCourseRecords(task.config || {});
+  const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
+  const paperLogs = [];
+  const emitLog = (message) => paperLogs.push(message);
+  await updatePaperFormBindState(task.taskId, "running", {
+    message: scheduled ? "定时检查到试卷绑定窗口，开始自动绑定试卷" : "开始试卷绑定，不修改场次科目绑定结果",
+  });
+  try {
+    if (!courses.length) {
+      const manualBindResult = await detectSessionPaperBindings({
+        login,
+        apiBase,
+        sessionId: formalSession?.session_id,
+        courses,
+        requestJson: readTenantJsonWithLogin,
+        emitLog,
+      });
+      if (manualBindResult.status === "success") {
+        return {
+          ok: true,
+          status: 200,
+          task: await updatePaperFormBindState(task.taskId, "success", {
+            message: paperLogs.join("\n") || "人工绑定回查确认正式场次已有试卷",
+            result: {
+              sessionId: formalSession?.session_id,
+              courseCount: manualBindResult.results?.length || 0,
+              bindResult: manualBindResult,
+              detectedManualBinding: true,
+            },
+          }),
+        };
+      }
+      const errorMessage = "任务未保存科目信息，且正式场次未检测到已绑定试卷";
+      return {
+        ok: false,
+        status: 409,
+        task: await updatePaperFormBindState(task.taskId, "failed", {
+          errorMessage,
+          message: [...paperLogs, errorMessage].filter(Boolean).join("\n"),
+          result: { sessionId: formalSession?.session_id, courseCount: 0, bindResult: manualBindResult, missingCourseCodes: [] },
+        }),
+      };
+    }
+
+    const bindResult = await bindPapersToFormalSession({
+      login,
+      apiBase,
+      sessionId: formalSession?.session_id,
+      courses,
+      requestJson: readTenantJsonWithLogin,
+      emitLog,
+    });
+    if (bindResult.status === "waiting_manual") {
+      const manualBindResult = await detectSessionPaperBindings({
+        login,
+        apiBase,
+        sessionId: formalSession?.session_id,
+        courses,
+        requestJson: readTenantJsonWithLogin,
+        emitLog,
+      });
+      if (manualBindResult.status === "success") {
+        return {
+          ok: true,
+          status: 200,
+          task: await updatePaperFormBindState(task.taskId, "success", {
+            message: paperLogs.join("\n") || "人工绑定回查确认正式场次已有试卷",
+            result: {
+              sessionId: formalSession?.session_id,
+              courseCount: courses.length,
+              bindResult: manualBindResult,
+              detectedManualBinding: true,
+            },
+          }),
+        };
+      }
+      const missingCourseCodes = bindResult.missingCourseCodes || [];
+      const duplicatePaperMatches = bindResult.duplicatePaperMatches || [];
+      const duplicatePaperNames = duplicatePaperMatches
+        .map((match) => `${match.course_code || "未知科目"}/${match.paper_name || "同名试卷"}`)
+        .join("、");
+      const errorMessage = duplicatePaperMatches.length
+        ? `发现重复试卷，请人工确认：${duplicatePaperNames}`
+        : `缺少试卷编号，无法绑定试卷：${missingCourseCodes.join("、") || "未获取到试卷 code"}`;
+      return {
+        ok: false,
+        status: 409,
+        task: await updatePaperFormBindState(task.taskId, "failed", {
+          errorMessage,
+          message: [...paperLogs, errorMessage].filter(Boolean).join("\n"),
+          result: { sessionId: formalSession?.session_id, courseCount: courses.length, bindResult, missingCourseCodes, duplicatePaperMatches },
+        }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      task: await updatePaperFormBindState(task.taskId, "success", {
+        message: paperLogs.join("\n") || "试卷绑定成功",
+        result: { sessionId: formalSession?.session_id, courseCount: courses.length, bindResult },
+      }),
+    };
+  } catch (error) {
+    const message = [...paperLogs, error instanceof Error ? error.message : String(error)].filter(Boolean).join("\n");
+    return {
+      ok: false,
+      status: error?.status && Number(error.status) >= 400 ? Number(error.status) : 500,
+      task: await updatePaperFormBindState(task.taskId, "failed", {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        message,
+      }),
+    };
+  }
+}
+
+async function runScheduledPaperBindingOnce(now = new Date()) {
+  const summaries = await runTaskState("list_all");
+  const results = [];
+  for (const summary of summaries || []) {
+    const task = await runTaskState("get", { taskId: summary.taskId });
+    if (!task || !shouldAttemptScheduledPaperBind(task, now)) continue;
+    try {
+      const login = getYikaoLoginForTask(task);
+      const result = await runPaperFormBindForTask(task, login, { scheduled: true });
+      results.push({ taskId: task.taskId, status: result.task?.config?.paperFormBind?.status || "unknown" });
+    } catch (error) {
+      results.push({ taskId: task.taskId, status: "failed", error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (results.length) console.log(`[试卷绑定定时] 本轮处理 ${results.length} 个任务：${JSON.stringify(results)}`);
+  return results;
+}
+
 async function handleTaskStepRetry(taskId, stepKey, req, res) {
   const visibleTask = await runTaskState("get", { taskId });
   if (!visibleTask || !visibleByOwner(auth, req, visibleTask)) return notFound(res);
@@ -3239,48 +3425,9 @@ async function handleTaskStepRetry(taskId, stepKey, req, res) {
 
   if (stepKey === "paper_form_bind") {
     const task = visibleTask;
-    const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
-    const courses = normalizeCourseRecords(task.config || {});
     const login = getYikaoLoginForRequest(req);
-    const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
-    const paperLogs = [];
-    const emitLog = (message) => paperLogs.push(message);
-
-    await updatePaperFormBindState(taskId, "running", {
-      message: "开始试卷绑定，不修改场次科目绑定结果",
-    });
-    try {
-      const bindResult = await bindPapersToFormalSession({
-        login,
-        apiBase,
-        sessionId: formalSession?.session_id,
-        courses,
-        requestJson: readTenantJsonWithLogin,
-        emitLog,
-      });
-      if (bindResult.status === "waiting_manual") {
-        const missingCourseCodes = bindResult.missingCourseCodes || [];
-        const errorMessage = `缺少试卷编号，无法绑定试卷：${missingCourseCodes.join("、") || "未获取到试卷 code"}`;
-        const updated = await updatePaperFormBindState(taskId, "failed", {
-          errorMessage,
-          message: [...paperLogs, errorMessage].filter(Boolean).join("\n"),
-          result: { sessionId: formalSession?.session_id, courseCount: courses.length, bindResult, missingCourseCodes },
-        });
-        return json(res, 409, updated);
-      }
-      const updated = await updatePaperFormBindState(taskId, "success", {
-        message: paperLogs.join("\n") || "试卷绑定成功",
-        result: { sessionId: formalSession?.session_id, courseCount: courses.length, bindResult },
-      });
-      return json(res, 200, updated);
-    } catch (error) {
-      const message = [...paperLogs, error instanceof Error ? error.message : String(error)].filter(Boolean).join("\n");
-      const updated = await updatePaperFormBindState(taskId, "failed", {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        message,
-      });
-      return json(res, error?.status && Number(error.status) >= 400 ? Number(error.status) : 500, updated);
-    }
+    const result = await runPaperFormBindForTask(task, login);
+    return json(res, result.status, result.task);
   }
 
   if (stepKey === "trial_paper_bind") {
@@ -3534,3 +3681,16 @@ const server = http.createServer(requestHandler);
 server.listen(port, host, () => {
   console.log(`Easy Exam server running at http://${host}:${port}`);
 });
+
+if (process.env.PAPER_BIND_SCHEDULER_DISABLED !== "1") {
+  setInterval(runScheduledPaperBindingOnce, PAPER_BIND_SCHEDULER_INTERVAL_MS).unref();
+  runScheduledPaperBindingOnce().catch((error) => {
+    console.warn(`[试卷绑定定时] 启动检查失败：${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
+export {
+  parseTaskStartTime,
+  runScheduledPaperBindingOnce,
+  shouldAttemptScheduledPaperBind,
+};

@@ -55,6 +55,45 @@ class ExamRequestParserTest(unittest.TestCase):
 
         self.assertFalse(result["config"]["manualScore"])
 
+    def test_reads_per_course_paper_names_from_subject_sheet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "需求单.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "业务需求单"
+            ws.append(["易考新建考试需求单"])
+            ws.append(["业务方只需填写“填写内容”列。"])
+            ws.append([])
+            ws.append(["阶段", "序号", "配置项", "填写内容"])
+            ws.append(["基本信息", 1, "考试名称", "每科试卷测试"])
+            ws.append(["", 2, "考试日期时间", "2026/7/18 09:00-2026/7/18 10:30"])
+            subject = wb.create_sheet("科目信息")
+            subject.append(["序号", "科目名称", "科目编号", "试卷名称"])
+            subject.append([1, "综合一", "20260718-01-01", "会计学与财务分析基础"])
+            subject.append([2, "综合二", "20260718-01-02", "Python语言基础+大数据技术"])
+            wb.save(path)
+
+            output = subprocess.check_output([sys.executable, str(PARSER), str(path)], text=True)
+            result = json.loads(output)
+
+        self.assertEqual(
+            result["config"]["courses"],
+            [
+                {
+                    "name": "综合一",
+                    "code": "20260718-01-01",
+                    "form_codes": [],
+                    "paper_name": "会计学与财务分析基础",
+                },
+                {
+                    "name": "综合二",
+                    "code": "20260718-01-02",
+                    "form_codes": [],
+                    "paper_name": "Python语言基础+大数据技术",
+                },
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

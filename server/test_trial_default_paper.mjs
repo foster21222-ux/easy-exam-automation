@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_TRIAL_PAPER_NAME,
   DEFAULT_TRIAL_COURSE_CODE,
   DEFAULT_TRIAL_COURSE_NAME,
   bindDefaultTrialPaperToSession,
@@ -60,13 +61,21 @@ test("reuses the default trial course when it already exists", async () => {
   assert.equal(calls[0].url, "https://eztest.cn/tenant/api/courses/SKTY/?apply=form");
 });
 
-test("binds the default trial course paper to a trial session using refreshed form codes", async () => {
+test("binds the fixed default trial paper to SKTY before binding the trial session", async () => {
   const calls = [];
   const logs = [];
   const requestJson = async (_login, url, options) => {
     calls.push({ url, options });
-    if (options.method === "GET") {
-      return { code: "SKTY", name: "试考", res: [{ code: "491519" }] };
+    if (url.endsWith("/tenant/api/courses/SKTY/?apply=form")) {
+      return { code: "SKTY", name: "试考", res: [] };
+    }
+    if (url.includes("/tenant/api/form/list/") && url.includes("name=")) {
+      return {
+        form_list: [
+          { code: "OTHER-FORM", name: "其他试卷" },
+          { code: "486086", name: DEFAULT_TRIAL_PAPER_NAME },
+        ],
+      };
     }
     return { __tenantResponse: true, httpStatus: 200, body: { ok: true } };
   };
@@ -80,20 +89,32 @@ test("binds the default trial course paper to a trial session using refreshed fo
   });
 
   assert.equal(result.status, "success");
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
   assert.equal(calls[0].url, "https://eztest.cn/tenant/api/courses/SKTY/?apply=form");
-  assert.equal(calls[1].url, "https://eztest.cn/tenant/api/course/session/429044/");
-  assert.deepEqual(JSON.parse(calls[1].options.body), {
-    course_code: "SKTY",
-    form_codes: ["491519"],
+  assert.equal(calls[1].url, `https://eztest.cn/tenant/api/form/list/?form_type=form&name=${encodeURIComponent(DEFAULT_TRIAL_PAPER_NAME)}&order_by=-id`);
+  assert.equal(calls[2].url, "https://eztest.cn/tenant/api/course/");
+  assert.equal(calls[2].options.method, "PUT");
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    code: "SKTY",
+    name: "试考",
+    form_codes: ["486086"],
   });
+  assert.equal(calls[3].url, "https://eztest.cn/tenant/api/course/session/429044/");
+  assert.deepEqual(JSON.parse(calls[3].options.body), {
+    course_code: "SKTY",
+    form_codes: ["486086"],
+  });
+  assert.deepEqual(result.results[0].paper_names, [DEFAULT_TRIAL_PAPER_NAME]);
   assert.ok(logs.includes("[试考默认卷] 试考试卷绑定完成"));
 });
 
-test("waits for manual paper association when SKTY has no form codes", async () => {
+test("waits for manual paper association when the fixed default trial paper is not found", async () => {
   const calls = [];
   const requestJson = async (_login, url, options) => {
     calls.push({ url, options });
+    if (url.includes("/tenant/api/form/list/")) {
+      return { form_list: [{ code: "OTHER-FORM", name: "其他试卷" }] };
+    }
     return { code: "SKTY", name: "试考", res: [] };
   };
 
@@ -106,6 +127,8 @@ test("waits for manual paper association when SKTY has no form codes", async () 
   });
 
   assert.deepEqual(result, { status: "waiting_manual", missingCourseCodes: ["SKTY"] });
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].options.method, "GET");
+  assert.equal(calls[1].url, `https://eztest.cn/tenant/api/form/list/?form_type=form&name=${encodeURIComponent(DEFAULT_TRIAL_PAPER_NAME)}&order_by=-id`);
+  assert.equal(calls[2].url, "https://eztest.cn/tenant/api/form/list/?form_type=form&order_by=-id");
 });

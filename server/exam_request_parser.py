@@ -77,17 +77,21 @@ def split_form_codes(value):
     return [part.strip() for part in parts if part and part.strip()]
 
 
-def normalize_course_record(name="", code="", form_codes=""):
+def normalize_course_record(name="", code="", form_codes="", paper_name=""):
     course_name = normalize_text(name)
     course_code = normalize_text(code)
     forms = split_form_codes(form_codes)
+    paper = normalize_text(paper_name)
     if not course_name and not course_code:
         return None
-    return {
+    record = {
         "name": course_name,
         "code": course_code,
         "form_codes": forms,
     }
+    if paper:
+        record["paper_name"] = paper
+    return record
 
 
 def parse_course_records_text(value):
@@ -102,6 +106,7 @@ def parse_course_records_text(value):
                 parts[0],
                 parts[1],
                 parts[2] if len(parts) > 2 else "",
+                parts[3] if len(parts) > 3 else "",
             )
             if record and record["name"] and record["code"]:
                 records.append(record)
@@ -189,13 +194,16 @@ def read_course_records(sheet):
 
     name_index = find_index("name", "科目名称", "科目")
     code_index = find_index("code", "course_code", "科目编号", "科目代码")
+    paper_name_index = find_index("paper_name", "paper name", "试卷名称", "试卷名")
     form_index = find_index("form_codes", "form code", "试卷编码", "试卷编号", "试卷代码")
+    if form_index == paper_name_index:
+        form_index = None
 
     if name_index is None:
         name_index = 1
     if code_index is None:
         code_index = 2
-    if form_index is None:
+    if form_index is None and paper_name_index is None:
         form_index = 3
 
     records = []
@@ -204,14 +212,15 @@ def read_course_records(sheet):
             continue
         name = row[name_index] if len(row) > name_index else ""
         code = row[code_index] if len(row) > code_index else ""
-        form_codes = row[form_index] if len(row) > form_index else ""
-        if normalize_text(name) and not normalize_text(code) and not normalize_text(form_codes):
+        form_codes = row[form_index] if form_index is not None and len(row) > form_index else ""
+        paper_name = row[paper_name_index] if paper_name_index is not None and len(row) > paper_name_index else ""
+        if normalize_text(name) and not normalize_text(code) and not normalize_text(form_codes) and not normalize_text(paper_name):
             for subject in split_subject_names(name):
                 record = normalize_course_record(subject, "", "")
                 if record:
                     records.append(record)
             continue
-        record = normalize_course_record(name, code, form_codes)
+        record = normalize_course_record(name, code, form_codes, paper_name)
         if record and (record["name"] or record["code"]):
             records.append(record)
     return records

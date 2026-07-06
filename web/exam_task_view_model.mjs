@@ -16,6 +16,27 @@ function aggregateStatus(sessions) {
   );
 }
 
+function parseExamTime(value) {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const normalized = String(value).trim().replace(/\//g, "-").replace(" ", "T");
+  const time = Date.parse(normalized);
+  return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY;
+}
+
+function resolveTaskProgress(sessions) {
+  const session = sessions.find((item) => Number.isFinite(Number(item?.progress)));
+  return session ? Number(session.progress) : 0;
+}
+
+export function isExamTaskEnded(task, now = new Date()) {
+  const formalSession = task?.formalSession || (task?.sessions || []).find((session) => session.sessionType === "formal") || null;
+  if (!formalSession) return false;
+  const endTime = parseExamTime(formalSession.end);
+  const startTime = parseExamTime(formalSession.start);
+  const comparisonTime = Number.isFinite(endTime) ? endTime : startTime;
+  return Number.isFinite(comparisonTime) && comparisonTime < now.getTime();
+}
+
 export function aggregateExamSessions(sessions = []) {
   const tasks = new Map();
   for (const session of sessions) {
@@ -30,12 +51,27 @@ export function aggregateExamSessions(sessions = []) {
     }
     tasks.get(session.taskId).sessions.push(session);
   }
-  return [...tasks.values()].map((task) => ({
-    ...task,
-    formalSession: task.sessions.find((session) => session.sessionType === "formal") || null,
-    trialSession: task.sessions.find((session) => session.sessionType === "trial") || null,
-    status: aggregateStatus(task.sessions),
-  }));
+  return [...tasks.values()]
+    .map((task, index) => {
+      const formalSession = task.sessions.find((session) => session.sessionType === "formal") || null;
+      return {
+        ...task,
+        formalSession,
+        trialSession: task.sessions.find((session) => session.sessionType === "trial") || null,
+        status: aggregateStatus(task.sessions),
+        progress: resolveTaskProgress(task.sessions),
+        sortIndex: index,
+      };
+    })
+    .sort((left, right) => {
+      const leftTime = parseExamTime(left.formalSession?.start);
+      const rightTime = parseExamTime(right.formalSession?.start);
+      if (!Number.isFinite(leftTime) && !Number.isFinite(rightTime)) return left.sortIndex - right.sortIndex;
+      if (!Number.isFinite(leftTime)) return 1;
+      if (!Number.isFinite(rightTime)) return -1;
+      return rightTime - leftTime || left.sortIndex - right.sortIndex;
+    })
+    .map(({ sortIndex, ...task }) => task);
 }
 
 export function matchesExamTask(task, query = "") {

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   aggregateExamSessions,
+  isExamTaskEnded,
   matchesExamTask,
   resolveCandidateTaskContext,
 } from "../web/exam_task_view_model.mjs";
@@ -54,6 +55,109 @@ test("marks a task successful only when all existing sessions succeed", () => {
   ]);
 
   assert.equal(tasks[0].status, "success");
+});
+
+test("orders exam tasks by latest formal exam start time first", () => {
+  const tasks = aggregateExamSessions([
+    {
+      taskId: "task-late",
+      projectName: "晚场考试",
+      sessionType: "formal",
+      session_id: "3001",
+      name: "晚场考试",
+      start: "2026-07-20 09:00",
+      status: "success",
+    },
+    {
+      taskId: "task-missing-formal-time",
+      projectName: "未填写正式时间",
+      sessionType: "trial",
+      session_id: "4002",
+      name: "未填写正式时间-试考",
+      start: "2026-07-01 09:00",
+      status: "success",
+    },
+    {
+      taskId: "task-early",
+      projectName: "早场考试",
+      sessionType: "formal",
+      session_id: "2001",
+      name: "早场考试",
+      start: "2026-07-10 09:00",
+      status: "success",
+    },
+  ]);
+
+  assert.deepEqual(tasks.map((task) => task.taskId), [
+    "task-late",
+    "task-early",
+    "task-missing-formal-time",
+  ]);
+});
+
+test("keeps task progress from sessions for exam list status display", () => {
+  const tasks = aggregateExamSessions([
+    {
+      taskId: "task-progress",
+      projectName: "进度考试",
+      sessionType: "formal",
+      session_id: "6001",
+      name: "进度考试",
+      progress: 50,
+      status: "success",
+    },
+    {
+      taskId: "task-progress",
+      projectName: "进度考试",
+      sessionType: "trial",
+      session_id: "6002",
+      name: "进度考试-试考",
+      progress: 50,
+      status: "success",
+    },
+  ]);
+
+  assert.equal(tasks[0].progress, 50);
+});
+
+test("detects exam tasks ended by formal exam time", () => {
+  const tasks = aggregateExamSessions([
+    {
+      taskId: "task-ended",
+      projectName: "已结束考试",
+      sessionType: "formal",
+      session_id: "5001",
+      name: "已结束考试",
+      start: "2026-07-01 09:00",
+      end: "2026-07-01 10:30",
+      status: "success",
+    },
+    {
+      taskId: "task-active",
+      projectName: "未结束考试",
+      sessionType: "formal",
+      session_id: "5002",
+      name: "未结束考试",
+      start: "2026-07-08 09:00",
+      end: "2026-07-08 10:30",
+      status: "success",
+    },
+    {
+      taskId: "task-missing-time",
+      projectName: "无正式时间考试",
+      sessionType: "formal",
+      session_id: "5003",
+      name: "无正式时间考试",
+      status: "success",
+    },
+  ]);
+  const endedTask = tasks.find((task) => task.taskId === "task-ended");
+  const activeTask = tasks.find((task) => task.taskId === "task-active");
+  const missingTimeTask = tasks.find((task) => task.taskId === "task-missing-time");
+
+  assert.equal(isExamTaskEnded(endedTask, new Date("2026-07-06T12:00:00+08:00")), true);
+  assert.equal(isExamTaskEnded(activeTask, new Date("2026-07-06T12:00:00+08:00")), false);
+  assert.equal(isExamTaskEnded(missingTimeTask, new Date("2026-07-06T12:00:00+08:00")), false);
 });
 
 test("searches all task and session identifiers", () => {

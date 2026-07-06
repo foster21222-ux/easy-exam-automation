@@ -151,7 +151,7 @@ test("retries course creation with incremented codes when tenant reports code al
     if (payload.code === "20260629-01-01" || payload.code === "20260629-02-01") {
       const error = new Error("bad request");
       error.status = 400;
-      error.detail = { message: "科目编码已存在" };
+      error.detail = { message: "科目编号已存在" };
       throw error;
     }
     return { name: payload.name, code: payload.code };
@@ -169,11 +169,46 @@ test("retries course creation with incremented codes when tenant reports code al
     .filter((call) => call.url === "https://eztest.cn/tenant/api/course/")
     .map((call) => JSON.parse(call.options.body));
   assert.deepEqual(createBodies.map((body) => body.code), ["20260629-01-01", "20260629-02-01", "20260629-03-01"]);
-  assert.deepEqual(courses, [{ name: "体育", code: "20260629-03-01", form_codes: ["20260629-01-01"], order: 1 }]);
+  assert.deepEqual(createBodies.map((body) => body.form_codes), [["20260629-01-01"], ["20260629-02-01"], ["20260629-03-01"]]);
+  assert.deepEqual(courses, [{ name: "体育", code: "20260629-03-01", form_codes: ["20260629-03-01"], order: 1 }]);
   assert.ok(logs.includes("[API 科目] 准备创建科目：体育 / 20260629-01-01"));
   assert.ok(logs.includes("[API 科目] 科目编号已存在：20260629-01-01，尝试下一个编号：20260629-02-01"));
   assert.ok(logs.includes("[API 科目] 科目编号已存在：20260629-02-01，尝试下一个编号：20260629-03-01"));
   assert.ok(logs.includes("[API 科目] 科目创建成功：体育 / 20260629-03-01"));
+});
+
+test("retries to a new unused exam serial when tenant list misses occupied course codes", async () => {
+  const calls = [];
+  const logs = [];
+  const occupiedCodes = new Set(["20260707-01-01", "20260707-02-01"]);
+  const requestJson = async (_login, url, options) => {
+    calls.push({ url, options });
+    if (String(url).includes("/tenant/api/courses/")) return { results: [] };
+    const payload = JSON.parse(options.body);
+    if (occupiedCodes.has(payload.code)) {
+      const error = new Error("bad request");
+      error.status = 400;
+      error.detail = { msg: "科目编号已存在" };
+      throw error;
+    }
+    return { name: payload.name, code: payload.code };
+  };
+
+  const courses = await ensureFormalCoursesCreated({
+    login: {},
+    apiBase: "https://eztest.cn",
+    config: { courses: [{ name: "天文", code: "20260707-01-01" }] },
+    requestJson,
+    emitLog: (message) => logs.push(message),
+  });
+
+  const createBodies = calls
+    .filter((call) => call.url === "https://eztest.cn/tenant/api/course/")
+    .map((call) => JSON.parse(call.options.body));
+  assert.deepEqual(createBodies.map((body) => body.code), ["20260707-01-01", "20260707-02-01", "20260707-03-01"]);
+  assert.deepEqual(courses, [{ name: "天文", code: "20260707-03-01", form_codes: ["20260707-03-01"], order: 1 }]);
+  assert.ok(logs.includes("[API 科目] 科目编号已存在：20260707-01-01，尝试下一个编号：20260707-02-01"));
+  assert.ok(logs.includes("[API 科目] 科目编号已存在：20260707-02-01，尝试下一个编号：20260707-03-01"));
 });
 
 test("does not retry course creation for other tenant errors", async () => {

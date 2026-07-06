@@ -1946,8 +1946,18 @@
       .task-step-name { font-weight: 800; line-height: 1.45; }
       .task-step-times { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.75; }
       .task-step-actions { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
-      .task-step-action { border: 1px solid var(--line); background: #fff; color: var(--blue); border-radius: 9px; padding: 7px 10px; font-weight: 800; cursor: pointer; }
+      .task-step-action { border: 1px solid var(--line); background: #fff; color: var(--blue); border-radius: 9px; padding: 7px 10px; font-weight: 800; cursor: pointer; text-decoration: none; }
       .task-step-action:disabled { color: var(--muted); background: #f4f7fb; cursor: not-allowed; }
+      .paper-bind-feedback, .course-bind-feedback { margin-top: 10px; display: grid; gap: 6px; border-radius: 10px; padding: 9px; font-size: 12px; line-height: 1.5; color: #475569; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; box-sizing: border-box; }
+      .paper-bind-feedback strong, .course-bind-feedback strong { color: var(--text); font-size: 12px; }
+      .paper-bind-feedback.success { background: #ecfdf3; color: #166534; }
+      .course-bind-feedback.success { background: #ecfdf3; color: #166534; }
+      .paper-bind-feedback.failed { background: #fff1f2; color: #b42318; }
+      .paper-bind-feedback.pending { background: #f8fafc; color: #475569; }
+      .paper-bind-row, .course-bind-row { display: grid; gap: 2px; min-width: 0; padding-top: 6px; border-top: 1px solid rgba(22, 101, 52, .14); }
+      .paper-bind-row:first-of-type, .course-bind-row:first-of-type { border-top: 0; padding-top: 0; }
+      .paper-bind-line, .course-bind-line { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+      .paper-bind-label, .course-bind-label { color: #64748b; font-weight: 800; margin-right: 4px; }
       .sms-notification-preview { margin-top: 12px; color: #475569; font-size: 12px; line-height: 1.65; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
       .sms-action-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
       .sms-message-text {
@@ -2256,42 +2266,6 @@
         </div>
 
         <section class="stack" id="autoConfigStack" hidden>
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2 class="panel-title">功能介绍</h2>
-                <p class="subtitle">围绕考试交付全流程，把需求收集、人工审核、自动执行和结果回收放在同一个本地控制台。</p>
-              </div>
-            </div>
-            <div class="panel-body">
-              <div class="settings-grid">
-                <div class="field">
-                  <span class="field-label">自动配置</span>
-                  <span class="settings-note">导入 Excel 需求单，自动创建正式考试、试考、科目、提示语和承诺书，并在确认页等待人工核对。</span>
-                </div>
-                <div class="field">
-                  <span class="field-label">项目与考试追踪</span>
-                  <span class="settings-note">按项目、考试任务和执行步骤保存状态，支持失败重试、试卷绑定、监考账号和成绩反馈单下载。</span>
-                </div>
-                <div class="field">
-                  <span class="field-label">名单导入</span>
-                  <span class="settings-note">识别客户名单字段，校验准考证号、姓名、证件号，整理后导入指定易考场次。</span>
-                </div>
-                <div class="field">
-                  <span class="field-label">需求中心</span>
-                  <span class="settings-note">承接 Dify、内部接口或微信群采集结果，保留审核、客户确认、变更记录和执行任务关联。</span>
-                </div>
-                <div class="field">
-                  <span class="field-label">微信采集</span>
-                  <span class="settings-note">按微信群采集可见聊天内容和附件线索，推送到需求中心，并提供预检、链路自检和运行历史。</span>
-                </div>
-                <div class="field">
-                  <span class="field-label">系统配置</span>
-                  <span class="settings-note">集中维护本机服务、定时采集、LLM 候选解析和上线前检查，密钥只保存在本机运行目录。</span>
-                </div>
-              </div>
-            </div>
-          </div>
           <div class="panel">
             <div class="panel-head">
               <h2 class="panel-title">后台连接</h2>
@@ -2743,19 +2717,6 @@
 
         <section class="task-view" id="projectManagementView" hidden>
           <div class="view-heading"><div><h1>项目管理</h1><p class="subtitle">管理已持久化的考试项目。</p></div><div class="view-actions"><button class="btn" id="refreshProjectsBtn" type="button">刷新</button><button class="btn primary" id="newProjectBtn" type="button">新建项目</button></div></div>
-          <div class="panel">
-            <div class="panel-head">
-              <div><h2 class="panel-title">功能介绍</h2><p class="subtitle">从客户需求到考试交付的本地工作台，覆盖需求收集、审核、自动配置、名单导入和结果回收。</p></div>
-            </div>
-            <div class="panel-body">
-              <div class="settings-grid">
-                <div class="field"><span class="field-label">需求入口</span><span class="settings-note">支持 Excel 需求单、需求中心和微信群采集，把客户信息沉淀成可审核记录。</span></div>
-                <div class="field"><span class="field-label">自动执行</span><span class="settings-note">创建正式考试、试考、科目、提示语、承诺书，并保留人工确认节点。</span></div>
-                <div class="field"><span class="field-label">项目追踪</span><span class="settings-note">按项目汇总考试任务、正式/试考场次、执行步骤、失败重试和人工待处理事项。</span></div>
-                <div class="field"><span class="field-label">交付结果</span><span class="settings-note">整理并导入考生名单，生成监考账号文件、成绩反馈单和项目共享表同步记录。</span></div>
-              </div>
-            </div>
-          </div>
           <div class="task-overview" id="projectStats"></div>
           <div class="panel"><div class="panel-body"><div class="settings-grid"><label class="field"><span class="field-label">搜索项目</span><input class="field-input" id="projectSearchInput" placeholder="项目名称 / 客户 / 账号" /></label><label class="field"><span class="field-label">项目状态</span><select class="field-input" id="projectStatusFilter"><option value="">全部状态</option><option value="running">进行中</option><option value="waiting_manual">待处理</option><option value="success">已完成</option><option value="failed">失败</option></select></label></div></div></div>
           <div class="project-grid" id="projectGrid"><div class="empty-state">暂无项目记录</div></div>
@@ -2773,6 +2734,7 @@
           <div class="view-heading"><div><h1>考试列表</h1><p class="subtitle">按考试任务汇总正式考试与试考。</p></div><button class="btn" id="refreshExamsBtn" type="button">刷新</button></div>
           <div class="task-overview" id="examStats"></div>
           <div class="panel"><div class="panel-body"><label class="field"><span class="field-label">搜索考试</span><input class="field-input" id="examSearchInput" placeholder="考试名称 / 场次名称 / session_id / 账号" /></label></div></div>
+          <div class="view-actions" style="margin: -4px 0 12px;"><button class="btn" id="endedExamsToggleBtn" type="button">查看已结束考试</button></div>
           <div class="exam-table-wrap">
             <table class="exam-table"><thead><tr><th>考试名称</th><th>正式考试</th><th>试考</th><th>来源账号</th><th>考生数</th><th>班级数</th><th>状态</th><th>操作</th></tr></thead><tbody id="examListRows"><tr><td colspan="8">暂无考试记录</td></tr></tbody></table>
           </div>
@@ -2838,7 +2800,7 @@
       import { CandidateImportPage } from "/web/pages/CandidateImportPage.mjs";
       import { ExamDetailPage } from "/web/pages/ExamDetailPage.mjs";
       import { ExamListPage } from "/web/pages/ExamListPage.mjs";
-      import { aggregateExamSessions, matchesExamTask, resolveCandidateTaskContext } from "/web/exam_task_view_model.mjs";
+      import { aggregateExamSessions, isExamTaskEnded, matchesExamTask, resolveCandidateTaskContext } from "/web/exam_task_view_model.mjs";
       import { LoginPage } from "/web/pages/LoginPage.mjs";
       import { ProjectDetailPage } from "/web/pages/ProjectDetailPage.mjs";
       import { ProjectListPage } from "/web/pages/ProjectListPage.mjs";
@@ -2961,6 +2923,7 @@
       const examListRows = document.querySelector("#examListRows");
       const examStats = document.querySelector("#examStats");
       const examSearchInput = document.querySelector("#examSearchInput");
+      const endedExamsToggleBtn = document.querySelector("#endedExamsToggleBtn");
       const taskOverview = document.querySelector("#taskOverview");
       const taskSessionCards = document.querySelector("#taskSessionCards");
       const taskStepGrid = document.querySelector("#taskStepGrid");
@@ -3082,7 +3045,12 @@
         return `<span class="status-chip ${safeText(status)}">${taskStatusLabels[status] || safeText(status)}</span>`;
       }
 
-      const taskViewState = { tasks: [], sessions: [], requirements: [], users: [], currentTaskId: "", currentProjectId: "", currentRequirementId: "", wechatRequirementDetails: {} };
+      function formatProgressPercent(value) {
+        const progress = Number(value || 0);
+        return `${(Number.isFinite(progress) ? progress : 0).toFixed(1)}%`;
+      }
+
+      const taskViewState = { tasks: [], sessions: [], requirements: [], users: [], currentTaskId: "", currentProjectId: "", currentRequirementId: "", examListMode: "active", wechatRequirementDetails: {} };
 
 
       async function fetchJson(url, options) {
@@ -3235,11 +3203,17 @@
 
       function renderExamList() {
         const query = String(examSearchInput.value || "").trim().toLowerCase();
-        const exams = aggregateExamSessions(taskViewState.sessions).filter((task) => matchesExamTask(task, query));
+        const allExams = aggregateExamSessions(taskViewState.sessions);
+        const endedExams = allExams.filter((task) => isExamTaskEnded(task));
+        const activeExams = allExams.filter((task) => !isExamTaskEnded(task));
+        const sourceExams = taskViewState.examListMode === "ended" ? endedExams : activeExams;
+        const exams = sourceExams.filter((task) => matchesExamTask(task, query));
         const formalCount = taskViewState.sessions.filter((session) => session.sessionType === "formal").length;
         const trialCount = taskViewState.sessions.filter((session) => session.sessionType === "trial").length;
-        const taskCount = aggregateExamSessions(taskViewState.sessions).length;
-        examStats.innerHTML = `<div class="task-summary"><div><div class="project-title">考试统计</div><div class="task-meta">考试任务 ${taskCount} · 正式考试 ${formalCount} · 试考 ${trialCount}</div></div></div>`;
+        const taskCount = allExams.length;
+        const activeLabel = taskViewState.examListMode === "ended" ? "已结束考试" : "当前考试";
+        endedExamsToggleBtn.textContent = taskViewState.examListMode === "ended" ? "查看当前考试" : "查看已结束考试";
+        examStats.innerHTML = `<div class="task-summary"><div><div class="project-title">考试统计</div><div class="task-meta">当前分类：${activeLabel} ${sourceExams.length} · 已结束 ${endedExams.length} · 考试任务 ${taskCount} · 正式考试 ${formalCount} · 试考 ${trialCount}</div></div></div>`;
 
         function sessionSummary(session) {
           if (!session) return `<div class="exam-session-summary">尚未创建</div>`;
@@ -3250,6 +3224,8 @@
           return `<div>正式：${Number(task.formalSession?.[field] || 0)}</div><div>试考：${Number(task.trialSession?.[field] || 0)}</div>`;
         }
 
+        const rowStatusChip = (task) => taskViewState.examListMode === "ended" ? `<span class="status-chip success">已结束</span>` : `<span class="status-chip pending">${formatProgressPercent(task.progress)}</span>`;
+
         examListRows.innerHTML = exams.length
           ? exams.map((task) => `
               <tr>
@@ -3259,10 +3235,10 @@
                 <td>${safeText(task.sourceAccount || "未记录")}</td>
                 <td>${countSummary(task, "candidateCount")}</td>
                 <td>${countSummary(task, "roomCount")}</td>
-                <td>${statusChip(task.status)}</td>
+                <td>${rowStatusChip(task)}</td>
                 <td><div class="view-actions"><button class="btn task-detail-btn" data-task-id="${safeText(task.taskId)}" type="button">查看</button><button class="btn exam-row-action" data-action="refresh" type="button">刷新</button></div></td>
               </tr>`).join("")
-          : `<tr><td colspan="8">暂无考试记录。新创建场次会自动显示在这里。</td></tr>`;
+          : `<tr><td colspan="8">${taskViewState.examListMode === "ended" ? "暂无已结束考试。" : "暂无当前考试。新创建场次会自动显示在这里。"}</td></tr>`;
       }
 
       async function loadExams() {
@@ -3572,7 +3548,10 @@
           display.push(cloneTaskStep(stepMap.get("trial_paper_bind"), { stepName: "试考试卷绑定" }));
         }
         if (stepMap.has("paper_bind")) {
-          display.push(cloneTaskStep(stepMap.get("paper_bind"), { stepName: "正式场次绑定科目" }));
+          display.push(cloneTaskStep(stepMap.get("paper_bind"), {
+            stepName: "正式场次绑定科目",
+            extraHtml: buildCourseBindFeedback(stepMap.get("course_create")),
+          }));
         }
         const paperState = task.config?.paperFormBind || {};
         display.push(cloneTaskStep(null, {
@@ -3583,7 +3562,8 @@
           completedAt: paperState.completedAt || null,
           durationMs: paperState.durationMs || null,
           errorMessage: paperState.errorMessage || "",
-          triggerActionHtml: `<div class="task-step-actions"><button class="task-step-action" data-trigger-step="paper_form_bind" type="button">${paperState.status === "failed" ? "重试试卷绑定" : "试卷绑定"}</button></div>`,
+          triggerActionHtml: `<div class="task-step-actions"><button class="task-step-action" data-trigger-step="paper_form_bind" type="button">${paperState.status === "running" ? "绑定中" : paperState.status === "failed" ? "重试试卷绑定" : "绑定试卷"}</button></div>`,
+          extraHtml: buildPaperBindFeedback(paperState, task.config?.courses || []),
           logs: Array.isArray(paperState.logs) && paperState.logs.length
             ? paperState.logs
             : [{ time: null, message: "等待正式场次绑定科目完成后处理试卷绑定。" }],
@@ -3616,6 +3596,44 @@
           extraDetail: scoreStep?.result?.fileName ? `成绩反馈单文件：${scoreStep.result.fileName}` : "",
         }));
         return display;
+      }
+
+      function inferredPaperName(item = {}, courses = []) {
+        const direct = (item.paper_names || []).join("、") || item.paper_name || "";
+        if (direct) return direct;
+        const courseCode = String(item.course_code || "").trim();
+        const course = (courses || []).find((candidate) => String(candidate.code || candidate.course_code || "").trim() === courseCode) || {};
+        const configured = String(course.paper_name || course.paperName || "").trim();
+        if (configured) return configured;
+        const courseName = String(item.course_name || course.name || course.course_name || "").trim();
+        return courseCode && courseName ? `${courseCode}${courseName}` : "";
+      }
+
+      function buildPaperBindFeedback(paperState = {}, courses = []) {
+        const results = paperState.result?.bindResult?.results || [];
+        if (paperState.status === "success" && results.length) {
+          return `<div class="paper-bind-feedback success"><strong>已绑定试卷</strong>${results.map((item) => `
+            <div class="paper-bind-row">
+              <div class="paper-bind-line"><span class="paper-bind-label">科目</span>${safeText(item.course_name || "科目")}</div>
+              <div class="paper-bind-line"><span class="paper-bind-label">试卷名</span>${safeText(inferredPaperName(item, courses))}</div>
+            </div>
+          `).join("")}</div>`;
+        }
+        if (paperState.status === "failed") {
+          return `<div class="paper-bind-feedback failed"><strong>试卷绑定未完成</strong><span>${safeText(paperState.errorMessage || "等待试卷上传后可手动重试，系统也会在考前一天内每小时自动检查。")}</span></div>`;
+        }
+        return `<div class="paper-bind-feedback pending"><strong>自动检查</strong><span>正式考试考前 24 小时内，系统会每小时检查试卷是否已上传；也可以点击“绑定试卷”立即触发。</span></div>`;
+      }
+
+      function buildCourseBindFeedback(courseStep = {}) {
+        const courses = courseStep?.result?.courses || [];
+        if (!Array.isArray(courses) || !courses.length) return "";
+        return `<div class="course-bind-feedback success"><strong>考试科目</strong>${courses.map((course) => `
+          <div class="course-bind-row">
+            <div class="course-bind-line"><span class="course-bind-label">科目</span>${safeText(course.name || course.course_name || "科目")}</div>
+            <div class="course-bind-line"><span class="course-bind-label">科目编号</span>${safeText(course.code || course.course_code || "")}</div>
+          </div>
+        `).join("")}</div>`;
       }
 
       function shouldShowRetryStepAction(step) {
@@ -6570,6 +6588,10 @@
       projectSearchInput.addEventListener("input", renderProjectList);
       projectStatusFilter.addEventListener("change", renderProjectList);
       examSearchInput.addEventListener("input", renderExamList);
+      endedExamsToggleBtn.addEventListener("click", () => {
+        taskViewState.examListMode = taskViewState.examListMode === "ended" ? "active" : "ended";
+        renderExamList();
+      });
       projectGrid.addEventListener("click", (event) => {
         const card = event.target.closest("[data-task-id]");
         if (!card) return;

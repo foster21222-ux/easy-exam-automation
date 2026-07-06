@@ -9,12 +9,43 @@ const serverSource = fs.readFileSync(path.join(rootDir, "server/easy_exam_server
 
 test("paper form bind retry does not mark missing form codes as success", () => {
   assert.ok(serverSource.includes('if (bindResult.status === "waiting_manual")'));
-  assert.ok(serverSource.includes('updatePaperFormBindState(taskId, "failed"'));
+  assert.ok(serverSource.includes('updatePaperFormBindState(task.taskId, "failed"'));
+  assert.ok(serverSource.includes("status: 409"));
   assert.ok(serverSource.includes("missingCourseCodes"));
+});
+
+test("paper form bind retry checks tenant session detail for manual binding before failing", () => {
+  assert.ok(serverSource.includes("detectSessionPaperBindings"));
+  assert.ok(serverSource.includes("if (!courses.length)"));
+  assert.ok(serverSource.includes('if (manualBindResult.status === "success")'));
+  assert.ok(serverSource.includes("detectedManualBinding: true"));
+  assert.ok(serverSource.includes("人工绑定回查确认正式场次已有试卷"));
 });
 
 test("trial paper bind is a retryable task step", () => {
   assert.ok(serverSource.includes('if (stepKey === "trial_paper_bind")'));
   assert.ok(serverSource.includes("bindDefaultTrialPaperToSession"));
   assert.ok(serverSource.includes('updateTaskStep(taskId, stepKey, "waiting_manual"'));
+});
+
+test("paper binding scheduler runs hourly before the formal exam starts", () => {
+  assert.ok(serverSource.includes("PAPER_BIND_SCHEDULER_INTERVAL_MS"));
+  assert.ok(serverSource.includes("shouldAttemptScheduledPaperBind"));
+  assert.ok(serverSource.includes("runScheduledPaperBindingOnce"));
+  assert.ok(serverSource.includes("setInterval(runScheduledPaperBindingOnce"));
+});
+
+test("paper binding detail renders bound form codes and manual action", () => {
+  assert.ok(serverSource.includes("paperFormBind"));
+  const html = fs.readFileSync(path.join(rootDir, "outputs/web_prototype/easy_exam_automation.html"), "utf8");
+  assert.ok(html.includes("buildPaperBindFeedback"));
+  assert.ok(html.includes("buildCourseBindFeedback"));
+  assert.ok(html.includes("已绑定试卷"));
+  assert.ok(html.includes("考试科目"));
+  assert.ok(html.includes("paper-bind-feedback success"));
+  assert.ok(html.includes("course-bind-feedback success"));
+  assert.ok(html.includes("paper-bind-label\">试卷名"));
+  assert.equal(html.includes("paper-bind-label\">科目编号"), false);
+  assert.ok(html.includes("course-bind-label\">科目编号"));
+  assert.ok(html.includes("data-trigger-step=\"paper_form_bind\""));
 });

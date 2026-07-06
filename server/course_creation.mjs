@@ -97,7 +97,8 @@ function getErrorMessage(error) {
 }
 
 function isCourseCodeExistsError(error) {
-  return error?.status === 400 && getErrorMessage(error).includes("科目编码已存在");
+  const message = getErrorMessage(error);
+  return error?.status === 400 && (message.includes("科目编码已存在") || message.includes("科目编号已存在"));
 }
 
 export function generateNextCourseCode(courseCode) {
@@ -209,10 +210,11 @@ async function createCourseWithAutoIncrement({
   let currentCode = initialCode;
   for (let attempt = 0; attempt < 99; attempt += 1) {
     emitLog(`[API 科目] 准备创建科目：${course.name} / ${currentCode}`);
+    const currentCourse = withCourseCode(course, currentCode);
     const coursePayload = {
-      name: course.name,
+      name: currentCourse.name,
       code: currentCode,
-      form_codes: course.form_codes,
+      form_codes: currentCourse.form_codes,
     };
 
     try {
@@ -338,7 +340,7 @@ export async function ensureFormalCoursesCreated({
       emitLog,
     });
     usedCodes.add(created.finalCourseCode);
-    confirmedCourses.push({ ...course, code: created.finalCourseCode });
+    confirmedCourses.push(withCourseCode(course, created.finalCourseCode));
   }
 
   return confirmedCourses;
