@@ -756,6 +756,179 @@ function escapeAppleScript(value) {
   return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
+export function parseMacIdleSeconds(ioregOutput = "") {
+  const match = String(ioregOutput || "").match(/"HIDIdleTime"\s*=\s*(\d+)/);
+  if (!match) return null;
+  return Number(match[1]) / 1_000_000_000;
+}
+
+function readMacIdleSeconds() {
+  try {
+    return parseMacIdleSeconds(execFileSync("ioreg", ["-c", "IOHIDSystem"], { encoding: "utf8" }));
+  } catch {
+    return null;
+  }
+}
+
+function pendingConfirmationPathForArgs(args = {}) {
+  if (args.pendingConfirmationPath) return args.pendingConfirmationPath;
+  const baseDir = args.output ? path.dirname(args.output) : ".easy_exam_runtime";
+  return path.join(baseDir, "wechat-pending-confirmation.json");
+}
+
+function readPendingConfirmation(filePath) {
+  if (!filePath || !existsSync(filePath)) return null;
+  try {
+    return JSON.parse(readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writePendingConfirmation(filePath, payload) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+function clearPendingConfirmation(filePath) {
+  if (!filePath) return;
+  rmSync(filePath, { force: true });
+}
+
+function addMinutes(date, minutes) {
+  return new Date(date.getTime() + Math.max(1, Number(minutes || 1)) * 60_000);
+}
+
+function activeDueGroupsForUserGate(groups = [], state = {}, args = {}) {
+  if (args.force || args.dryRun) return [];
+  return groups.filter((group) => {
+    const groupState = resolveGroupRunState(group, state.groups?.[group.groupName]);
+    const checkpoint = groupState?.checkpoint || null;
+    if (!checkpoint?.lastMessageHash) return false;
+    return !shouldSkipByInterval(group, groupState, { force: false }).skip;
+  });
+}
+
+function buildUserConfirmationPayload({
+  status = "waiting",
+  reason = "user_active",
+  groups = [],
+  now = new Date(),
+  idleSeconds = null,
+  idleThresholdSeconds = 300,
+  confirmationTimeoutMinutes = 5,
+  snoozeMinutes = 15,
+} = {}) {
+  const createdAt = now.toISOString();
+  return {
+    confirmationId: `wechat-confirm-${now.getTime()}-${crypto.randomUUID()}`,
+    status,
+    reason,
+    groups,
+    createdAt,
+    updatedAt: createdAt,
+    idleSeconds,
+    idleThresholdSeconds,
+    promptExpiresAt: addMinutes(now, confirmationTimeoutMinutes).toISOString(),
+    snoozedUntil: status === "snoozed" ? addMinutes(now, snoozeMinutes).toISOString() : "",
+    detail: "检测到用户正在使用这台 Mac，自动采集已暂停，等待确认或稍后重试。",
+  };
+}
+
+function notifyUserConfirmation(pending) {
+  try {
+    const title = "微信群自动采集等待确认";
+    const groupText = (pending.groups || []).join("、") || "已启用微信群";
+    const body = `检测到你正在使用电脑，已暂停 ${groupText} 的自动采集。可在 easy-exam 系统配置中确认执行或稍后提醒。`;
+    execFileSync("osascript", [
+      "-e",
+      `display notification "${escapeAppleScript(body)}" with title "${escapeAppleScript(title)}"`,
+    ], { encoding: "utf8" });
+  } catch {
+    // 通知失败不能影响调度状态；网页状态仍是权威提示入口。
+  }
+}
+
+function writeUserGateRunSummary({
+  args,
+  startedAt,
+  status,
+  groups,
+  pending,
+  detail,
+} = {}) {
+  const runSummary = {
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    status,
+    detail: detail || pending?.detail || "",
+    confirmationId: pending?.confirmationId || "",
+    groups: groups.map((groupName) => ({
+      groupName,
+      status,
+      detail: detail || pending?.detail || "",
+    })),
+  };
+  writeJsonFile(args.output, runSummary);
+  appendRunHistory(historyPathForArgs(args), runSummary, { maxEntries: args.historyMaxEntries });
+  process.stdout.write(`${JSON.stringify({ results: runSummary.groups.map((group) => ({ groupName: group.groupName, skipped: status })) }, null, 2)}\n`);
+}
+
+function resolveUserActivityGate({ args, groups, state, startedAt }) {
+  const dueGroups = activeDueGroupsForUserGate(groups, state, args);
+  if (!dueGroups.length) return { blocked: false };
+  const pendingPath = pendingConfirmationPathForArgs(args);
+  const now = new Date();
+  const confirmationTimeoutMinutes = Number(args.confirmationTimeoutMinutes || 5);
+  const snoozeMinutes = Number(args.snoozeMinutes || 15);
+  const pending = readPendingConfirmation(pendingPath);
+  if (pending?.status === "waiting") {
+    const promptExpiresAt = new Date(pending.promptExpiresAt || 0);
+    if (!Number.isNaN(promptExpiresAt.getTime()) && now < promptExpiresAt) {
+      return { blocked: true, status: "waiting_user_confirmation", pending, pendingPath, groups: pending.groups || dueGroups.map((group) => group.groupName) };
+    }
+    const snoozed = {
+      ...pending,
+      status: "snoozed",
+      updatedAt: now.toISOString(),
+      snoozedUntil: addMinutes(now, snoozeMinutes).toISOString(),
+      detail: "用户未确认本轮自动采集，已自动延后，稍后重新判断是否空闲。",
+    };
+    writePendingConfirmation(pendingPath, snoozed);
+    return { blocked: true, status: "snoozed_user_active", pending: snoozed, pendingPath, groups: snoozed.groups || dueGroups.map((group) => group.groupName) };
+  }
+  if (pending?.status === "snoozed") {
+    const snoozedUntil = new Date(pending.snoozedUntil || 0);
+    if (!Number.isNaN(snoozedUntil.getTime()) && now < snoozedUntil) {
+      return { blocked: true, status: "snoozed_user_active", pending, pendingPath, groups: pending.groups || dueGroups.map((group) => group.groupName) };
+    }
+  }
+  if (pending?.status === "paused_today") {
+    const pausedUntil = new Date(pending.pausedUntil || 0);
+    if (!Number.isNaN(pausedUntil.getTime()) && now < pausedUntil) {
+      return { blocked: true, status: "paused_user_requested", pending, pendingPath, groups: pending.groups || dueGroups.map((group) => group.groupName) };
+    }
+    clearPendingConfirmation(pendingPath);
+  }
+  const idleThresholdSeconds = Number(args.userIdleMinSeconds || 300);
+  const idleSeconds = readMacIdleSeconds();
+  if (idleSeconds !== null && idleSeconds < idleThresholdSeconds) {
+    const nextPending = buildUserConfirmationPayload({
+      groups: dueGroups.map((group) => group.groupName),
+      now,
+      idleSeconds,
+      idleThresholdSeconds,
+      confirmationTimeoutMinutes,
+      snoozeMinutes,
+    });
+    writePendingConfirmation(pendingPath, nextPending);
+    notifyUserConfirmation(nextPending);
+    return { blocked: true, status: "waiting_user_confirmation", pending: nextPending, pendingPath, groups: nextPending.groups };
+  }
+  clearPendingConfirmation(pendingPath);
+  return { blocked: false, startedAt };
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
   const args = parseArgs(process.argv);
@@ -793,6 +966,17 @@ async function main() {
   if (!groups.length) throw new Error("没有找到可采集的微信群配置。");
 
   const state = readState(args.state);
+  const userGate = resolveUserActivityGate({ args, groups, state, startedAt });
+  if (userGate.blocked) {
+    writeUserGateRunSummary({
+      args,
+      startedAt,
+      status: userGate.status,
+      groups: userGate.groups,
+      pending: userGate.pending,
+    });
+    return;
+  }
   const llmParserConfig = buildLlmParserConfig(args, process.env, rawConfig);
   const results = [];
   const runSummary = {

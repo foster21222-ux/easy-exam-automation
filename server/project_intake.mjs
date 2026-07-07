@@ -287,7 +287,7 @@ function parseSchedule(lines) {
   for (const index of dateOnlyIndexes) {
     const previousLabels = lines.slice(Math.max(0, index - 8), index);
     if (!previousLabels.some((line) => line.includes("考试日期") || line.includes("考试时间"))) continue;
-    const examTime = normalizeValue(lines[index + 1] || "");
+    const examTime = normalizeValue(lines[index + 1] || "").replace(/^全大$/, "全天");
     if (!/^(上午|下午|晚上|全天|\d{1,2}:\d{2}(?:\s*[-~至]\s*\d{1,2}:\d{2})?)$/.test(examTime)) continue;
     const note = normalizeValue(lines[index + 2] || "");
     schedules.push({
@@ -390,7 +390,7 @@ export function parseBusinessRequirementOcr(text = "") {
   const schedules = parseSchedule(lines);
   if (schedules.length) draft.exam_schedule = schedules;
   applyBusinessScreenshotHeuristics(lines, draft);
-  if (draft.project_name && !draft.exam_name) draft.exam_name = draft.project_name;
+  if (draft.project_name) draft.exam_name = draft.project_name;
   return draft;
 }
 
@@ -478,7 +478,7 @@ export function parseBusinessRequirementTemplateRegions(regions = {}, fallbackTe
       draft[field] = selected.join("、");
     }
   }
-  if (draft.project_name && !draft.exam_name) draft.exam_name = draft.project_name;
+  if (draft.project_name) draft.exam_name = draft.project_name;
   return draft;
 }
 

@@ -116,6 +116,15 @@ test("parses visible WeChat messages into a requirement draft", () => {
   assert.match(draft.checkpoint.lastMessageHash, /^[a-f0-9]{64}$/);
 });
 
+test("parses exam monitoring wording as video monitoring requirement", () => {
+  const messages = parseWechatRequirementMessages("老师，还需要您确认以下几点：使用客户端考试，需要考试监控并开启鹰眼第二视角，视频需要录制。");
+
+  assert.equal(messages.requirement.exam_client_type, "客户端考试");
+  assert.equal(messages.requirement.video_monitor_required, "是");
+  assert.equal(messages.requirement.hawkeye_required, "是");
+  assert.equal(messages.requirement.video_record_required, "是");
+});
+
 test("reports unresolved questions when required fields are missing", () => {
   const messages = parseWechatRequirementMessages("客户：考试叫产品认证考试，科目是语文。");
 

@@ -193,6 +193,12 @@ test("project deletion disables linked WeChat collector groups", () => {
     serverSource.indexOf("async function handleTaskHide"),
     serverSource.indexOf("async function updatePaperFormBindState"),
   );
+  assert.ok(serverSource.includes("buildTaskDeletePreview"));
+  assert.ok(serverSource.includes("createTaskDeleteConfirmationToken"));
+  assert.ok(serverSource.includes("verifyTaskDeleteConfirmationToken"));
+  assert.ok(serverSource.includes("taskDeletePreviewMatch"));
+  assert.ok(handler.includes("确认信息已过期或不匹配"));
+  assert.ok(handler.includes("请先输入项目编码或项目名称确认删除"));
   assert.ok(handler.includes("disableWechatGroupsForDeletedTask"));
   assert.ok(handler.includes("disabledWechatGroupNames"));
 });

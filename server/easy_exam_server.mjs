@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { randomInt, randomUUID } from "node:crypto";
+import { createHmac, randomInt, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
@@ -3382,9 +3382,89 @@ async function handleScoreDownload(taskId, req, res) {
   createReadStream(filePath).pipe(res);
 }
 
+function taskProjectCode(task = {}) {
+  return String(task.config?.businessRequirement?.project_code || task.config?.projectCode || "").trim();
+}
+
+function taskDeletionConfirmText(task = {}) {
+  return taskProjectCode(task) || String(task.projectName || task.config?.projectName || task.taskId || "").trim();
+}
+
+function taskDeleteTokenSecret() {
+  return String(process.env.EASY_EXAM_DELETE_SECRET || `${rootDir}:${authSettingsPath}`);
+}
+
+function signTaskDeletePayload(payload) {
+  return createHmac("sha256", taskDeleteTokenSecret()).update(payload).digest("base64url");
+}
+
+function createTaskDeleteConfirmationToken(task, now = new Date()) {
+  const payload = {
+    taskId: String(task.taskId || ""),
+    confirmText: taskDeletionConfirmText(task),
+    expiresAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return `${encoded}.${signTaskDeletePayload(encoded)}`;
+}
+
+function verifyTaskDeleteConfirmationToken(token, task, now = new Date()) {
+  const [encoded, signature] = String(token || "").split(".");
+  if (!encoded || !signature || signTaskDeletePayload(encoded) !== signature) return false;
+  const payload = parseJsonSafe(Buffer.from(encoded, "base64url"));
+  if (!payload) return false;
+  if (String(payload.taskId || "") !== String(task.taskId || "")) return false;
+  if (String(payload.confirmText || "") !== taskDeletionConfirmText(task)) return false;
+  const expiresAt = new Date(payload.expiresAt || "");
+  return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() >= now.getTime();
+}
+
+function buildTaskDeletePreview(task = {}) {
+  const sessions = Array.isArray(task.sessions) ? task.sessions : [];
+  const formalSessionCount = sessions.filter((session) => session.sessionType === "formal").length;
+  const trialSessionCount = sessions.filter((session) => session.sessionType === "trial").length;
+  return {
+    taskId: task.taskId || "",
+    projectName: task.projectName || task.config?.projectName || "",
+    projectCode: taskProjectCode(task),
+    requirementRequestId: task.config?.requirementRequestId || task.config?.initialRequirementRequestId || "",
+    requiredConfirmText: taskDeletionConfirmText(task),
+    formalSessionCount,
+    trialSessionCount,
+    sessionCount: sessions.length,
+    sessions: sessions.map((session) => ({
+      sessionId: session.session_id || session.sessionId || "",
+      sessionName: session.session_name || session.sessionName || "",
+      sessionType: session.sessionType || session.session_type || "",
+    })),
+    impacts: [
+      "从项目管理和考试列表移除此项目",
+      "同步删除易考正式/试考场次",
+      "停用关联微信群采集任务",
+    ],
+  };
+}
+
+async function handleTaskDeletePreview(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  return json(res, 200, {
+    ok: true,
+    preview: buildTaskDeletePreview(task),
+    confirmationToken: createTaskDeleteConfirmationToken(task),
+  });
+}
+
 async function handleTaskHide(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  if (!verifyTaskDeleteConfirmationToken(payload.confirmationToken, task)) {
+    return badRequest(res, "确认信息已过期或不匹配，请重新打开删除预览。");
+  }
+  if (String(payload.confirmText || "").trim() !== taskDeletionConfirmText(task)) {
+    return badRequest(res, "请先输入项目编码或项目名称确认删除。");
+  }
   const login = getYikaoLoginForRequest(req);
   const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
   const logs = [];
@@ -3712,6 +3792,10 @@ async function requestHandler(req, res) {
     const scoreDownloadMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/scores\/download$/);
     if (req.method === "GET" && scoreDownloadMatch) {
       return await handleScoreDownload(decodeURIComponent(scoreDownloadMatch[1]), req, res);
+    }
+    const taskDeletePreviewMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/delete-preview$/);
+    if (req.method === "POST" && taskDeletePreviewMatch) {
+      return await handleTaskDeletePreview(decodeURIComponent(taskDeletePreviewMatch[1]), req, res);
     }
     const taskDetailMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
     if (req.method === "DELETE" && taskDetailMatch) {

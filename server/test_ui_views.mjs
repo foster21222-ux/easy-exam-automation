@@ -134,6 +134,10 @@ test("WeChat configuration lives in project management and monitoring lives in s
   assert.ok(html.includes('data-wechat-action="remove"'));
   assert.ok(html.includes('data-wechat-action="run-once"'));
   assert.ok(html.includes("renderWechatCollectorReadiness"));
+  assert.ok(html.includes("renderWechatUserConfirmation"));
+  assert.ok(html.includes("/api/wechat-collector/user-confirmation/action"));
+  assert.ok(html.includes("等待用户确认"));
+  assert.ok(html.includes("15 分钟后提醒"));
   assert.ok(html.includes("微信群配置"));
   assert.ok(html.includes("本项目微信群配置"));
   assert.ok(html.includes("只维护当前项目关联微信群"));
@@ -161,13 +165,23 @@ test("WeChat configuration lives in project management and monitoring lives in s
   assert.ok(html.includes("<h2 class=\"panel-title\">配置备份与恢复</h2>"));
   assert.ok(html.includes("任务执行状态"));
   assert.ok(html.includes("需求更新记录"));
+  assert.ok(html.includes("本群采集状态"));
+  assert.ok(html.includes("当前结论"));
+  assert.ok(html.includes("下一步："));
+  assert.ok(html.includes("需求更新时间线"));
+  assert.ok(html.includes("采集运行时间线"));
+  assert.ok(html.includes("查看排障信息"));
+  assert.ok(html.includes("renderWechatGroupStatusOverview"));
+  assert.ok(html.includes("renderWechatRunDebugDetails"));
   assert.ok(html.includes("renderWechatGroupRequirementTimeline"));
   assert.ok(html.includes("renderWechatGroupRequirementUpdates"));
   assert.ok(html.includes("renderWechatGroupRequirementChanges"));
   assert.ok(html.includes("采集运行记录"));
   assert.ok(html.includes("客户变更记录"));
-  assert.ok(html.includes("查看需求单详情"));
-  assert.ok(html.includes('<h2 class="panel-title">需求更新记录</h2></div><div class="view-actions">${renderWechatRequirementDetailButton(effectiveRequestId)}</div>'));
+  assert.ok(html.includes("查看配置需求详情"));
+  assert.ok(html.includes("先看结论和下一步；排障参数默认折叠。"));
+  assert.ok(html.includes("左侧只展示真正写入需求单的更新；右侧展示采集运行日志。"));
+  assert.ok(html.includes("${renderWechatGroupStatusOverview(status, group, effectiveRequestId, attachmentDetail)}"));
   assert.equal(html.includes('const actions = `<div class="view-actions" style="margin-top:10px;"><button class="btn" data-wechat-action="open-requirement"'), false);
   assert.ok(html.includes("字段变更"));
   assert.ok(html.includes("本群已关联需求单，可在这里核对最近客户变更。"));
@@ -223,9 +237,9 @@ test("WeChat configuration lives in project management and monitoring lives in s
   assert.ok(html.includes("/api/wechat-collector/config/restore"));
   assert.ok(html.includes("restoreWechatCollectorConfigBackup"));
   assert.ok(html.includes("latestStatus"));
-  assert.ok(html.includes("status.latestError ? `错误：${status.latestError}` : \"\""));
+  assert.ok(html.includes("const latestNote = status.latestDetail || wechatRunUserNote({ status: statusText, error: status.latestError });"));
   assert.ok(html.includes("\"no_requirement_signal\""));
-  assert.ok(html.includes("status.latestDetail ? `说明：${status.latestDetail}` : \"\""));
+  assert.ok(html.includes("item.error ? `错误：${item.error}` : \"\""));
   assert.ok(html.includes("[\"failed\", \"not_run\", \"needs_initial_collection\", \"no_requirement_signal\"].includes(statusText)"));
   assert.ok(html.includes("checkpointUpdatedAt"));
   assert.ok(html.includes("下次运行"));
@@ -704,7 +718,16 @@ test("user management page is present for admin account provisioning", () => {
 
 test("project management supports deleting projects", () => {
   assert.ok(html.includes('data-action="delete"'));
-  assert.ok(html.includes("同步删除易考中的正式考试/试考场次"));
+  assert.ok(html.includes("进入项目配置"));
+  assert.ok(html.includes("删除影响预览"));
+  assert.ok(html.includes("projectDeleteConfirmInput"));
+  assert.ok(html.includes("projectDeleteSessionConfirm"));
+  assert.ok(html.includes("/delete-preview"));
+  assert.ok(html.includes("confirmationToken"));
+  assert.ok(html.includes("确认删除项目及易考场次"));
+  assert.equal(html.includes('class="btn project-action" data-action="view"'), false);
+  assert.equal(html.includes('class="btn project-action" data-action="edit"'), false);
+  assert.ok(html.includes("同步删除易考正式/试考场次"));
   assert.ok(html.includes('method: "DELETE"'));
   assert.ok(html.includes("/api/tasks/"));
 });
@@ -722,6 +745,7 @@ test("project management supports screenshot-based project intake", () => {
   assert.ok(html.includes("运控流水号"));
   assert.ok(html.includes("ATA集中监考场地"));
   assert.ok(html.includes("试题类型"));
+  assert.ok(html.includes("const draft = { ...taskViewState.projectIntake.draft };"));
   assert.ok(html.includes("newProjectBtn.addEventListener(\"click\", openProjectIntakePanel)"));
   assert.equal(html.includes('newProjectBtn.addEventListener("click", () => router.navigate("/auto-config"))'), false);
 });
@@ -765,6 +789,13 @@ test("project detail exposes initial requirement and project scoped WeChat entry
   assert.ok(html.includes("projectRequirementInline.addEventListener"));
   assert.ok(html.includes("projectRequirementInlinePanel.open = true"));
   assert.equal(html.includes('if (button && requestId) openRequirementInProjectContext(requestId);'), false);
+  const openRequirementInProjectSource = html.slice(
+    html.indexOf("function openRequirementInProjectContext"),
+    html.indexOf("const projectRequirementConfigFields"),
+  );
+  assert.equal(openRequirementInProjectSource.includes("router.navigate"), false);
+  assert.ok(openRequirementInProjectSource.includes("projectRequirementInlinePanel.open = true"));
+  assert.ok(openRequirementInProjectSource.includes('projectRequirementInlinePanel.scrollIntoView({ block: "start", behavior: "smooth" })'));
   assert.equal(html.includes("findProjectByRequirementRequestId"), false);
   assert.ok(html.includes("配置本项目微信群"));
   assert.ok(html.includes("在运控建立批次"));
@@ -784,11 +815,24 @@ test("project configuration owns requirement and WeChat configuration entry poin
   assert.match(nav, /id="wechatCollectorNavBtn"[^>]*hidden/);
   assert.ok(html.includes("项目配置"));
   assert.ok(html.includes('id="projectConfigurationWorkflow"'));
+  assert.ok(html.includes('id="projectConfigurationReadiness"'));
   assert.ok(html.includes('id="projectWechatConfigPanel"'));
+  assert.ok(html.includes('<details id="projectRequirementInlinePanel" open>'));
+  assert.ok(html.includes('<details id="projectWechatConfigPanel" open>'));
   assert.equal(html.includes('id="projectRequirementWorkQueue"'), false);
   assert.equal(html.includes("配置需求处理工作台"), false);
+  assert.ok(html.includes("项目配置总览"));
+  assert.ok(html.includes("renderProjectConfigurationReadiness"));
+  assert.ok(html.includes("解析结果确认"));
+  assert.ok(html.includes("renderProjectRequirementAnalysisCandidates"));
+  assert.ok(html.includes("data-project-requirement-ready-risk"));
   assert.ok(html.includes("配置需求确认"));
   assert.ok(html.includes("本项目微信群"));
+  assert.ok(html.includes("查看配置需求详情"));
+  assert.equal(html.includes(">查看需求单详情<"), false);
+  assert.ok(html.includes("/api/projects/${encodeURIComponent(taskViewState.currentProjectId)}/wechat-groups"));
+  assert.ok(html.includes("本次保存：本项目微信群"));
+  assert.ok(html.includes("项目资料与执行记录"));
   assert.ok(html.includes("微信采集监控与排障"));
   assert.equal(html.includes('router.navigate("/wechat-collector")'), false);
   assert.ok(html.includes("projectWechatConfigPanel.open = true"));

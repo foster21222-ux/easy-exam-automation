@@ -237,6 +237,37 @@ async function appendRunHistory(filePath, payload, { maxEntries = 500 } = {}) {
   await fs.writeFile(filePath, `${trimmed.map((item) => JSON.stringify(item)).join("\n")}\n`, "utf8");
 }
 
+async function readPendingConfirmation(filePath) {
+  const pending = await readJsonFile(filePath, null);
+  return pending && typeof pending === "object" ? pending : null;
+}
+
+async function clearPendingConfirmation(filePath) {
+  try {
+    await fs.rm(filePath, { force: true });
+  } catch {}
+}
+
+function pendingConfirmationSummary(pending) {
+  if (!pending) return null;
+  return {
+    confirmationId: pending.confirmationId || "",
+    status: pending.status || "",
+    reason: pending.reason || "",
+    groups: Array.isArray(pending.groups) ? pending.groups : [],
+    createdAt: pending.createdAt || "",
+    updatedAt: pending.updatedAt || "",
+    promptExpiresAt: pending.promptExpiresAt || "",
+    snoozedUntil: pending.snoozedUntil || "",
+    pausedUntil: pending.pausedUntil || "",
+    detail: pending.detail || "",
+  };
+}
+
+function addMinutesToDate(date, minutes) {
+  return new Date(date.getTime() + Math.max(1, Number(minutes || 1)) * 60_000).toISOString();
+}
+
 async function readCollectorLogs(paths = {}, maxChars = 4000) {
   const defaultPaths = {
     serviceStdout: path.join(runtimeDir, "logs", "service.stdout.log"),
@@ -593,6 +624,43 @@ function validateConfig(config) {
   return { ok: true };
 }
 
+function projectGroupIdentity(payload = {}, fallbackTaskId = "") {
+  return {
+    taskId: String(payload.taskId || payload.task_id || fallbackTaskId || "").trim(),
+    projectName: String(payload.projectName || payload.project_name || "").trim(),
+    requirementRequestId: String(payload.requirementRequestId || payload.requirement_request_id || "").trim(),
+  };
+}
+
+function isGroupForProject(group = {}, identity = {}) {
+  if (identity.taskId && group.task_id === identity.taskId) return true;
+  if (identity.requirementRequestId && group.requirement_request_id === identity.requirementRequestId) return true;
+  return Boolean(identity.projectName && group.project_name === identity.projectName);
+}
+
+function mergeProjectScopedGroups(previousConfig = {}, payload = {}, fallbackTaskId = "") {
+  const identity = projectGroupIdentity(payload.project || payload, fallbackTaskId);
+  const projectConfig = normalizeConfig({ groups: payload.groups || [] });
+  const previousGroups = Array.isArray(previousConfig.groups) ? previousConfig.groups : [];
+  const retainedGroups = previousGroups.filter((group) => !isGroupForProject(group, identity));
+  const droppedEmptyGroupCount = Array.isArray(payload.groups)
+    ? payload.groups.length - projectConfig.groups.length
+    : 0;
+  return {
+    config: {
+      ...previousConfig,
+      groups: [...retainedGroups, ...projectConfig.groups],
+      llm_parse: previousConfig.llm_parse || normalizeLlmConfig({}),
+    },
+    impact: {
+      savedProjectGroupCount: projectConfig.groups.length,
+      retainedOtherGroupCount: retainedGroups.length,
+      removedProjectGroupCount: previousGroups.length - retainedGroups.length,
+      droppedEmptyGroupCount,
+    },
+  };
+}
+
 function validateRunTargetGroup(config, groupName) {
   if (!groupName) {
     return validateOperationalConfig(config);
@@ -767,13 +835,14 @@ function summarizeAttachmentScan(scan = {}, params = {}) {
   };
 }
 
-function buildReadiness({ config, status, service, scheduler, requirementCenter, ocr, lock, pipelineSmoke, realPush, runFreshness }) {
+function buildReadiness({ config, status, service, scheduler, requirementCenter, ocr, lock, pipelineSmoke, realPush, runFreshness, pendingConfirmation = null }) {
   const groups = config.groups || [];
   const enabledGroups = groups.filter((group) => group.enabled !== false);
   const configValidation = validateConfig(config);
   const runGroups = Array.isArray(status.groups) ? status.groups : [];
   const hasRun = Boolean(status.finishedAt);
-  const successfulCollectionStatuses = new Set(["pushed", "collected", "skipped_interval", "no_new_messages", "no_requirement_signal"]);
+  const successfulCollectionStatuses = new Set(["pushed", "collected", "skipped_interval", "no_new_messages", "no_requirement_signal", "waiting_user_confirmation", "snoozed_user_active", "paused_user_requested", "skipped_user_cancelled"]);
+  const userDeferredStatuses = new Set(["waiting_user_confirmation", "snoozed_user_active", "paused_user_requested", "skipped_user_cancelled"]);
   const allDryRun = runGroups.length > 0 && runGroups.every((group) => group.status === "dry_run");
   const lastRunOk = hasRun && runGroups.length > 0 && runGroups.every((group) => successfulCollectionStatuses.has(group.status));
   const pushOk = Boolean(realPush?.fresh);
@@ -834,12 +903,22 @@ function buildReadiness({ config, status, service, scheduler, requirementCenter,
       detail: lock.detail || (!lock.exists ? "没有采集锁" : "采集任务可能正在运行"),
     },
     {
+      key: "user_confirmation",
+      label: "用户确认",
+      ok: !pendingConfirmation,
+      detail: pendingConfirmation
+        ? `等待用户确认：${(pendingConfirmation.groups || []).join("、") || "已启用微信群"}。自动采集已暂停，不会重复抢占前台。`
+        : "没有待处理的用户确认",
+    },
+    {
       key: "last_run",
       label: "最近运行",
       ok: lastRunOk,
       detail: hasRun
         ? (lastRunOk
-          ? (runGroups.some((group) => group.status === "no_requirement_signal")
+          ? (runGroups.some((group) => userDeferredStatuses.has(group.status))
+            ? "最近一次定时采集因用户正在使用电脑而暂停或延后，未更新需求单"
+            : runGroups.some((group) => group.status === "no_requirement_signal")
             ? "最近一次采集完成，但未识别到需求内容，未更新需求单"
             : "最近一次采集运行成功")
           : (allDryRun ? "最近一次是预检脚本，不算正式采集运行" : "最近一次运行失败或未产生有效需求"))
@@ -970,6 +1049,7 @@ export function createWechatCollectorHandler(options = {}) {
   const preflightStatusPath = options.preflightStatusPath || path.join(runtimeDir, "wechat-preflight-run.json");
   const pipelineSmokeStatusPath = options.pipelineSmokeStatusPath || path.join(runtimeDir, "wechat-pipeline-smoke.json");
   const attachmentScanStatusPath = options.attachmentScanStatusPath || path.join(runtimeDir, "wechat-attachment-scan.json");
+  const pendingConfirmationPath = options.pendingConfirmationPath || path.join(path.dirname(statusPath), "wechat-pending-confirmation.json");
   const historyPath = options.historyPath || path.join(path.dirname(statusPath), "wechat-run-history.jsonl");
   const historyLimit = Number(options.historyLimit || 20);
   const realPushHistoryLimit = Number(options.realPushHistoryLimit || 500);
@@ -1058,10 +1138,13 @@ export function createWechatCollectorHandler(options = {}) {
     }
     return { ok: true, realPush };
   };
-  const runQueuedRealCollection = async ({ config, groupName = "" } = {}) => {
+  const runQueuedRealCollection = async ({ config, groupName = "", groupNames = [] } = {}) => {
+    const targetNames = new Set((groupNames || []).map((item) => String(item || "").trim()).filter(Boolean));
     const groups = groupName
       ? (config.groups || []).filter((group) => group.group_name === groupName)
-      : (config.groups || []).filter((group) => group.enabled !== false);
+      : (targetNames.size
+        ? (config.groups || []).filter((group) => targetNames.has(group.group_name))
+        : (config.groups || []).filter((group) => group.enabled !== false));
     const aggregate = {
       startedAt: now().toISOString(),
       finishedAt: "",
@@ -1140,6 +1223,27 @@ export function createWechatCollectorHandler(options = {}) {
       return true;
     }
 
+    const projectWechatGroupsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/wechat-groups$/);
+    if (req.method === "PUT" && projectWechatGroupsMatch) {
+      const payload = parseJsonSafe(await readBody(req)) || {};
+      const previousConfig = normalizeConfig(await readJsonFile(configPath, { groups: [] }));
+      const { config, impact } = mergeProjectScopedGroups(
+        previousConfig,
+        payload,
+        decodeURIComponent(projectWechatGroupsMatch[1]),
+      );
+      const validation = validateConfig(config);
+      if (!validation.ok) {
+        json(res, 400, { error: validation.error });
+        return true;
+      }
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      const backupPath = await backupExistingJsonFile(configPath, configBackupDir, now);
+      await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+      json(res, 200, { ok: true, config: redactConfig(config), path: configPath, backupPath, impact });
+      return true;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/wechat-collector/llm/models") {
       const payload = parseJsonSafe(await readBody(req)) || {};
       const previousConfig = normalizeConfig(await readJsonFile(configPath, { groups: [] }));
@@ -1199,6 +1303,7 @@ export function createWechatCollectorHandler(options = {}) {
       const ocr = await ocrStatus();
       const lock = await readCollectorLockStatus(lockPath, lockMaxAgeMs);
       const history = await readRunHistory(historyPath, historyLimit);
+      const pendingConfirmation = pendingConfirmationSummary(await readPendingConfirmation(pendingConfirmationPath));
       const realPushHistory = historyLimit >= realPushHistoryLimit
         ? history
         : await readRunHistory(historyPath, realPushHistoryLimit);
@@ -1221,9 +1326,10 @@ export function createWechatCollectorHandler(options = {}) {
         requirementCenter,
         ocr,
         lock,
+        pendingConfirmation,
         queue: collectorQueue.snapshot(),
         groups: buildGroupStatusSummary({ config, status, state, history }),
-        readiness: buildReadiness({ config, status, service, scheduler, requirementCenter, ocr, lock, pipelineSmoke, realPush, runFreshness }),
+        readiness: buildReadiness({ config, status, service, scheduler, requirementCenter, ocr, lock, pipelineSmoke, realPush, runFreshness, pendingConfirmation }),
         logs: await readCollectorLogs(logPaths, logMaxChars),
         path: statusPath,
         preflightPath: preflightStatusPath,
@@ -1368,6 +1474,83 @@ export function createWechatCollectorHandler(options = {}) {
       return true;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/wechat-collector/user-confirmation/action") {
+      const payload = parseJsonSafe(await readBody(req)) || {};
+      const action = String(payload.action || "").trim();
+      const pending = await readPendingConfirmation(pendingConfirmationPath);
+      if (!pending) {
+        json(res, 404, { error: "没有待处理的用户确认" });
+        return true;
+      }
+      if (payload.confirmationId && String(payload.confirmationId) !== String(pending.confirmationId || "")) {
+        json(res, 409, { error: "用户确认状态已变化，请刷新后重试" });
+        return true;
+      }
+      const config = normalizeConfig(await readJsonFile(configPath, { groups: [] }));
+      if (action === "run-now") {
+        const requirementCenter = await requirementCenterStatus();
+        if (!requirementCenter.available) {
+          const detail = requirementCenter.detail ? `：${requirementCenter.detail}` : "";
+          json(res, 400, { error: `需求中心不可用${detail}` });
+          return true;
+        }
+        await clearPendingConfirmation(pendingConfirmationPath);
+        const run = await runQueuedRealCollection({ config, groupNames: pending.groups || [] });
+        json(res, 200, { ok: true, pendingConfirmation: null, queued: true, queue: collectorQueue.snapshot(), run });
+        return true;
+      }
+      if (action === "snooze") {
+        const minutes = Number(payload.minutes || 15);
+        const updated = {
+          ...pending,
+          status: "snoozed",
+          updatedAt: now().toISOString(),
+          snoozedUntil: addMinutesToDate(now(), minutes),
+          detail: `用户选择稍后提醒，自动采集暂停到 ${addMinutesToDate(now(), minutes)}`,
+        };
+        await writeJsonFile(pendingConfirmationPath, updated);
+        json(res, 200, { ok: true, pendingConfirmation: pendingConfirmationSummary(updated) });
+        return true;
+      }
+      if (action === "pause-today") {
+        const current = now();
+        const pausedUntil = new Date(current);
+        pausedUntil.setHours(23, 59, 59, 999);
+        const updated = {
+          ...pending,
+          status: "paused_today",
+          updatedAt: current.toISOString(),
+          pausedUntil: pausedUntil.toISOString(),
+          detail: "用户已选择今天暂停自动采集。",
+        };
+        await writeJsonFile(pendingConfirmationPath, updated);
+        json(res, 200, { ok: true, pendingConfirmation: pendingConfirmationSummary(updated) });
+        return true;
+      }
+      if (action === "cancel") {
+        const finishedAt = now().toISOString();
+        const summary = {
+          startedAt: pending.createdAt || finishedAt,
+          finishedAt,
+          status: "skipped_user_cancelled",
+          detail: "用户取消本轮自动采集。",
+          confirmationId: pending.confirmationId || "",
+          groups: (pending.groups || []).map((groupName) => ({
+            groupName,
+            status: "skipped_user_cancelled",
+            detail: "用户取消本轮自动采集。",
+          })),
+        };
+        await clearPendingConfirmation(pendingConfirmationPath);
+        await writeJsonFile(statusPath, summary);
+        await appendRunHistory(historyPath, summary);
+        json(res, 200, { ok: true, pendingConfirmation: null, status: summary });
+        return true;
+      }
+      json(res, 400, { error: "用户确认动作无效" });
+      return true;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/wechat-collector/run-once") {
       const payload = parseJsonSafe(await readBody(req)) || {};
       const groupName = String(payload.groupName || url.searchParams.get("groupName") || "").trim();
@@ -1388,6 +1571,7 @@ export function createWechatCollectorHandler(options = {}) {
         json(res, 400, { error: `需求中心不可用${detail}` });
         return true;
       }
+      await clearPendingConfirmation(pendingConfirmationPath);
       const run = await runQueuedRealCollection({ config, groupName });
       json(res, 200, { ok: true, queued: true, queue: collectorQueue.snapshot(), run });
       return true;

@@ -786,6 +786,116 @@ test("visible WeChat collector scheduler skips uninitialized groups before touch
   assert.equal(existsSync(osascriptMarker), false);
 });
 
+test("visible WeChat collector waits for user confirmation when the Mac is active", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "wechat-visible-cli-"));
+  const binDir = path.join(tempDir, "bin");
+  const configPath = path.join(tempDir, "groups.json");
+  const statePath = path.join(tempDir, "state.json");
+  const outputPath = path.join(tempDir, "last-run.json");
+  const historyPath = path.join(tempDir, "wechat-run-history.jsonl");
+  const pendingPath = path.join(tempDir, "wechat-pending-confirmation.json");
+  const swiftMarker = path.join(tempDir, "swift-called");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{ group_name: "AI赋能运营自动化小组", enabled: true, interval_minutes: 15 }],
+  }));
+  writeFileSync(statePath, JSON.stringify({
+    groups: {
+      "AI赋能运营自动化小组": {
+        updatedAt: "2026-06-25T08:00:00.000Z",
+        checkpoint: { lastMessageHash: "abc" },
+      },
+    },
+  }));
+  writeFileSync(path.join(binDir, "ioreg"), "#!/bin/sh\nprintf '    | |   \"HIDIdleTime\" = 1000000000\\n'\n", { mode: 0o755 });
+  writeFileSync(path.join(binDir, "osascript"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeFileSync(path.join(binDir, "swift"), `#!/bin/sh\nprintf called > "${swiftMarker}"\nexit 0\n`, { mode: 0o755 });
+
+  execFileSync(nodeBin, [
+    "scripts/wechat_visible_collect.mjs",
+    "--config", configPath,
+    "--state", statePath,
+    "--push",
+    "--api", "http://127.0.0.1:9",
+    "--output", outputPath,
+    "--history", historyPath,
+    "--pendingConfirmationPath", pendingPath,
+    "--userIdleMinSeconds", "300",
+    "--confirmationTimeoutMinutes", "5",
+    "--snoozeMinutes", "15",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+  });
+
+  const summary = JSON.parse(readFileSync(outputPath, "utf8"));
+  const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
+  const history = readFileSync(historyPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(summary.status, "waiting_user_confirmation");
+  assert.equal(summary.groups[0].status, "waiting_user_confirmation");
+  assert.equal(summary.groups[0].groupName, "AI赋能运营自动化小组");
+  assert.equal(pending.status, "waiting");
+  assert.deepEqual(pending.groups, ["AI赋能运营自动化小组"]);
+  assert.match(pending.confirmationId, /^wechat-confirm-/);
+  assert.equal(history[0].status, "waiting_user_confirmation");
+  assert.equal(existsSync(swiftMarker), false);
+});
+
+test("visible WeChat collector snoozes an expired user confirmation without touching WeChat", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "wechat-visible-cli-"));
+  const binDir = path.join(tempDir, "bin");
+  const configPath = path.join(tempDir, "groups.json");
+  const statePath = path.join(tempDir, "state.json");
+  const outputPath = path.join(tempDir, "last-run.json");
+  const pendingPath = path.join(tempDir, "wechat-pending-confirmation.json");
+  const swiftMarker = path.join(tempDir, "swift-called");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{ group_name: "AI赋能运营自动化小组", enabled: true, interval_minutes: 15 }],
+  }));
+  writeFileSync(statePath, JSON.stringify({
+    groups: {
+      "AI赋能运营自动化小组": {
+        updatedAt: "2026-06-25T08:00:00.000Z",
+        checkpoint: { lastMessageHash: "abc" },
+      },
+    },
+  }));
+  writeFileSync(pendingPath, JSON.stringify({
+    confirmationId: "wechat-confirm-expired",
+    status: "waiting",
+    reason: "user_active",
+    groups: ["AI赋能运营自动化小组"],
+    createdAt: "2020-01-01T00:00:00.000Z",
+    promptExpiresAt: "2020-01-01T00:05:00.000Z",
+  }));
+  writeFileSync(path.join(binDir, "swift"), `#!/bin/sh\nprintf called > "${swiftMarker}"\nexit 0\n`, { mode: 0o755 });
+
+  execFileSync(nodeBin, [
+    "scripts/wechat_visible_collect.mjs",
+    "--config", configPath,
+    "--state", statePath,
+    "--push",
+    "--api", "http://127.0.0.1:9",
+    "--output", outputPath,
+    "--pendingConfirmationPath", pendingPath,
+    "--snoozeMinutes", "15",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+  });
+
+  const summary = JSON.parse(readFileSync(outputPath, "utf8"));
+  const pending = JSON.parse(readFileSync(pendingPath, "utf8"));
+  assert.equal(summary.status, "snoozed_user_active");
+  assert.equal(summary.groups[0].status, "snoozed_user_active");
+  assert.equal(pending.status, "snoozed");
+  assert.match(pending.snoozedUntil, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(existsSync(swiftMarker), false);
+});
+
 test("visible WeChat collector force-runs a group before its interval elapses", () => {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "wechat-visible-cli-"));
   const configPath = path.join(tempDir, "groups.json");
@@ -960,6 +1070,7 @@ test("visible WeChat collector checks push API before activating WeChat", () => 
     "EOF",
     "",
   ].join("\n"), { mode: 0o755 });
+  writeFileSync(path.join(binDir, "ioreg"), "#!/bin/sh\nprintf '    | |   \"HIDIdleTime\" = 600000000000\\n'\n", { mode: 0o755 });
 
   let thrown = null;
   try {

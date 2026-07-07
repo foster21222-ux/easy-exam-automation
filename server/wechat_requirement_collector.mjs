@@ -304,8 +304,8 @@ export function parseWechatRequirementMessages(text) {
   if (/不需要鹰眼|不用鹰眼|无需鹰眼/.test(normalizedText)) requirement.hawkeye_required = "否";
   else if (/需要鹰眼|开启鹰眼|鹰眼/.test(normalizedText)) requirement.hawkeye_required = "是";
 
-  if (/需要视频监控|开启视频监控|视频监控/.test(normalizedText)) requirement.video_monitor_required = "是";
-  if (/不需要视频监控|不用视频监控|无需视频监控/.test(normalizedText)) requirement.video_monitor_required = "否";
+  if (/需要视频监控|开启视频监控|视频监控|需要考试监控|开启考试监控|考试监控/.test(normalizedText)) requirement.video_monitor_required = "是";
+  if (/不需要视频监控|不用视频监控|无需视频监控|不需要考试监控|不用考试监控|无需考试监控/.test(normalizedText)) requirement.video_monitor_required = "否";
   if (/需要(?:视频)?录制|开启(?:视频)?录制|视频监控和录制|录制/.test(normalizedText)) requirement.video_record_required = "是";
   if (/不需要(?:视频)?录制|不用(?:视频)?录制|无需(?:视频)?录制/.test(normalizedText)) requirement.video_record_required = "否";
 
