@@ -177,7 +177,11 @@ export async function pushWechatDraftToRequirementCenter(draft, {
   let push = null;
   let resolvedRequestId = requestId || "";
   if (!changeOnly || !resolvedRequestId) {
-    const collectingPayload = buildRequirementCenterPayload(draft, { requestId, attachments });
+    const collectingDraft = {
+      ...draft,
+      requirement: requirementWithoutPendingChangeFields(draft.requirement, draft.changeRecords),
+    };
+    const collectingPayload = buildRequirementCenterPayload(collectingDraft, { requestId, attachments });
     push = await pushRequirementCenterPayload(collectingPayload, { apiBase, fetchImpl });
     resolvedRequestId = requestId || push.requirement?.requestId || "";
   }
@@ -230,6 +234,22 @@ function isChangeOnlyDraft(draft) {
     .map(([field]) => field);
   if (requirementFields.every((field) => changedFields.has(field))) return true;
   return messages.every((message) => isChangeMessage(message.text));
+}
+
+function requirementWithoutPendingChangeFields(requirement, changeRecords) {
+  const pendingFields = new Set();
+  for (const record of changeRecords || []) {
+    const changes = record?.changes || {};
+    for (const field of Object.keys(changes)) {
+      pendingFields.add(field === "removedSubjects" ? "subjects" : field);
+    }
+  }
+  if (!pendingFields.size) return requirement || {};
+  const result = { ...(requirement || {}) };
+  for (const field of pendingFields) {
+    delete result[field];
+  }
+  return result;
 }
 
 function isChangeMessage(text) {

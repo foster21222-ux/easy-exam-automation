@@ -249,6 +249,20 @@ export function createRequirementRequestHandler(options = {}) {
       return true;
     }
 
+    const staffEditMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/staff-edit$/);
+    if (req.method === "POST" && staffEditMatch) {
+      const payload = await readJson(req);
+      const requirement = await runStoreOrBadRequest(res, "staff_edit", {
+        requestId: decodeSegment(staffEditMatch[1]),
+        reviewer: payload.reviewer || "",
+        message: payload.message || "",
+        requirement: payload.requirement || {},
+      });
+      if (!requirement) return true;
+      json(res, 200, { ok: true, requirement });
+      return true;
+    }
+
     const acceptChangeMatch = pathname.match(/^\/api\/requirements\/([^/]+)\/change-requests\/([^/]+)\/accept$/);
     if (req.method === "POST" && acceptChangeMatch) {
       const payload = await readJson(req);
@@ -257,6 +271,7 @@ export function createRequirementRequestHandler(options = {}) {
         changeId: decodeSegment(acceptChangeMatch[2]),
         reviewer: payload.reviewer || "",
         message: payload.message || "",
+        overrideManualEdit: Boolean(payload.overrideManualEdit || payload.override_manual_edit),
       });
       if (!requirement) return true;
       json(res, 200, { ok: true, requirement });

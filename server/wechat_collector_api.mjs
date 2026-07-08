@@ -955,6 +955,16 @@ function addMinutes(isoTime, minutes) {
   return new Date(date.getTime() + Math.max(1, Number(minutes || 15)) * 60 * 1000).toISOString();
 }
 
+function latestIsoTime(...values) {
+  let latest = null;
+  for (const value of values) {
+    const date = new Date(value || "");
+    if (Number.isNaN(date.getTime())) continue;
+    if (!latest || date.getTime() > latest.time) latest = { value, time: date.getTime() };
+  }
+  return latest?.value || "";
+}
+
 function isValidIntervalMinutes(value) {
   return Number.isInteger(value) && value >= 1;
 }
@@ -1006,6 +1016,15 @@ function buildGroupStatusSummary({ config, status, state, history = [] }) {
     const enabled = group.enabled !== false;
     const latestRunAt = latestRun.lastRunAt || latestRun.finishedAt || (latestRun.status ? status.finishedAt : "") || checkpoint.updatedAt || "";
     const checkpointUpdatedAt = checkpoint.updatedAt || "";
+    const checkpointNextRunAt = checkpointUpdatedAt && isValidIntervalMinutes(intervalMinutes)
+      ? addMinutes(checkpointUpdatedAt, intervalMinutes)
+      : "";
+    const latestAttemptNextRunAt = latestRunAt
+      && checkpointUpdatedAt
+      && isValidIntervalMinutes(intervalMinutes)
+      && !["failed", "needs_initial_collection", "not_run"].includes(latestRun.status || "not_run")
+      ? addMinutes(latestRunAt, intervalMinutes)
+      : "";
     return {
       groupName,
       projectName: group.project_name || "",
@@ -1035,9 +1054,7 @@ function buildGroupStatusSummary({ config, status, state, history = [] }) {
       checkpointLocated: latestRun.checkpointLocated,
       latestError: latestRun.error || "",
       checkpointUpdatedAt,
-      nextRunAt: !enabled ? "" : latestRun.nextRunAt || (checkpointUpdatedAt && isValidIntervalMinutes(intervalMinutes)
-        ? addMinutes(checkpointUpdatedAt, intervalMinutes)
-        : ""),
+      nextRunAt: !enabled ? "" : latestIsoTime(latestRun.nextRunAt, checkpointNextRunAt, latestAttemptNextRunAt),
     };
   });
 }
@@ -1494,9 +1511,33 @@ export function createWechatCollectorHandler(options = {}) {
           json(res, 400, { error: `需求中心不可用${detail}` });
           return true;
         }
-        await clearPendingConfirmation(pendingConfirmationPath);
-        const run = await runQueuedRealCollection({ config, groupNames: pending.groups || [] });
-        json(res, 200, { ok: true, pendingConfirmation: null, queued: true, queue: collectorQueue.snapshot(), run });
+        const pendingGroups = (pending.groups || []).map((item) => String(item || "").trim()).filter(Boolean);
+        const requestedGroups = [
+          ...((Array.isArray(payload.groupNames) ? payload.groupNames : []).map((item) => String(item || "").trim())),
+          String(payload.groupName || "").trim(),
+        ].filter(Boolean);
+        const runGroups = requestedGroups.length
+          ? pendingGroups.filter((groupName) => requestedGroups.includes(groupName))
+          : pendingGroups;
+        if (!runGroups.length) {
+          json(res, 400, { error: "待确认列表中没有匹配的微信群" });
+          return true;
+        }
+        const remainingGroups = pendingGroups.filter((groupName) => !runGroups.includes(groupName));
+        let nextPending = null;
+        if (remainingGroups.length) {
+          nextPending = {
+            ...pending,
+            groups: remainingGroups,
+            updatedAt: now().toISOString(),
+            detail: `已执行 ${runGroups.join("、")}；剩余微信群仍等待确认。`,
+          };
+          await writeJsonFile(pendingConfirmationPath, nextPending);
+        } else {
+          await clearPendingConfirmation(pendingConfirmationPath);
+        }
+        const run = await runQueuedRealCollection({ config, groupNames: runGroups });
+        json(res, 200, { ok: true, pendingConfirmation: pendingConfirmationSummary(nextPending), queued: true, queue: collectorQueue.snapshot(), run });
         return true;
       }
       if (action === "snooze") {

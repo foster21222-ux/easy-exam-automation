@@ -486,10 +486,53 @@ test("pushes a WeChat draft and then routes parsed changes to the same request",
   assert.equal(calls.length, 2);
   assert.equal(calls[0].body.intent, "collecting");
   assert.equal(calls[0].body.requestId, "wechat-ai-ops");
+  assert.equal(calls[0].body.requirement.formal_exam_time_range, "8 月 20 日上午 9 点到 11 点");
+  assert.equal(calls[0].body.requirement.subjects, undefined);
   assert.equal(calls[1].body.intent, "change_request");
   assert.equal(calls[1].body.requestId, "wechat-ai-ops");
   assert.match(calls[1].body.customerMessage, /科目增加数学/);
   assert.equal(result.requestId, "wechat-ai-ops");
+  assert.equal(result.changePushes.length, 1);
+});
+
+test("does not write pending WeChat change fields through the collecting payload", async () => {
+  const calls = [];
+  const config = loadWechatGroupConfig(configuredRequestConfig);
+  const draft = buildWechatRequirementDraft({
+    config,
+    groupName: "AI赋能运营自动化小组",
+    text: [
+      "客户：考试名称是蜀道集团考试。",
+      "客户：试考名单、考生名单很快给。",
+      "客户：考试时间改到7-1号 时间10点~12点。",
+      "客户：提前登陆，迟到时间都是30分钟。",
+      "客户：本次不考英语了，改成数学吧。",
+    ].join("\n"),
+  });
+
+  const result = await pushWechatDraftToRequirementCenter(draft, {
+    apiBase: "http://127.0.0.1:8765",
+    requestId: "wechat-ai-ops",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, requirement: { requestId: "wechat-ai-ops" } }),
+      };
+    },
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].body.intent, "collecting");
+  assert.equal(calls[0].body.requirement.exam_name, "蜀道集团考试");
+  assert.equal(calls[0].body.requirement.formal_exam_time_range, undefined);
+  assert.equal(calls[0].body.requirement.early_login_minutes, undefined);
+  assert.equal(calls[0].body.requirement.late_limit_minutes, undefined);
+  assert.equal(calls[0].body.requirement.subjects, undefined);
+  assert.equal(calls[1].body.intent, "change_request");
+  assert.equal(calls[1].body.changes.latestRequirement.formal_exam_time_range, "7-1号 时间10点~12点");
+  assert.deepEqual(calls[1].body.changes.latestRequirement.subjects, ["数学"]);
   assert.equal(result.changePushes.length, 1);
 });
 

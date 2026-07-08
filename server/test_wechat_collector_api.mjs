@@ -227,6 +227,47 @@ test("wechat collector group summary includes latest failure detail", async () =
   assert.equal(status.body.groups[0].nextRunAt, "");
 });
 
+test("wechat collector group summary does not show stale next run before the latest attempt interval", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [{
+      group_name: "AI赋能运营自动化小组",
+      requirement_request_id: "request-1",
+      enabled: true,
+      interval_minutes: 15,
+    }],
+  }));
+  writeFileSync(statusPath, JSON.stringify({
+    startedAt: "2026-07-08T21:34:19.000Z",
+    finishedAt: "2026-07-08T21:34:20.000Z",
+    groups: [{
+      groupName: "AI赋能运营自动化小组",
+      status: "no_requirement_signal",
+      requestId: "request-1",
+      nextRunAt: "2026-07-08T17:08:26.000Z",
+    }],
+  }));
+  writeFileSync(statePath, JSON.stringify({
+    groups: {
+      "AI赋能运营自动化小组": {
+        requestId: "request-1",
+        updatedAt: "2026-07-08T16:53:26.000Z",
+      },
+    },
+  }));
+  const handler = createWechatCollectorHandler({ configPath, statusPath, statePath });
+
+  const status = await call(handler, "GET", "/api/wechat-collector/status");
+
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.body.groups[0].latestRunAt, "2026-07-08T21:34:20.000Z");
+  assert.equal(status.body.groups[0].checkpointUpdatedAt, "2026-07-08T16:53:26.000Z");
+  assert.equal(status.body.groups[0].nextRunAt, "2026-07-08T21:49:20.000Z");
+});
+
 test("wechat collector group summary does not treat global scheduler heartbeat as a group run", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
   const configPath = path.join(dir, "wechat-requirement-groups.json");
@@ -1637,6 +1678,79 @@ test("wechat collector API exposes pending user confirmation and can run it now"
   assert.equal(existsSync(pendingConfirmationPath), false);
 });
 
+test("wechat collector user confirmation can run one pending group and keep the rest waiting", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  const statePath = path.join(dir, "wechat-checkpoints.json");
+  const pendingConfirmationPath = path.join(dir, "wechat-pending-confirmation.json");
+  const calls = [];
+  writeFileSync(configPath, JSON.stringify({
+    groups: [
+      {
+        group_name: "项目A群",
+        requirement_request_id: "request-a",
+        enabled: true,
+        interval_minutes: 15,
+      },
+      {
+        group_name: "项目B群",
+        requirement_request_id: "request-b",
+        enabled: true,
+        interval_minutes: 15,
+      },
+    ],
+  }));
+  writeFileSync(statusPath, JSON.stringify({
+    startedAt: "2026-07-07T08:00:00.000Z",
+    finishedAt: "2026-07-07T08:00:01.000Z",
+    status: "waiting_user_confirmation",
+    groups: [
+      { groupName: "项目A群", status: "waiting_user_confirmation" },
+      { groupName: "项目B群", status: "waiting_user_confirmation" },
+    ],
+  }));
+  writeFileSync(pendingConfirmationPath, JSON.stringify({
+    confirmationId: "wechat-confirm-multi",
+    status: "waiting",
+    reason: "user_active",
+    groups: ["项目A群", "项目B群"],
+    createdAt: "2026-07-07T08:00:00.000Z",
+    promptExpiresAt: "2026-07-07T08:05:00.000Z",
+  }));
+  const handler = createWechatCollectorHandler({
+    configPath,
+    statusPath,
+    statePath,
+    pendingConfirmationPath,
+    schedulerStatus: () => ({ installed: true, loaded: true }),
+    requirementCenterStatus: async () => ({ apiBase: "http://127.0.0.1:8765", available: true, detail: "ok" }),
+    runCollectorOnce: async ({ groupName }) => {
+      calls.push(groupName);
+      return {
+        ok: true,
+        status: {
+          startedAt: "2026-07-07T08:01:00.000Z",
+          finishedAt: "2026-07-07T08:01:05.000Z",
+          groups: [{ groupName, status: "pushed", requestId: groupName === "项目A群" ? "request-a" : "request-b" }],
+        },
+      };
+    },
+  });
+
+  const run = await call(handler, "POST", "/api/wechat-collector/user-confirmation/action", {
+    confirmationId: "wechat-confirm-multi",
+    action: "run-now",
+    groupName: "项目A群",
+  });
+
+  assert.equal(run.statusCode, 200);
+  assert.equal(run.body.ok, true);
+  assert.deepEqual(calls, ["项目A群"]);
+  assert.deepEqual(run.body.pendingConfirmation.groups, ["项目B群"]);
+  assert.deepEqual(JSON.parse(readFileSync(pendingConfirmationPath, "utf8")).groups, ["项目B群"]);
+});
+
 test("wechat collector run-once does not reuse stale non-failed status after collection failure", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
   const configPath = path.join(dir, "wechat-requirement-groups.json");
@@ -2543,6 +2657,56 @@ test("wechat collector API saves project scoped groups without front-end global 
   assert.equal(saved.groups[0].group_name, "其它项目群");
   assert.equal(saved.groups[1].task_id, "project-1");
   assert.equal(saved.llm_parse.api_key, "saved-key");
+});
+
+test("wechat collector API does not silently claim a legacy unbound group with the same name", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wechat-api-"));
+  const configPath = path.join(dir, "wechat-requirement-groups.json");
+  const statusPath = path.join(dir, "wechat-last-run.json");
+  writeFileSync(configPath, JSON.stringify({
+    groups: [
+      {
+        group_name: "AI赋能运营自动化小组",
+        project_name: "",
+        customer_name: "",
+        requirement_request_id: "",
+        enabled: true,
+        interval_minutes: 15,
+      },
+      {
+        group_name: "其它项目群",
+        task_id: "project-2",
+        project_name: "项目二",
+        requirement_request_id: "req-2",
+        enabled: true,
+        interval_minutes: 15,
+      },
+    ],
+  }));
+  const handler = createWechatCollectorHandler({ configPath, statusPath });
+
+  const result = await call(handler, "PUT", "/api/projects/project-1/wechat-groups", {
+    project: {
+      taskId: "project-1",
+      projectName: "项目一",
+      requirementRequestId: "req-1",
+    },
+    groups: [{
+      taskId: "project-1",
+      groupName: "AI赋能运营自动化小组",
+      projectName: "项目一",
+      requirementRequestId: "req-1",
+      enabled: true,
+      intervalMinutes: 15,
+    }],
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.statusCode, 400);
+  assert.match(result.body.error, /微信群名称重复/);
+  const saved = JSON.parse(readFileSync(configPath, "utf8"));
+  assert.equal(saved.groups[0].group_name, "AI赋能运营自动化小组");
+  assert.equal(saved.groups[0].task_id || "", "");
 });
 
 test("wechat collector API saves and redacts LLM parser config", async () => {
