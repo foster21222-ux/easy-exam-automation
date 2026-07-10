@@ -807,6 +807,89 @@
         color: #8a5700;
       }
 
+      .operation-action-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .operation-action-card {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+        min-height: 132px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--panel-soft);
+      }
+
+      .operation-action-card.active {
+        border-color: #9cc7ff;
+        background: #f7fbff;
+      }
+
+      .operation-action-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .operation-action-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .operation-param-list {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .operation-param-item {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        background: #fff;
+      }
+
+      .operation-param-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .operation-param-value {
+        margin-top: 6px;
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 750;
+        word-break: break-word;
+      }
+
+      @media (max-width: 1120px) {
+        .operation-action-grid,
+        .operation-param-list {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .operation-action-grid,
+        .operation-param-list {
+          grid-template-columns: 1fr;
+        }
+      }
+
       .log-list {
         display: grid;
         gap: 9px;
@@ -2854,7 +2937,11 @@
           <div id="projectConfigurationWorkflow">
             <details>
               <summary>业务需求采集</summary>
-              <div class="panel"><div class="panel-head"><div><h2 class="panel-title">业务需求详情</h2><p class="subtitle">来自业务需求表截图的人工确认版本，只展示业务表字段。自动化配置所需字段、微信群变更采纳和版本记录，请在下方“配置需求确认”处理。</p></div></div><div class="panel-body"><div class="task-overview-grid" id="projectBusinessRequirement"></div></div></div>
+              <div class="panel"><div class="panel-head"><div><h2 class="panel-title">业务需求详情</h2><p class="subtitle">来自业务需求表截图的人工确认版本，只展示业务表字段。自动化配置所需字段、微信群变更采纳和版本记录，请在“配置需求确认”处理。</p></div></div><div class="panel-body"><div class="task-overview-grid" id="projectBusinessRequirement"></div></div></div>
+            </details>
+            <details id="projectOperationBatchPanel" open>
+              <summary>运控协同</summary>
+              <div class="panel"><div class="panel-head"><div><h2 class="panel-title">运控协同</h2><p class="subtitle">业务需求单导入后先创建运营批次并回填批次代码；后续内容需求单、人员任务单和项目归档在这里接入。</p></div><div class="view-actions"><button class="btn" id="operationBatchRefreshBtn" type="button">刷新状态</button><button class="btn primary" id="operationBatchCreateBtn" type="button">创建未发布批次</button></div></div><div class="panel-body"><div class="task-meta" id="projectOperationBatchState">正在加载运控协同状态。</div><div class="operation-action-grid"><div class="operation-action-card active"><div class="operation-action-head"><strong>创建运营批次</strong><span class="tag green">当前功能</span></div><p>从业务需求和默认规则生成参数，模拟运营控制台创建未发布批次，并把批次代码回填到本项目。</p></div><div class="operation-action-card active"><div class="operation-action-head"><strong>发送内容任务单</strong><span class="tag green">当前功能</span></div><p>使用系统配置中的 Outlook 公司邮箱，把本项目内容任务单模板发送给当次输入的收件人。</p><input class="field-input" id="contentRequirementEmailRecipients" placeholder="收件人邮箱，多个用分号分隔" /><button class="btn compact" id="contentRequirementEmailSendBtn" type="button">发送邮件</button><div class="task-meta" id="contentRequirementEmailState">等待发送。</div></div><div class="operation-action-card"><div class="operation-action-head"><strong>发送人员任务单</strong><span class="tag amber">预留</span></div><p>后续按运控流程模拟操作，保留业务需求中的人员服务安排作为输入。</p><button class="btn compact" type="button" disabled>待接入</button></div><div class="operation-action-card"><div class="operation-action-head"><strong>项目归档</strong><span class="tag amber">预留</span></div><p>后续把项目执行结果和关联数据回填到运营控制台归档模块。</p><button class="btn compact" type="button" disabled>待接入</button></div></div><details open style="margin-top:12px;"><summary>创建参数</summary><div id="projectOperationBatchDraft" style="margin-top:10px;"></div></details><details style="margin-top:12px;"><summary>手动补录批次代码</summary><div class="settings-grid" style="margin-top:12px;"><label class="field"><span class="field-label">运营批次代码</span><input class="field-input" id="operationBatchCodeInput" placeholder="例如 EZT260003" /><span class="task-meta">仅在自动创建失败、或已在运营控制台手工创建批次时补录；内部需求单 UUID 保留不变。</span></label><label class="field"><span class="field-label">批次详情地址</span><input class="field-input" id="operationBatchDetailUrlInput" placeholder="可选，粘贴运营控制台详情页 URL" /></label></div><div class="view-actions" style="margin-top:12px;"><button class="btn" id="operationBatchRecordBtn" type="button">手动补录批次代码</button></div></details></div></div>
             </details>
             <details id="projectRequirementInlinePanel" open>
               <summary>配置需求确认</summary>
@@ -2866,7 +2953,7 @@
             </details>
             <details>
               <summary>项目资料与执行记录</summary>
-              <div class="panel"><div class="panel-head"><div><h2 class="panel-title">项目资料与执行记录</h2><p class="subtitle">配置需求确认后进入自动化执行；运控批次创建后续接入。场次、文件和日志是辅助信息，不作为配置主流程入口。</p></div></div><div class="panel-body"><div class="task-overview-grid"><div><div class="task-overview-label">在运控建立批次</div><div class="task-overview-value">后续接入</div><div class="view-actions" style="margin-top:10px;"><button class="btn" type="button" disabled>暂未开放</button></div></div><div><div class="task-overview-label">自动化执行</div><div class="task-overview-value">需求确认后进入</div><div class="task-meta">进入自动配置会沿用当前项目上下文。</div></div></div></div></div>
+              <div class="panel"><div class="panel-head"><div><h2 class="panel-title">项目资料与执行记录</h2><p class="subtitle">场次、文件和日志是执行辅助信息，不作为配置主流程入口。</p></div></div><div class="panel-body"><div class="task-overview-grid"><div><div class="task-overview-label">自动化执行</div><div class="task-overview-value">需求确认后进入</div><div class="task-meta">进入自动配置会沿用当前项目上下文。</div></div><div><div class="task-overview-label">批次代码</div><div class="task-overview-value" id="projectOperationBatchDisplay">--</div><div class="task-meta">有运营批次代码时优先显示批次代码。</div></div></div></div></div>
               <div class="panel"><div class="panel-head"><h2 class="panel-title">考试任务与场次</h2></div><div class="panel-body"><div class="exam-table-wrap"><table class="exam-table"><thead><tr><th>类型</th><th>场次</th><th>session_id</th><th>时间</th><th>考生</th><th>班级</th><th>状态</th></tr></thead><tbody id="projectDetailSessionRows"></tbody></table></div></div></div>
               <div class="panel"><div class="panel-head"><h2 class="panel-title">相关文件</h2></div><div class="panel-body" id="projectFiles">暂无已归档文件</div></div>
               <div class="panel"><div class="panel-head"><h2 class="panel-title">项目日志</h2></div><div class="panel-body"><div class="log-list" id="projectLogs"></div></div></div>
@@ -2922,6 +3009,8 @@
             <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">一次性权限设置</h2><p class="subtitle">macOS 权限弹窗不能由系统自动点击允许，也不能绕过；需要在系统设置里为实际运行采集的 Codex / Terminal / node 授权。</p></div></div><div class="panel-body"><div class="task-meta">首次部署时请在“系统设置 > 隐私与安全性”中完成：辅助功能、屏幕录制、自动化/访问其他 App 数据。授权后通常不需要每次确认；如果更换 Node 路径、启动方式或系统重置权限，macOS 可能会再次弹窗。完成后运行“检查本机采集环境”，失败时按预检原因补授权。</div></div></div>
             <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">1. 初始化验证 / 上线前检查</h2><p class="subtitle">确认这台 Mac、微信可见窗口、需求中心链路是否可用。预检不推送需求；链路自检使用临时数据验证流转。</p></div></div><div class="panel-body"><div class="task-overview"><div><div class="task-overview-label">环境预检</div><div class="task-overview-value">部署或排障时使用</div><div class="view-actions" style="margin-top:10px;"><button class="btn" id="dryRunWechatCollectorBtn" type="button">检查本机采集环境</button></div></div><div><div class="task-overview-label">需求链路自检</div><div class="task-overview-value">验证需求中心写入</div><div class="view-actions" style="margin-top:10px;"><button class="btn" id="runWechatPipelineSmokeBtn" type="button">运行链路自检</button></div></div><div><div class="task-overview-label">按群真实验证</div><div class="task-overview-value">到项目配置页按群验证</div><div class="task-meta">每个启用群上线前都需要在项目配置页对应群执行“立即采集本群”；识别到新需求或变更时会推送需求中心并更新 checkpoint。</div></div></div><details><summary>高级操作：批量真实采集</summary><div class="task-meta" style="margin-top:10px;">批量真实采集所有启用群会激活微信，适合上线前统一验证；日常建议回到项目配置页逐群操作。</div><div class="view-actions" style="margin-top:10px;"><button class="btn" id="runWechatCollectorOnceBtn" type="button">批量真实采集所有启用群</button></div></details><div class="panel" style="margin-top:12px;margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">最近一次预检</h2></div><div class="panel-body"><div class="task-meta" id="wechatCollectorPreflightMeta">等待加载预检状态</div><div class="log-list" id="wechatCollectorPreflight"></div></div></div><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">链路自检结果</h2></div><div class="panel-body"><div class="task-meta" id="wechatPipelineSmokeMeta">尚未自检</div><div class="log-list" id="wechatPipelineSmoke"><div class="empty-state">使用临时服务和临时数据库验证需求推送与变更单流程。</div></div></div></div><div class="panel"><div class="panel-head"><h2 class="panel-title">需求中心服务</h2></div><div class="panel-body"><div class="log-list" id="wechatCollectorRequirementCenter"><div class="empty-state">等待加载需求中心服务状态</div></div></div></div></div></div>
             <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">LLM 候选解析</h2><p class="subtitle">默认关闭。启用后只生成候选结构化结果和原文证据，进入需求详情页人工确认，不会自动覆盖正式需求。API Key 只保存在本机运行时配置，页面不会回显明文。</p></div><div class="view-actions"><button class="btn" id="loadWechatLlmModelsBtn" type="button">验证并读取模型</button><button class="btn primary" id="saveWechatLlmConfigBtn" type="button">保存 LLM 配置</button></div></div><div class="panel-body"><p class="subtitle">一般不用改 Endpoint；选择 OpenAI 或千问后会带出默认地址，只有使用代理或私有兼容接口时才需要修改。</p><div class="settings-grid"><label class="field"><span class="field-label">启用 LLM</span><select class="field-input" id="wechatLlmEnabled"><option value="false">否</option><option value="true">是</option></select></label><label class="field"><span class="field-label">服务商</span><select class="field-input" id="wechatLlmProvider"><option value="openai">OpenAI</option><option value="qwen">千问</option></select></label><label class="field"><span class="field-label">模型</span><select class="field-input" id="wechatLlmModel"><option value="">请先验证并读取模型</option></select></label><label class="field"><span class="field-label">Endpoint</span><input class="field-input" id="wechatLlmEndpoint" placeholder="https://api.openai.com/v1/responses" /></label><label class="field"><span class="field-label">API Key</span><input class="field-input" id="wechatLlmApiKey" type="password" placeholder="留空则保留已保存密钥" /></label><label class="field"><span class="field-label">密钥操作</span><select class="field-input" id="wechatLlmClearApiKey"><option value="false">保留/更新密钥</option><option value="true">清空已保存密钥</option></select></label></div><div class="task-meta" id="wechatLlmConfigState" style="margin-top:8px;">等待加载 LLM 配置</div></div></div>
+            <div class="panel" id="emailSettingsPanel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">邮箱配置</h2><p class="subtitle">使用 Outlook 公司邮箱发送内容任务单。收件人不在这里保存，发送时按项目当次输入。</p></div><div class="view-actions"><button class="btn" id="sendEmailTestBtn" type="button">发送测试邮件</button><button class="btn primary" id="saveEmailSettingsBtn" type="button">保存邮箱配置</button></div></div><div class="panel-body"><div class="settings-grid"><label class="field"><span class="field-label">SMTP Host</span><input class="field-input" id="emailHost" value="smtp.office365.com" /></label><label class="field"><span class="field-label">SMTP Port</span><input class="field-input" id="emailPort" value="587" /></label><label class="field"><span class="field-label">发件邮箱</span><input class="field-input" id="emailFromAddress" placeholder="name@company.com" /></label><label class="field"><span class="field-label">发件显示名</span><input class="field-input" id="emailFromName" placeholder="运营自动化" /></label><label class="field"><span class="field-label">SMTP 用户名</span><input class="field-input" id="emailUsername" placeholder="通常与发件邮箱一致" /></label><label class="field"><span class="field-label">SMTP 密码/应用密码</span><input class="field-input" id="emailPassword" type="password" placeholder="留空则保留已保存密码" /></label><label class="field"><span class="field-label">清空已保存密码</span><select class="field-input" id="emailClearPassword"><option value="false">保留/更新密码</option><option value="true">清空已保存密码</option></select></label><label class="field"><span class="field-label">测试收件人</span><input class="field-input" id="emailTestRecipient" placeholder="仅用于本次测试发送" /></label></div><div class="task-meta" id="emailSettingsState" style="margin-top:8px;">等待加载邮箱配置</div></div></div>
+            <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">运营控制台自动化环境</h2><p class="subtitle">只检查和修复本机浏览器自动化运行环境；运控账号登录、内网连通由使用者自行保证。</p></div><div class="view-actions"><button class="btn" id="checkOperationConsoleEnvironmentBtn" type="button">检查运控自动化环境</button><button class="btn" id="installOperationConsoleEnvironmentBtn" type="button">安装浏览器自动化依赖</button><button class="btn primary" id="enableOperationConsoleEnvironmentBtn" type="button">启用自动化并重启服务</button></div></div><div class="panel-body"><div class="log-list" id="operationConsoleEnvironment"><div class="empty-state">等待检查运营控制台自动化环境</div></div></div></div>
             <div class="panel" style="margin-bottom:12px;"><div class="panel-head"><div><h2 class="panel-title">2. 上线自动采集</h2><p class="subtitle">只有“上线前必须完成”全部通过后，才安装定时自动采集。</p></div><div class="view-actions"><button class="btn" id="installWechatCollectorAutomationBtn" type="button" disabled title="等待上线前检查">安装整套自动采集</button><button class="btn" id="uninstallWechatCollectorAutomationBtn" type="button">卸载整套自动采集</button></div></div><div class="panel-body"><div class="log-list" id="wechatCollectorGoLive"><div class="empty-state">等待加载上线前检查</div></div></div></div>
           <details><summary>高级维护：服务与定时任务</summary><div class="panel"><div class="panel-head"><div><h2 class="panel-title">3. 高级维护</h2><p class="subtitle">正常上线优先使用“安装整套自动采集”。只有排障或单独维护 LaunchAgent 时才操作本区按钮。</p></div></div><div class="panel-body"><div class="panel" style="margin-bottom:12px;"><div class="panel-head"><h2 class="panel-title">本机服务</h2><div class="view-actions"><button class="btn" id="installWechatCollectorServiceBtn" type="button">安装服务</button><button class="btn" id="uninstallWechatCollectorServiceBtn" type="button">卸载服务</button></div></div><div class="panel-body"><div class="log-list" id="wechatCollectorService"><div class="empty-state">等待加载本机服务状态</div></div></div></div><div class="panel"><div class="panel-head"><h2 class="panel-title">定时任务</h2><div class="view-actions"><button class="btn" id="installWechatCollectorSchedulerBtn" type="button" disabled title="等待上线前检查">安装定时</button><button class="btn" id="uninstallWechatCollectorSchedulerBtn" type="button">卸载定时</button></div></div><div class="panel-body"><div class="log-list" id="wechatCollectorScheduler"><div class="empty-state">等待加载定时任务状态</div></div></div></div></div></div></details>
           </div></div>
@@ -3060,6 +3149,21 @@
       const wechatLlmConfigState = document.querySelector("#wechatLlmConfigState");
       const loadWechatLlmModelsBtn = document.querySelector("#loadWechatLlmModelsBtn");
       const saveWechatLlmConfigBtn = document.querySelector("#saveWechatLlmConfigBtn");
+      const operationConsoleEnvironment = document.querySelector("#operationConsoleEnvironment");
+      const checkOperationConsoleEnvironmentBtn = document.querySelector("#checkOperationConsoleEnvironmentBtn");
+      const installOperationConsoleEnvironmentBtn = document.querySelector("#installOperationConsoleEnvironmentBtn");
+      const enableOperationConsoleEnvironmentBtn = document.querySelector("#enableOperationConsoleEnvironmentBtn");
+      const emailHost = document.querySelector("#emailHost");
+      const emailPort = document.querySelector("#emailPort");
+      const emailFromAddress = document.querySelector("#emailFromAddress");
+      const emailFromName = document.querySelector("#emailFromName");
+      const emailUsername = document.querySelector("#emailUsername");
+      const emailPassword = document.querySelector("#emailPassword");
+      const emailClearPassword = document.querySelector("#emailClearPassword");
+      const emailTestRecipient = document.querySelector("#emailTestRecipient");
+      const emailSettingsState = document.querySelector("#emailSettingsState");
+      const saveEmailSettingsBtn = document.querySelector("#saveEmailSettingsBtn");
+      const sendEmailTestBtn = document.querySelector("#sendEmailTestBtn");
       const projectGrid = document.querySelector("#projectGrid");
       const examListRows = document.querySelector("#examListRows");
       const examStats = document.querySelector("#examStats");
@@ -3333,9 +3437,10 @@
               const business = task.config?.businessRequirement || {};
               const customerName = business.customer_name || task.customerName || "";
               const projectCode = business.project_code || task.config?.projectCode || "";
-              const requirementRequestId = task.config?.requirementRequestId || task.config?.initialRequirementRequestId || "";
+              const requirementRequestId = projectRequirementRequestId(task);
+              const businessFlowId = operationBatchDisplayId(task);
               return `<article class="project-card" data-task-id="${safeText(task.taskId)}">
-                <div class="project-card-head"><div><div class="project-title">${safeText(task.projectName)}</div><div class="task-meta">客户名称：${safeText(customerName || "未记录")}<br>项目编码：${safeText(projectCode || "未记录")}<br>需求单：${safeText(requirementRequestId || "未生成")}<br>来源账号：${safeText(task.sourceAccount || "未记录")}<br>考试任务：1 · 正式场次：${formalCount} · 试考场次：${trialCount}<br>更新时间：${formatTaskTime(task.updatedAt)}</div></div>${statusChip(task.status)}</div>
+                <div class="project-card-head"><div><div class="project-title">${safeText(task.projectName)}</div><div class="task-meta">客户名称：${safeText(customerName || "未记录")}<br>项目编码：${safeText(projectCode || "未记录")}<br>批次代码：${safeText(businessFlowId || "未生成")}<br>内部需求单：${safeText(requirementRequestId || "未生成")}<br>来源账号：${safeText(task.sourceAccount || "未记录")}<br>考试任务：1 · 正式场次：${formalCount} · 试考场次：${trialCount}<br>更新时间：${formatTaskTime(task.updatedAt)}</div></div>${statusChip(task.status)}</div>
                 <div class="mini-progress"><span style="width:${Math.max(0, Math.min(100, Number(task.progress || 0)))}%"></span></div>
                 <div class="task-meta" style="margin-top:7px;">当前进度 ${Number(task.progress || 0).toFixed(1)}%</div>
                 <div class="card-actions" style="margin-top:12px;"><button class="btn primary project-action" data-action="open" type="button">进入项目配置</button><button class="btn project-action" data-action="auto" type="button">进入自动配置</button></div>
@@ -4106,6 +4211,10 @@
         return task.config?.requirementRequestId || task.config?.initialRequirementRequestId || "";
       }
 
+      function operationBatchDisplayId(task = {}) {
+        return task.config?.operationBatchCode || task.config?.operationBatch?.code || projectRequirementRequestId(task);
+      }
+
       function openRequirementInProjectContext(requestId) {
         if (!requestId) return;
         projectRequirementInlinePanel.open = true;
@@ -4276,6 +4385,133 @@
         renderProjectConfigurationStatus(task, detail);
       }
 
+      const operationBatchFieldLabels = [
+        ["operationTaskSerial", "考试需求任务单"],
+        ["projectCode", "项目编码"],
+        ["projectName", "项目名称"],
+        ["businessDirection", "业务方向"],
+        ["businessDepartment", "业务部归属"],
+        ["businessOwner", "业务负责人"],
+        ["batchName", "批次名称"],
+        ["projectDepartment", "项目部归属"],
+        ["examStartDate", "考试开始日期"],
+        ["examEndDate", "考试结束日期"],
+        ["serviceExam", "考试服务"],
+        ["servicePersonnel", "人员服务"],
+        ["estimatedTotalSubjectCount", "预估总考量"],
+        ["estimatedMaxSubjectCount", "预估单场最大科次数"],
+        ["estimatedCityCount", "预估城市数"],
+        ["systemType", "系统类型"],
+        ["stationUsage", "使用考站情况"],
+        ["arrangementService", "编排服务"],
+        ["onlineSettlementArrangementSource", "在线结算编排来源"],
+        ["billingBasis", "结算依据"],
+        ["remark", "备注"],
+      ];
+
+      function operationBatchSourceLabel(source) {
+        if (source === "business_requirement") return "业务需求";
+        if (source === "default_rule") return "默认规则";
+        if (source === "manual") return "人工补充";
+        return source || "--";
+      }
+
+      function renderOperationBatchDraft(draft = {}) {
+        const fields = draft.fields || {};
+        const warnings = draft.warnings || [];
+        const warningFields = new Set(warnings.map((item) => item.field));
+        const rows = operationBatchFieldLabels.map(([key, label]) => {
+          const item = fields[key] || {};
+          const warn = warningFields.has(key) || !item.value;
+          return `<div class="operation-param-item"><div class="operation-param-label"><span>${safeText(label)}</span><span class="tag ${warn ? "amber" : "green"}">${safeText(warn ? "待确认" : operationBatchSourceLabel(item.source))}</span></div><div class="operation-param-value">${safeText(item.value || "待补充")}</div></div>`;
+        }).join("");
+        const warningHtml = warnings.length
+          ? `<div class="log warn" style="margin-top:12px;"><div>${warnings.map((item) => safeText(item.message || "")).join("<br>")}</div></div>`
+          : `<div class="log success" style="margin-top:12px;"><div>创建参数已满足当前规则，可直接创建运营批次。</div></div>`;
+        return `<div class="operation-param-list">${rows}</div>${warningHtml}`;
+      }
+
+      function updateOperationBatchActions(task = taskViewState.currentProject) {
+        const batch = task?.config?.operationBatch || {};
+        const code = task?.config?.operationBatchCode || batch.code || "";
+        operationBatchCreateBtn.disabled = Boolean(code);
+        operationBatchRecordBtn.disabled = Boolean(code);
+        operationBatchCreateBtn.textContent = code ? "已创建批次" : "创建未发布批次";
+      }
+
+      function renderOperationBatchFromTask(task = {}) {
+        const batch = task.config?.operationBatch || {};
+        const code = task.config?.operationBatchCode || batch.code || "";
+        const contentMail = task.config?.contentRequirementEmail || {};
+        projectOperationBatchDisplay.textContent = operationBatchDisplayId(task) || "--";
+        operationBatchCodeInput.value = code;
+        operationBatchDetailUrlInput.value = batch.detailUrl || "";
+        contentRequirementEmailState.textContent = contentMail.lastSentAt
+          ? `上次发送：${formatTaskTime(contentMail.lastSentAt)} · ${(contentMail.lastRecipients || []).join("、")}`
+          : "等待发送。";
+        updateOperationBatchActions(task);
+        if (batch.draft) {
+          projectOperationBatchDraft.innerHTML = renderOperationBatchDraft(batch.draft);
+          projectOperationBatchState.textContent = code
+            ? `已记录运营批次代码：${code}`
+            : "已加载运营批次创建参数。";
+        } else {
+          projectOperationBatchDraft.innerHTML = `<div class="empty-state">正在生成创建参数。</div>`;
+          projectOperationBatchState.textContent = "正在生成运营批次创建参数。";
+        }
+      }
+
+      async function loadProjectOperationBatchDraft(task = taskViewState.currentProject) {
+        if (!task?.taskId) return;
+        renderOperationBatchFromTask(task);
+        const result = await fetchJson(`/api/tasks/${encodeURIComponent(task.taskId)}/operation-batch/draft?_=${Date.now()}`);
+        taskViewState.currentProject = result.task || task;
+        projectOperationBatchDraft.innerHTML = renderOperationBatchDraft(result.draft || {});
+        updateOperationBatchActions(taskViewState.currentProject);
+        projectOperationBatchState.textContent = (result.draft?.warnings || []).length
+          ? "创建参数已生成，仍有字段需要先在业务需求或配置需求中补充。"
+          : "创建参数已生成，可创建未发布批次。";
+      }
+
+      async function createProjectOperationBatch() {
+        const task = taskViewState.currentProject || {};
+        if (!task.taskId) throw new Error("缺少当前项目编号");
+        if (task.config?.operationBatchCode || task.config?.operationBatch?.code) {
+          renderOperationBatchFromTask(task);
+          projectOperationBatchState.textContent = `运营批次已创建：${task.config.operationBatchCode || task.config.operationBatch.code}`;
+          return;
+        }
+        projectOperationBatchState.textContent = "正在打开运营控制台创建未发布批次...";
+        const result = await fetchJson(`/api/tasks/${encodeURIComponent(task.taskId)}/operation-batch/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        taskViewState.currentProject = result.task || task;
+        renderOperationBatchFromTask(taskViewState.currentProject);
+        projectOperationBatchState.textContent = `运营批次已创建：${result.operationBatchCode || taskViewState.currentProject.config?.operationBatchCode || "--"}`;
+      }
+
+      async function recordProjectOperationBatchCode() {
+        const task = taskViewState.currentProject || {};
+        const operationBatchCode = operationBatchCodeInput.value.trim();
+        if (!task.taskId) throw new Error("缺少当前项目编号");
+        if (!operationBatchCode) throw new Error("请填写运营批次代码");
+        projectOperationBatchState.textContent = "正在记录批次代码...";
+        const result = await fetchJson(`/api/tasks/${encodeURIComponent(task.taskId)}/operation-batch/result`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operationBatchCode,
+            detailUrl: operationBatchDetailUrlInput.value.trim(),
+            status: "created_unpublished",
+          }),
+        });
+        taskViewState.currentProject = result.task || task;
+        renderOperationBatchFromTask(taskViewState.currentProject);
+        projectOperationBatchState.textContent = `已记录运营批次代码：${operationBatchCode}`;
+      }
+
       async function loadProjectRequirementForDetail(task) {
         const requestId = projectRequirementRequestId(task);
         if (!requestId) return;
@@ -4295,10 +4531,12 @@
         projectDetailSubtitle.textContent = task.projectName || "";
         const business = task.config?.businessRequirement || {};
         const requirementRequestId = projectRequirementRequestId(task);
+        const businessFlowId = operationBatchDisplayId(task);
         const sessions = task.sessions || [];
         const candidates = sessions.reduce((sum, session) => sum + Number(session.candidateCount || 0), 0);
         const rooms = sessions.reduce((sum, session) => sum + Number(session.roomCount || 0), 0);
-        projectDetailOverview.innerHTML = `<div class="task-summary"><div><div class="project-title">${safeText(task.projectName)}</div>${statusChip(task.status)}</div><div class="task-progress-value">${Number(task.progress || 0).toFixed(1)}%</div></div><div class="task-overview-grid"><div><div class="task-overview-label">项目编号</div><div class="task-overview-value">${safeText(task.taskId)}</div></div><div><div class="task-overview-label">项目编码</div><div class="task-overview-value">${safeText(business.project_code || task.config?.projectCode || "--")}</div></div><div><div class="task-overview-label">客户名称</div><div class="task-overview-value">${safeText(business.customer_name || task.config?.customerName || "--")}</div></div><div><div class="task-overview-label">运控流水号</div><div class="task-overview-value">${safeText(business.operation_serial_number || task.config?.operationSerialNumber || "--")}</div></div><div><div class="task-overview-label">需求单</div><div class="task-overview-value">${safeText(requirementRequestId || "--")}</div></div><div><div class="task-overview-label">来源账号</div><div class="task-overview-value">${safeText(task.sourceAccount || "未记录")}</div></div><div><div class="task-overview-label">考生总数</div><div class="task-overview-value">${candidates}</div></div><div><div class="task-overview-label">班级总数</div><div class="task-overview-value">${rooms}</div></div><div><div class="task-overview-label">更新时间</div><div class="task-overview-value">${formatTaskTime(task.updatedAt)}</div></div></div>`;
+        projectDetailOverview.innerHTML = `<div class="task-summary"><div><div class="project-title">${safeText(task.projectName)}</div>${statusChip(task.status)}</div><div class="task-progress-value">${Number(task.progress || 0).toFixed(1)}%</div></div><div class="task-overview-grid"><div><div class="task-overview-label">项目编号</div><div class="task-overview-value">${safeText(task.taskId)}</div></div><div><div class="task-overview-label">项目编码</div><div class="task-overview-value">${safeText(business.project_code || task.config?.projectCode || "--")}</div></div><div><div class="task-overview-label">客户名称</div><div class="task-overview-value">${safeText(business.customer_name || task.config?.customerName || "--")}</div></div><div><div class="task-overview-label">运控流水号</div><div class="task-overview-value">${safeText(business.operation_serial_number || task.config?.operationSerialNumber || "--")}</div></div><div><div class="task-overview-label">批次代码</div><div class="task-overview-value">${safeText(businessFlowId || "--")}</div></div><div><div class="task-overview-label">内部需求单</div><div class="task-overview-value">${safeText(requirementRequestId || "--")}</div></div><div><div class="task-overview-label">来源账号</div><div class="task-overview-value">${safeText(task.sourceAccount || "未记录")}</div></div><div><div class="task-overview-label">考生总数</div><div class="task-overview-value">${candidates}</div></div><div><div class="task-overview-label">班级总数</div><div class="task-overview-value">${rooms}</div></div><div><div class="task-overview-label">更新时间</div><div class="task-overview-value">${formatTaskTime(task.updatedAt)}</div></div></div>`;
+        renderOperationBatchFromTask(task);
         renderProjectRequirementDetail(task, taskViewState.wechatRequirementDetails[requirementRequestId] || null);
         projectRequirementActions.innerHTML = requirementRequestId
           ? `<button class="btn" data-project-action="view-requirement" type="button">展开配置需求详情</button>`
@@ -4311,6 +4549,7 @@
       async function loadProjectDetail(projectId) {
         const task = await fetchJson(`/api/tasks/${encodeURIComponent(projectId)}?_=${Date.now()}`);
         renderProjectDetail(task);
+        await loadProjectOperationBatchDraft(task);
         await loadProjectRequirementForDetail(task);
         await loadWechatCollector();
         renderProjectConfigurationStatus(taskViewState.currentProject, taskViewState.wechatRequirementDetails[projectRequirementRequestId(task)] || null);
@@ -4505,9 +4744,11 @@
       }
 
       async function loadWechatCollector() {
-        const [configData, statusData] = await Promise.all([
+        const [configData, statusData, operationConsoleData, emailData] = await Promise.all([
           fetchJson(`/api/wechat-collector/config?_=${Date.now()}`),
           fetchJson(`/api/wechat-collector/status?_=${Date.now()}`),
+          fetchJson(`/api/operation-console/environment?_=${Date.now()}`),
+          fetchJson(`/api/email/settings?_=${Date.now()}`),
         ]);
         const allGroups = mergePendingProjectWechatGroup(configData.config?.groups || []);
         taskViewState.wechatAllGroups = allGroups;
@@ -4530,6 +4771,8 @@
         renderWechatCollectorHistory(statusData.history || []);
         renderWechatCollectorPreflight(statusData.preflight || {});
         renderWechatPipelineSmoke(statusData.pipelineSmoke || {});
+        renderOperationConsoleEnvironment(operationConsoleData.environment || {});
+        renderEmailSettings(emailData.email || {});
 
         const status = statusData.status || {};
         const runGroups = status.groups || [];
@@ -4783,6 +5026,39 @@
         wechatCollectorRequirementCenter.innerHTML = `<div class="log${warnClass}">
           <div>${safeText(service.apiBase || "http://127.0.0.1:8765")} · ${available}${service.detail ? `<br><span class="task-meta">${safeText(service.detail)}</span>` : ""}</div>
         </div>`;
+      }
+
+      function renderOperationConsoleEnvironment(environment = {}) {
+        const items = [
+          ["自动化开关", environment.automationEnabled],
+          ["Playwright 依赖", environment.playwright],
+          ["Chromium 浏览器", environment.chromium],
+        ];
+        const ready = Boolean(environment.ready);
+        operationConsoleEnvironment.innerHTML = `<div class="log ${ready ? "" : "warn"}"><div>${ready ? "运控自动化运行环境已就绪" : "运控自动化运行环境未就绪"}<br><span class="task-meta">这里只检查本机自动化运行条件；运控账号登录和内网连通由使用者自行保证。</span></div></div>${items.map(([label, item]) => `<div class="log ${item?.ok ? "" : "warn"}"><div>${safeText(label)} · ${item?.ok ? "通过" : "待处理"}<br><span class="task-meta">${safeText(item?.detail || "--")}</span></div></div>`).join("")}`;
+      }
+
+      function renderEmailSettings(email = {}) {
+        emailHost.value = email.host || "smtp.office365.com";
+        emailPort.value = email.port || "587";
+        emailFromAddress.value = email.fromEmail || "";
+        emailFromName.value = email.fromName || "";
+        emailUsername.value = email.username || "";
+        emailPassword.value = "";
+        emailClearPassword.value = "false";
+        emailSettingsState.textContent = email.passwordConfigured ? "邮箱配置已保存，密码已配置。" : "邮箱配置未完整，发送前请保存 SMTP 密码或应用密码。";
+      }
+
+      function collectEmailSettings() {
+        return {
+          host: emailHost.value.trim() || "smtp.office365.com",
+          port: Number(emailPort.value || 587),
+          fromEmail: emailFromAddress.value.trim(),
+          fromName: emailFromName.value.trim(),
+          username: emailUsername.value.trim(),
+          password: emailPassword.value,
+          clearPassword: emailClearPassword.value === "true",
+        };
       }
 
       function wechatIntervalInputValue(group) {
@@ -5492,6 +5768,64 @@
         const models = result.models || [];
         renderWechatLlmModelOptions(models, wechatLlmModel.value || models[0] || "");
         wechatLlmConfigState.textContent = `连通成功，读取到 ${Number(models.length)} 个模型，请选择后保存。`;
+      }
+
+      async function saveEmailSettings() {
+        emailSettingsState.textContent = "正在保存邮箱配置...";
+        const result = await fetchJson("/api/email/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: collectEmailSettings() }),
+        });
+        renderEmailSettings(result.email || {});
+        emailSettingsState.textContent = "邮箱配置已保存。";
+      }
+
+      async function sendEmailTest() {
+        const recipients = emailTestRecipient.value.trim();
+        if (!recipients) throw new Error("请填写测试收件人");
+        emailSettingsState.textContent = "正在发送测试邮件...";
+        const result = await fetchJson("/api/email/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipients }),
+        });
+        emailSettingsState.textContent = `测试邮件已发送：${safeText((result.result?.recipients || []).join("、"))}`;
+      }
+
+      async function sendContentRequirementEmailFromProject() {
+        const task = taskViewState.currentProject || {};
+        if (!task.taskId) throw new Error("缺少当前项目编号");
+        const recipients = contentRequirementEmailRecipients.value.trim();
+        if (!recipients) throw new Error("请填写收件人");
+        contentRequirementEmailState.textContent = "正在发送内容任务单...";
+        const result = await fetchJson(`/api/tasks/${encodeURIComponent(task.taskId)}/content-requirement-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipients }),
+        });
+        taskViewState.currentProject = result.task || task;
+        contentRequirementEmailState.textContent = `已发送：${safeText((result.result?.recipients || []).join("、"))}`;
+      }
+
+      async function checkOperationConsoleEnvironment() {
+        operationConsoleEnvironment.innerHTML = `<div class="empty-state">正在检查运控自动化环境...</div>`;
+        const result = await fetchJson(`/api/operation-console/environment?_=${Date.now()}`);
+        renderOperationConsoleEnvironment(result.environment || {});
+      }
+
+      async function installOperationConsoleEnvironment() {
+        if (!confirmWechatSideEffect("将执行固定安装命令：npm install --omit=dev 和 npx playwright install chromium。确认继续？")) return;
+        operationConsoleEnvironment.innerHTML = `<div class="empty-state">正在安装浏览器自动化依赖，首次安装可能需要几分钟...</div>`;
+        const result = await fetchJson("/api/operation-console/environment/install", { method: "POST" });
+        renderOperationConsoleEnvironment(result.environment || {});
+      }
+
+      async function enableOperationConsoleEnvironment() {
+        if (!confirmWechatSideEffect("将写入 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 并重启本机服务。确认继续？")) return;
+        operationConsoleEnvironment.innerHTML = `<div class="empty-state">正在启用运控自动化并重启服务...</div>`;
+        const result = await fetchJson("/api/operation-console/environment/enable", { method: "POST" });
+        renderOperationConsoleEnvironment(result.environment || {});
       }
 
       async function restoreWechatCollectorConfigBackup(button) {
@@ -7744,6 +8078,11 @@
       uninstallWechatCollectorSchedulerBtn.addEventListener("click", () => uninstallWechatCollectorScheduler().catch((error) => { wechatCollectorScheduler.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
       loadWechatLlmModelsBtn.addEventListener("click", () => loadWechatLlmModels().catch((error) => { wechatLlmConfigState.textContent = error.message || String(error); }));
       saveWechatLlmConfigBtn.addEventListener("click", () => saveWechatLlmConfig().catch((error) => { wechatLlmConfigState.textContent = error.message || String(error); }));
+      saveEmailSettingsBtn.addEventListener("click", () => saveEmailSettings().catch((error) => { emailSettingsState.textContent = error.message || String(error); }));
+      sendEmailTestBtn.addEventListener("click", () => sendEmailTest().catch((error) => { emailSettingsState.textContent = error.message || String(error); }));
+      checkOperationConsoleEnvironmentBtn.addEventListener("click", () => checkOperationConsoleEnvironment().catch((error) => { operationConsoleEnvironment.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      installOperationConsoleEnvironmentBtn.addEventListener("click", () => installOperationConsoleEnvironment().catch((error) => { operationConsoleEnvironment.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
+      enableOperationConsoleEnvironmentBtn.addEventListener("click", () => enableOperationConsoleEnvironment().catch((error) => { operationConsoleEnvironment.innerHTML = `<div class="empty-state">${safeText(error.message)}</div>`; }));
       wechatLlmProvider.addEventListener("change", () => {
         if (wechatLlmProvider.value === "qwen") {
           renderWechatLlmModelOptions([], "qwen-plus");
@@ -7764,6 +8103,10 @@
       projectIntakeOcrBtn.addEventListener("click", () => uploadProjectIntakeScreenshot().catch((error) => { projectIntakeState.textContent = error.message || String(error); }));
       projectIntakeCreateBtn.addEventListener("click", () => createProjectFromBusinessDraft().catch((error) => { projectIntakeState.textContent = error.message || String(error); }));
       projectAutoConfigBtn.addEventListener("click", () => router.navigate(`/auto-config?projectId=${encodeURIComponent(taskViewState.currentProjectId)}`));
+      operationBatchRefreshBtn.addEventListener("click", () => loadProjectOperationBatchDraft().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
+      operationBatchCreateBtn.addEventListener("click", () => createProjectOperationBatch().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
+      operationBatchRecordBtn.addEventListener("click", () => recordProjectOperationBatchCode().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
+      contentRequirementEmailSendBtn.addEventListener("click", () => sendContentRequirementEmailFromProject().catch((error) => { contentRequirementEmailState.textContent = error.message || String(error); }));
       projectDeleteConfirmInput.addEventListener("input", updateProjectDeleteConfirmState);
       projectDeleteSessionConfirm.addEventListener("change", updateProjectDeleteConfirmState);
       projectDeleteCancelBtn.addEventListener("click", closeProjectDeleteDialog);

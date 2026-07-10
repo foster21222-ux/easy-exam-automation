@@ -18,6 +18,45 @@ test("server exposes exam request template download endpoint", () => {
   assert.ok(serverSource.includes('/api/templates/exam-request'));
 });
 
+test("server exposes operation batch draft and result endpoints without replacing requirement id", () => {
+  assert.ok(serverSource.includes('from "./operation_batch.mjs"'));
+  assert.ok(serverSource.includes("async function handleOperationBatchDraft"));
+  assert.ok(serverSource.includes("async function handleOperationBatchResult"));
+  assert.ok(serverSource.includes("async function handleOperationBatchCreate"));
+  assert.ok(serverSource.includes('operation-batch\\/draft'));
+  assert.ok(serverSource.includes('operation-batch\\/create'));
+  assert.ok(serverSource.includes('operation-batch\\/result'));
+  assert.ok(serverSource.includes("applyOperationBatchResult(task"));
+  assert.ok(serverSource.includes("OPERATION_CONSOLE_AUTOMATION_ENABLED"));
+  assert.ok(serverSource.includes("existingOperationBatchCode"));
+  assert.ok(serverSource.includes("runTaskState(\"update_config\""));
+  assert.equal(serverSource.includes("requirementRequestId: patch.operationBatchCode"), false);
+});
+
+test("server exposes operation console automation environment endpoints", () => {
+  assert.ok(serverSource.includes('from "./operation_console_env.mjs"'));
+  assert.ok(serverSource.includes("async function handleOperationConsoleEnvironment"));
+  assert.ok(serverSource.includes("async function handleOperationConsoleEnvironmentInstall"));
+  assert.ok(serverSource.includes("async function handleOperationConsoleEnvironmentEnable"));
+  assert.ok(serverSource.includes("/api/operation-console/environment"));
+  assert.ok(serverSource.includes("/api/operation-console/environment/install"));
+  assert.ok(serverSource.includes("/api/operation-console/environment/enable"));
+  assert.equal(serverSource.includes("operation-console/login"), false);
+});
+
+test("server exposes Outlook email settings and content requirement send endpoints without default recipients", () => {
+  assert.ok(serverSource.includes('from "./content_requirement_email.mjs"'));
+  assert.ok(serverSource.includes('path.join(runtimeDir, "email_settings.json")'));
+  assert.ok(serverSource.includes("async function handleEmailSettings"));
+  assert.ok(serverSource.includes("async function handleEmailTest"));
+  assert.ok(serverSource.includes("async function handleContentRequirementEmail"));
+  assert.ok(serverSource.includes("/api/email/settings"));
+  assert.ok(serverSource.includes("/api/email/test"));
+  assert.ok(serverSource.includes("content-requirement-email"));
+  assert.ok(serverSource.includes("sendContentRequirementEmail"));
+  assert.equal(serverSource.includes("defaultRecipients"), false);
+});
+
 test("EasyExam account settings are stored per console user", () => {
   assert.ok(serverSource.includes('path.join(runtimeDir, "user_settings.json")'));
   assert.ok(serverSource.includes("saveUserLogin(state.userSettings, user"));

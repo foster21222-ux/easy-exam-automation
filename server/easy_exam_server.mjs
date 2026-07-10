@@ -58,6 +58,16 @@ import {
   templateFrameFromTableBounds,
   templateRectToImageRect,
 } from "./project_intake.mjs";
+import {
+  applyOperationBatchResult,
+  buildOperationBatchDraft,
+} from "./operation_batch.mjs";
+import {
+  checkOperationConsoleAutomationEnvironment,
+  enableOperationConsoleAutomation,
+  installOperationConsoleAutomationDeps,
+} from "./operation_console_env.mjs";
+import { runOperationBatchCreation } from "./operation_batch_runner.mjs";
 import { deleteTaskSessionsFromTenant } from "./session_deletion.mjs";
 import {
   apiKeyProfilesForUser,
@@ -78,6 +88,11 @@ import {
 } from "./tencent_docs_sync.mjs";
 import { createWechatCollectorHandler } from "./wechat_collector_api.mjs";
 import { disableWechatGroupsForDeletedTask } from "./wechat_project_cleanup.mjs";
+import {
+  normalizeEmailSettings,
+  redactEmailSettings,
+  sendContentRequirementEmail,
+} from "./content_requirement_email.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -91,6 +106,7 @@ const authSettingsPath = path.join(runtimeDir, "auth.json");
 const authUsersPath = path.join(runtimeDir, "auth_users.json");
 const authSessionsPath = path.join(runtimeDir, "auth_sessions.json");
 const userSettingsPath = path.join(runtimeDir, "user_settings.json");
+const emailSettingsPath = path.join(runtimeDir, "email_settings.json");
 const parserScript = path.join(__dirname, "exam_request_parser.py");
 const candidateParserScript = path.join(__dirname, "candidate_list_parser.py");
 const monitorAccountExporterScript = path.join(__dirname, "monitor_account_exporter.py");
@@ -3491,6 +3507,221 @@ async function handleTaskHide(taskId, req, res) {
   });
 }
 
+function operationBatchDraftOverridesFromTask(task = {}) {
+  const fields = task.config?.operationBatch?.draft?.fields || {};
+  return {
+    fields: Object.fromEntries(Object.entries(fields).map(([key, item]) => [key, item?.value || ""])),
+  };
+}
+
+async function handleOperationBatchDraft(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const payload = req.method === "POST" ? (parseJsonSafe(await readBody(req)) || {}) : operationBatchDraftOverridesFromTask(task);
+  const draft = buildOperationBatchDraft(task, payload);
+  if (req.method !== "POST") {
+    return json(res, 200, { ok: true, draft, task });
+  }
+  const current = task.config?.operationBatch || {};
+  const operationBatch = {
+    ...current,
+    status: current.status || "draft",
+    draft,
+    updatedAt: new Date().toISOString(),
+  };
+  const updated = await runTaskState("update_config", { taskId, config: { operationBatch } });
+  return json(res, 200, { ok: true, draft, task: updated });
+}
+
+async function handleOperationBatchCreate(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const existingOperationBatchCode = task.config?.operationBatchCode || task.config?.operationBatch?.code || "";
+  if (existingOperationBatchCode) {
+    return json(res, 200, {
+      ok: true,
+      task,
+      operationBatch: task.config?.operationBatch || {},
+      operationBatchCode: existingOperationBatchCode,
+      skipped: "operation_batch_already_created",
+    });
+  }
+  if (process.env.OPERATION_CONSOLE_AUTOMATION_ENABLED !== "1") {
+    return json(res, 409, {
+      error: "运营控制台浏览器自动化未启用。请先确认测试环境已登录，并设置 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 后重启服务。",
+    });
+  }
+  const payload = parseJsonSafe(await readBody(req)) || operationBatchDraftOverridesFromTask(task);
+  const draft = buildOperationBatchDraft(task, payload);
+  const missing = (draft.warnings || []).map((item) => item.message).filter(Boolean);
+  if (missing.length) {
+    return badRequest(res, `批次草稿仍有缺失字段：${missing.join("；")}`);
+  }
+  const current = task.config?.operationBatch || {};
+  await runTaskState("update_config", {
+    taskId,
+    config: {
+      operationBatch: {
+        ...current,
+        status: "creating",
+        draft,
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  });
+  try {
+    const created = await runOperationBatchCreation(draft, {
+      baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
+      userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
+      allowTaskMismatch: process.env.OPERATION_CONSOLE_ALLOW_TEST_TASK_MISMATCH === "1",
+    });
+    const freshTask = await runTaskState("get", { taskId });
+    const patch = applyOperationBatchResult(freshTask, created);
+    const updated = await runTaskState("update_config", { taskId, config: patch });
+    return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
+  } catch (error) {
+    const failedTask = await runTaskState("get", { taskId });
+    const failedCurrent = failedTask.config?.operationBatch || {};
+    const updated = await runTaskState("update_config", {
+      taskId,
+      config: {
+        operationBatch: {
+          ...failedCurrent,
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
+    return json(res, 500, { error: error instanceof Error ? error.message : String(error), task: updated });
+  }
+}
+
+async function handleOperationBatchResult(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  let patch;
+  try {
+    patch = applyOperationBatchResult(task, payload);
+  } catch (error) {
+    return badRequest(res, error instanceof Error ? error.message : String(error));
+  }
+  const updated = await runTaskState("update_config", { taskId, config: patch });
+  return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
+}
+
+async function readEmailSettings() {
+  try {
+    const raw = await fs.readFile(emailSettingsPath, "utf8");
+    return normalizeEmailSettings(JSON.parse(raw));
+  } catch {
+    return normalizeEmailSettings({});
+  }
+}
+
+async function writeEmailSettings(settings) {
+  await fs.mkdir(runtimeDir, { recursive: true });
+  await fs.writeFile(emailSettingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+}
+
+async function handleEmailSettings(req, res) {
+  if (req.method === "GET") {
+    return json(res, 200, { ok: true, email: redactEmailSettings(await readEmailSettings()) });
+  }
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const existing = await readEmailSettings();
+  const settings = normalizeEmailSettings(payload.email || payload, existing);
+  await writeEmailSettings(settings);
+  return json(res, 200, { ok: true, email: redactEmailSettings(settings) });
+}
+
+async function handleEmailTest(req, res) {
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  try {
+    const result = await sendContentRequirementEmail({
+      task: { taskId: "email-test", projectName: "邮箱配置测试", config: {} },
+      requirement: {},
+      recipients: payload.recipients || "",
+      emailSettings: await readEmailSettings(),
+    });
+    return json(res, 200, { ok: true, result });
+  } catch (error) {
+    return badRequest(res, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function handleContentRequirementEmail(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  let requirement = null;
+  const requestId = taskRequirementIds(task)[0] || "";
+  if (requestId) {
+    try {
+      requirement = await runRequirementState("get", { requestId });
+    } catch {}
+  }
+  try {
+    const result = await sendContentRequirementEmail({
+      task,
+      requirement,
+      recipients: payload.recipients || "",
+      emailSettings: await readEmailSettings(),
+    });
+    const history = Array.isArray(task.config?.contentRequirementEmail?.history)
+      ? task.config.contentRequirementEmail.history.slice(-9)
+      : [];
+    const updated = await runTaskState("update_config", {
+      taskId,
+      config: {
+        contentRequirementEmail: {
+          lastSentAt: result.sentAt,
+          lastRecipients: result.recipients,
+          lastSubject: result.subject,
+          lastMessageId: result.messageId,
+          history: [...history, result],
+        },
+      },
+    });
+    return json(res, 200, { ok: true, task: updated, result });
+  } catch (error) {
+    return badRequest(res, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function handleOperationConsoleEnvironment(req, res) {
+  const environment = await checkOperationConsoleAutomationEnvironment({ cwd: rootDir });
+  return json(res, 200, { ok: true, environment });
+}
+
+async function handleOperationConsoleEnvironmentInstall(req, res) {
+  try {
+    installOperationConsoleAutomationDeps({ cwd: rootDir });
+    const environment = await checkOperationConsoleAutomationEnvironment({ cwd: rootDir });
+    return json(res, 200, { ok: true, environment });
+  } catch (error) {
+    return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function handleOperationConsoleEnvironmentEnable(req, res) {
+  try {
+    enableOperationConsoleAutomation({ envPath: path.join(rootDir, ".env") });
+    const environment = await checkOperationConsoleAutomationEnvironment({ cwd: rootDir });
+    json(res, 200, { ok: true, environment, restartScheduled: true });
+    setTimeout(() => {
+      const label = process.env.EASY_EXAM_SERVICE_LABEL || "com.ata.easy-exam-service";
+      const service = `gui/${process.getuid()}/${label}`;
+      const child = spawn("launchctl", ["kickstart", "-k", service], { detached: true, stdio: "ignore" });
+      child.unref();
+    }, 150);
+    return;
+  } catch (error) {
+    return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function updatePaperFormBindState(taskId, status, patch = {}) {
   const now = new Date().toISOString();
   const currentTask = await runTaskState("get", { taskId });
@@ -3746,6 +3977,12 @@ async function requestHandler(req, res) {
     if (req.method === "POST" && url.pathname === "/api/settings") {
       return await handleSaveSettings(req, res);
     }
+    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {
+      return await handleEmailSettings(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/email/test") {
+      return await handleEmailTest(req, res);
+    }
     if (url.pathname === "/api/customer-service-scheduler" || url.pathname.startsWith("/api/customer-service-scheduler/")) {
       const handled = await handleCustomerServiceScheduler(req, res, url);
       if (handled !== false) return;
@@ -3771,6 +4008,15 @@ async function requestHandler(req, res) {
     if (await handleWechatCollector(req, res, url)) {
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/operation-console/environment") {
+      return await handleOperationConsoleEnvironment(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/operation-console/environment/install") {
+      return await handleOperationConsoleEnvironmentInstall(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/operation-console/environment/enable") {
+      return await handleOperationConsoleEnvironmentEnable(req, res);
+    }
     if (req.method === "GET" && url.pathname === "/api/tasks") {
       return await handleTaskList(req, res);
     }
@@ -3780,6 +4026,22 @@ async function requestHandler(req, res) {
     const taskRetryMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/steps\/([^/]+)\/retry$/);
     if (req.method === "POST" && taskRetryMatch) {
       return await handleTaskStepRetry(decodeURIComponent(taskRetryMatch[1]), decodeURIComponent(taskRetryMatch[2]), req, res);
+    }
+    const operationBatchDraftMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/draft$/);
+    if ((req.method === "GET" || req.method === "POST") && operationBatchDraftMatch) {
+      return await handleOperationBatchDraft(decodeURIComponent(operationBatchDraftMatch[1]), req, res);
+    }
+    const operationBatchCreateMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/create$/);
+    if (req.method === "POST" && operationBatchCreateMatch) {
+      return await handleOperationBatchCreate(decodeURIComponent(operationBatchCreateMatch[1]), req, res);
+    }
+    const operationBatchResultMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/result$/);
+    if (req.method === "POST" && operationBatchResultMatch) {
+      return await handleOperationBatchResult(decodeURIComponent(operationBatchResultMatch[1]), req, res);
+    }
+    const contentRequirementEmailMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/content-requirement-email$/);
+    if (req.method === "POST" && contentRequirementEmailMatch) {
+      return await handleContentRequirementEmail(decodeURIComponent(contentRequirementEmailMatch[1]), req, res);
     }
     const sharedSheetFillMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/shared-sheet\/fill$/);
     if (req.method === "POST" && sharedSheetFillMatch) {
