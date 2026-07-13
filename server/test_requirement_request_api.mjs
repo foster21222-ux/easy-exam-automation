@@ -481,6 +481,171 @@ test("staff can accept a pending change request into a new reviewed requirement 
   assert.ok(accepted.body.requirement.events.some((event) => event.eventType === "change_request_accepted"));
 });
 
+test("requirement upsert merges partial WeChat updates with the latest version", async () => {
+  const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
+  const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });
+
+  const created = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: "req-partial-upsert",
+    customer: { name: "ATA客户" },
+    requirement: completeRequirementPayload(),
+    source: { type: "manual" },
+    message: "初始需求",
+  });
+  const updated = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: created.body.requirement.requestId,
+    customer: { name: "ATA客户" },
+    requirement: {
+      formal_exam_time_range: "9 月 1 日 10:00-12:00",
+      subjects: ["数学"],
+    },
+    source: { type: "wechat_group" },
+    message: "客户补充正式考试时间",
+  });
+
+  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.body.requirement.versions.length, 2);
+  assert.equal(updated.body.requirement.latest.requirement.formal_exam_time_range, "9 月 1 日 10:00-12:00");
+  assert.equal(updated.body.requirement.latest.requirement.exam_name, completeRequirementPayload().exam_name);
+  assert.deepEqual(updated.body.requirement.latest.requirement.subjects, ["英语", "化学", "物理", "数学"]);
+  assert.equal(updated.body.requirement.latest.requirement.video_monitor_required, true);
+});
+
+test("accepting a partial WeChat change preserves existing fields and merges subject changes", async () => {
+  const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
+  const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });
+
+  const created = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: "req-partial-change",
+    customer: { name: "ATA客户" },
+    requirement: completeRequirementPayload(),
+    source: { type: "manual" },
+    message: "初始需求",
+  });
+  const changed = await callHandler(handler, "POST", "/api/ai/requirements/dispatch", {
+    intent: "change_request",
+    requestId: created.body.requirement.requestId,
+    customerMessage: "客户：本次不考英语，改成数学。",
+    changes: {
+      changeRecords: [{
+        type: "subject_change",
+        message: "客户：本次不考英语，改成数学。",
+        changes: { removedSubjects: ["英语"], subjects: ["数学"] },
+      }],
+      latestRequirement: {
+        subjects: ["数学"],
+      },
+    },
+  });
+  const changeId = changed.body.requirement.changeRequests[0].changeId;
+
+  const accepted = await callHandler(
+    handler,
+    "POST",
+    `/api/requirements/req-partial-change/change-requests/${changeId}/accept`,
+    { reviewer: "ops-a", message: "变更内容已核对" },
+  );
+
+  assert.equal(accepted.statusCode, 200);
+  assert.equal(accepted.body.requirement.versions.length, 2);
+  assert.deepEqual(accepted.body.requirement.latest.requirement.subjects, ["化学", "物理", "数学"]);
+  assert.equal(accepted.body.requirement.latest.requirement.exam_name, completeRequirementPayload().exam_name);
+  assert.equal(accepted.body.requirement.latest.requirement.formal_exam_time_range, completeRequirementPayload().formal_exam_time_range);
+  assert.equal(accepted.body.requirement.latest.requirement.video_monitor_required, true);
+});
+
+test("staff can edit latest requirement into a new audited version", async () => {
+  const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
+  const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });
+
+  const created = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: "req-staff-edit",
+    customer: { name: "ATA客户" },
+    requirement: completeRequirementPayload(),
+    source: { type: "manual" },
+    message: "初始需求",
+  });
+
+  const edited = await callHandler(handler, "POST", `/api/requirements/${created.body.requirement.requestId}/staff-edit`, {
+    reviewer: "ops-a",
+    message: "人工补充配置需求",
+    requirement: {
+      formal_exam_time_range: "2026-07-02 09:00 - 2026-07-02 11:00",
+      subjects: ["数学", "地理"],
+    },
+  });
+
+  assert.equal(edited.statusCode, 200);
+  assert.equal(edited.body.requirement.versions.length, 2);
+  assert.equal(edited.body.requirement.latest.source, "staff_manual_edit");
+  assert.equal(edited.body.requirement.latest.requirement.formal_exam_time_range, "2026-07-02 09:00 - 2026-07-02 11:00");
+  assert.deepEqual(edited.body.requirement.latest.requirement.subjects, ["数学", "地理"]);
+  assert.equal(edited.body.requirement.latest.requirement.exam_name, completeRequirementPayload().exam_name);
+  const event = edited.body.requirement.events.find((item) => item.eventType === "requirement_staff_edited");
+  assert.ok(event);
+  assert.equal(event.actor, "ops-a");
+  assert.deepEqual(event.payload.fields.sort(), ["formal_exam_time_range", "subjects"]);
+  assert.equal(event.payload.message, "人工补充配置需求");
+});
+
+test("accepting a pending change after staff edited the same field requires override", async () => {
+  const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
+  const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });
+
+  const created = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: "req-staff-edit-conflict",
+    customer: { name: "ATA客户" },
+    requirement: completeRequirementPayload(),
+    source: { type: "manual" },
+    message: "初始需求",
+  });
+  const changed = await callHandler(handler, "POST", "/api/ai/requirements/dispatch", {
+    intent: "change_request",
+    requestId: created.body.requirement.requestId,
+    customerMessage: "客户要求考试时间改到 7 月 1 日 10 点",
+    changes: {
+      latestRequirement: {
+        formal_exam_time_range: "7 月 1 日 10 点",
+      },
+    },
+  });
+  const changeId = changed.body.requirement.changeRequests[0].changeId;
+
+  const edited = await callHandler(handler, "POST", "/api/requirements/req-staff-edit-conflict/staff-edit", {
+    reviewer: "ops-a",
+    message: "人工确认考试时间以客户邮件为准",
+    requirement: {
+      formal_exam_time_range: "7 月 2 日 9 点",
+    },
+  });
+  assert.equal(edited.statusCode, 200);
+
+  const rejectedConflict = await callHandler(
+    handler,
+    "POST",
+    `/api/requirements/req-staff-edit-conflict/change-requests/${changeId}/accept`,
+    { reviewer: "ops-a", message: "采纳旧变更" },
+  );
+
+  assert.equal(rejectedConflict.statusCode, 400);
+  assert.match(rejectedConflict.body.error, /人工修订冲突/);
+
+  const afterRejectedConflict = await callHandler(handler, "GET", "/api/requirements/req-staff-edit-conflict");
+  assert.equal(afterRejectedConflict.body.latest.requirement.formal_exam_time_range, "7 月 2 日 9 点");
+  assert.equal(afterRejectedConflict.body.changeRequests[0].status, "pending_internal_review");
+
+  const acceptedOverride = await callHandler(
+    handler,
+    "POST",
+    `/api/requirements/req-staff-edit-conflict/change-requests/${changeId}/accept`,
+    { reviewer: "ops-a", message: "确认覆盖人工修订", overrideManualEdit: true },
+  );
+
+  assert.equal(acceptedOverride.statusCode, 200);
+  assert.equal(acceptedOverride.body.requirement.latest.requirement.formal_exam_time_range, "7 月 1 日 10 点");
+  assert.equal(acceptedOverride.body.requirement.changeRequests[0].status, "accepted");
+});
+
 test("staff can reject a pending change request without creating a new version", async () => {
   const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
   const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });

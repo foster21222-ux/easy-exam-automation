@@ -87,6 +87,49 @@ test("leaves AI cloud monitoring blank when hawkeye is disabled", () => {
   assert.equal(rows[0][26], "");
 });
 
+test("client exam L column uses client login limit instead of web leave limit", () => {
+  const [row] = buildTencentDocRows({
+    config: {
+      ...config,
+      clientExam: true,
+      examType: "客户端考试",
+      clientLoginLimit: 20,
+      leaveLimit: 10,
+    },
+    created: [created[0]],
+  });
+
+  assert.equal(row[11], "客户端，20次");
+});
+
+test("client exam L column allows session-level login limit overrides", () => {
+  const [row] = buildTencentDocRows({
+    config: {
+      ...config,
+      clientExam: true,
+      examType: "客户端考试",
+      clientLoginLimit: 10,
+    },
+    created: [{ ...created[1], clientLoginLimit: 20 }],
+  });
+
+  assert.equal(row[11], "客户端，20次");
+});
+
+test("client trial exam L column defaults to 20 login attempts", () => {
+  const [row] = buildTencentDocRows({
+    config: {
+      ...config,
+      clientExam: true,
+      examType: "客户端考试",
+      clientLoginLimit: 10,
+    },
+    created: [{ ...created[1], kind: "mock", sessionType: "trial" }],
+  });
+
+  assert.equal(row[11], "客户端，20次");
+});
+
 test("SMS uses unified exam code for unified address and session id for independent address", () => {
   const [row] = buildTencentDocRows({
     config,

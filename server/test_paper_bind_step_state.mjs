@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { shouldSkipRecentFailedPaperBindCheck } from "./paper_bind_scheduler.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const serverSource = fs.readFileSync(path.join(rootDir, "server/easy_exam_server.mjs"), "utf8");
@@ -33,6 +34,49 @@ test("paper binding scheduler runs hourly before the formal exam starts", () => 
   assert.ok(serverSource.includes("shouldAttemptScheduledPaperBind"));
   assert.ok(serverSource.includes("runScheduledPaperBindingOnce"));
   assert.ok(serverSource.includes("setInterval(runScheduledPaperBindingOnce"));
+});
+
+test("paper binding scheduler skips recently failed automatic checks", () => {
+  const now = new Date("2026-07-07T10:20:00Z");
+  const state = {
+    status: "failed",
+    completedAt: "2026-07-07T10:10:00Z",
+  };
+
+  assert.equal(shouldSkipRecentFailedPaperBindCheck(state, now), true);
+});
+
+test("paper binding scheduler retries failed checks after cooldown", () => {
+  const now = new Date("2026-07-07T11:15:00Z");
+  const state = {
+    status: "failed",
+    completedAt: "2026-07-07T10:10:00Z",
+  };
+
+  assert.equal(shouldSkipRecentFailedPaperBindCheck(state, now), false);
+});
+
+test("paper binding scheduler uses the latest log time when completion time is absent", () => {
+  const now = new Date("2026-07-07T10:20:00Z");
+  const state = {
+    status: "failed",
+    logs: [
+      { time: "2026-07-07T09:00:00Z", message: "old" },
+      { time: "2026-07-07T10:05:00Z", message: "new" },
+    ],
+  };
+
+  assert.equal(shouldSkipRecentFailedPaperBindCheck(state, now), true);
+});
+
+test("paper binding scheduler does not cool down manual pending checks", () => {
+  const now = new Date("2026-07-07T10:20:00Z");
+  const state = {
+    status: "pending",
+    completedAt: "2026-07-07T10:10:00Z",
+  };
+
+  assert.equal(shouldSkipRecentFailedPaperBindCheck(state, now), false);
 });
 
 test("paper binding detail renders bound form codes and manual action", () => {

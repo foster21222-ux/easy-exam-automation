@@ -30,6 +30,20 @@ class TaskStoreTest(unittest.TestCase):
         self.assertEqual({item["sourceAccount"] for item in projects}, {"account-a", "account-b"})
         self.assertEqual({item["session_id"] for item in sessions}, {"10001", "10002"})
 
+    def test_list_sessions_includes_task_config_for_unified_exam_display(self):
+        task = self.store.create_task("统一项目", "account-a", {
+            "unifiedExamAddress": True,
+            "examUrl": "https://eztest.cn/exam/1234/uniform/login/",
+        })
+        self.store.upsert_session(task["taskId"], "formal", {
+            "session_id": "30001", "name": "统一项目正式考试"
+        })
+
+        sessions = self.store.list_sessions()
+
+        self.assertEqual(sessions[0]["config"]["unifiedExamAddress"], True)
+        self.assertEqual(sessions[0]["config"]["examUrl"], "https://eztest.cn/exam/1234/uniform/login/")
+
     def test_persists_task_owner_email_to_tasks_and_sessions(self):
         task = self.store.create_task("同事项目", "account-a", {}, owner_email="mate@example.com")
         self.store.upsert_session(task["taskId"], "formal", {
@@ -117,6 +131,46 @@ class TaskStoreTest(unittest.TestCase):
         finished = self.store.get_task(task_id)
         combined = next(step for step in finished["steps"] if step["stepKey"] == "sessions_auto_rooms")
         self.assertEqual(combined["status"], "success")
+
+    def test_progress_reaches_complete_after_both_candidate_imports_and_rooms(self):
+        task = self.store.create_task("项目甲", "account-a", {})
+        task_id = task["taskId"]
+        for step_key in [
+            "requirement_parse",
+            "formal_session_create",
+            "trial_session_create",
+            "trial_paper_bind",
+            "course_create",
+            "paper_bind",
+            "trial_candidate_import",
+            "formal_candidate_import",
+        ]:
+            self.store.update_step(task_id, step_key, "success")
+        self.store.update_step(task_id, "sessions_auto_rooms", "success", {
+            "subStatus": {"formalExamStatus": "success", "trialExamStatus": "success"}
+        })
+
+        detail = self.store.get_task(task_id)
+
+        self.assertEqual(detail["progress"], 100)
+        self.assertEqual(detail["currentStage"], "已完成")
+
+    def test_current_stage_names_first_unfinished_display_card(self):
+        task = self.store.create_task("项目甲", "account-a", {})
+        task_id = task["taskId"]
+        for step_key in [
+            "requirement_parse",
+            "formal_session_create",
+            "trial_session_create",
+            "trial_paper_bind",
+            "course_create",
+            "paper_bind",
+        ]:
+            self.store.update_step(task_id, step_key, "success")
+
+        detail = self.store.get_task(task_id)
+
+        self.assertEqual(detail["currentStage"], "试考考生导入 & 自动分班")
 
     def test_updates_task_config_with_final_course_codes(self):
         task = self.store.create_task("项目甲", "account-a", {

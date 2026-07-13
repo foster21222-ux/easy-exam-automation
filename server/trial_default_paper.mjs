@@ -24,7 +24,13 @@ function normalizeFormCodes(value) {
 }
 
 function normalizePaperName(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[，、；;:：|｜-]/g, "");
 }
 
 function normalizePaperCandidate(value) {
@@ -41,7 +47,7 @@ function normalizePaperCandidate(value) {
     value.id ||
     "",
   ).trim();
-  const name = normalizePaperName(
+  const name = String(
     value.name ||
     value.form_name ||
     value.formName ||
@@ -49,8 +55,32 @@ function normalizePaperCandidate(value) {
     value.paperName ||
     value.title ||
     "",
-  );
+  ).replace(/\s+/g, " ").trim();
   return code || name ? { code, name } : null;
+}
+
+function normalizeSessionCourseCandidate(value) {
+  if (!value || typeof value !== "object") return null;
+  const code = String(value.code || value.course_code || value.courseCode || value.subject_code || value.subjectCode || "").trim();
+  const name = String(value.name || value.course_name || value.courseName || value.subject_name || value.subjectName || code).trim();
+  const formLists = [
+    value.res,
+    value.results,
+    value.forms,
+    value.form_codes,
+    value.formCodes,
+    value.papers,
+    value.paper_list,
+    value.paperList,
+    value.form,
+    value.paper,
+  ];
+  const papers = formLists.flatMap((item) => {
+    if (Array.isArray(item)) return item.map(normalizePaperCandidate);
+    if (item && typeof item === "object") return [normalizePaperCandidate(item)];
+    return normalizeFormCodes(item).map((formCode) => ({ code: formCode, name: formCode }));
+  }).filter((paper) => paper?.code || paper?.name);
+  return code || name || papers.length ? { code, name, papers } : null;
 }
 
 function normalizeFormList(payload) {
@@ -69,6 +99,52 @@ function normalizeFormList(payload) {
     if (Array.isArray(candidate)) return candidate.map(normalizePaperCandidate).filter((paper) => paper?.code);
   }
   return [];
+}
+
+function unwrapSessionDetail(payload, sessionId) {
+  const targetId = String(sessionId || "").trim();
+  const directCandidates = [payload, payload?.data, payload?.result, payload?.session, payload?.detail]
+    .filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  for (const item of directCandidates) {
+    const itemId = String(item.id ?? item.session_id ?? item.sessionId ?? "").trim();
+    if (!targetId || itemId === targetId || item.courses || item.course_list || item.subjects || item.data?.courses) return item;
+  }
+  const listCandidates = [payload?.results, payload?.data?.results, payload?.data?.list, payload?.list, Array.isArray(payload) ? payload : null];
+  for (const candidate of listCandidates) {
+    if (!Array.isArray(candidate)) continue;
+    const match = candidate.find((item) => String(item?.id ?? item?.session_id ?? item?.sessionId ?? "").trim() === targetId);
+    if (match) return match;
+  }
+  return {};
+}
+
+function extractSessionCourses(payload, sessionId) {
+  const detail = unwrapSessionDetail(payload, sessionId);
+  const courseLists = [
+    detail?.courses,
+    detail?.course_list,
+    detail?.courseList,
+    detail?.subjects,
+    detail?.subject_list,
+    detail?.course,
+    detail?.data?.courses,
+    detail?.data?.course_list,
+    detail?.data?.subjects,
+  ];
+  for (const candidate of courseLists) {
+    const courses = (Array.isArray(candidate) ? candidate : candidate && typeof candidate === "object" ? [candidate] : [])
+      .map(normalizeSessionCourseCandidate)
+      .filter(Boolean);
+    if (courses.length) return courses;
+  }
+  return [];
+}
+
+function trialPaperMatches(paper, expectedCodes = []) {
+  const code = String(paper?.code || "").trim();
+  const expectedCodeSet = new Set(expectedCodes.map((item) => String(item || "").trim()).filter(Boolean));
+  if (code && expectedCodeSet.has(code)) return true;
+  return normalizePaperName(paper?.name) === normalizePaperName(DEFAULT_TRIAL_PAPER_NAME);
 }
 
 function unwrapCourseDetail(payload) {
@@ -177,7 +253,7 @@ async function fetchDefaultTrialPaperByName({
   return null;
 }
 
-function validateDefaultTrialBinding({ sessionId, courseCode, formCodes }) {
+function validateDefaultTrialCourseBinding({ sessionId, courseCode }) {
   const normalizedSessionId = typeof sessionId === "number" ? String(sessionId) : sessionId;
   if (typeof normalizedSessionId !== "string" || !normalizedSessionId.trim()) {
     throw new Error(DEFAULT_TRIAL_BINDING_MESSAGE);
@@ -185,23 +261,32 @@ function validateDefaultTrialBinding({ sessionId, courseCode, formCodes }) {
   if (typeof courseCode !== "string" || !courseCode.trim()) {
     throw new Error(DEFAULT_TRIAL_BINDING_MESSAGE);
   }
+  return {
+    sessionId: normalizedSessionId.trim(),
+    courseCode: courseCode.trim(),
+  };
+}
+
+function validateDefaultTrialBinding({ sessionId, courseCode, formCodes }) {
+  const courseBinding = validateDefaultTrialCourseBinding({ sessionId, courseCode });
   const normalizedFormCodes = normalizeFormCodes(formCodes);
   if (!normalizedFormCodes.length) {
     return null;
   }
   return {
-    sessionId: normalizedSessionId.trim(),
-    courseCode: courseCode.trim(),
+    ...courseBinding,
     formCodes: normalizedFormCodes,
   };
 }
 
-async function postDefaultTrialPaperBinding({ login, apiBase, binding, requestJson, emitLog }) {
+async function postDefaultTrialCourseBinding({ login, apiBase, binding, requestJson, emitLog }) {
   const path = `/tenant/api/course/session/${encodeURIComponent(binding.sessionId)}/`;
   const payload = {
     course_code: binding.courseCode,
-    form_codes: binding.formCodes,
   };
+  if (Array.isArray(binding.formCodes) && binding.formCodes.length) {
+    payload.form_codes = binding.formCodes;
+  }
 
   emitLog(`[试考默认卷] POST ${path}`);
   emitLog(`[试考默认卷] payload = ${JSON.stringify(payload)}`);
@@ -215,7 +300,7 @@ async function postDefaultTrialPaperBinding({ login, apiBase, binding, requestJs
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       },
-      `绑定默认试考卷到试考场次 ${binding.sessionId}`,
+      `绑定默认试考科目到试考场次 ${binding.sessionId}`,
     );
     const httpStatus = responseBody?.__tenantResponse ? responseBody.httpStatus : 200;
     const body = responseBody?.__tenantResponse ? responseBody.body : responseBody;
@@ -262,6 +347,62 @@ async function putDefaultTrialCoursePaper({ login, apiBase, course, binding, req
   return { ...payload, responseBody: body };
 }
 
+async function verifyDefaultTrialPaperBinding({ login, apiBase, binding, paper, requestJson, emitLog }) {
+  const expectedCodes = binding.formCodes || [];
+  const formsPath = `/tenant/api/session/${encodeURIComponent(binding.sessionId)}/forms/`;
+  emitLog(`[试考默认卷] 回查 GET ${formsPath}`);
+  try {
+    const formsPayload = await requestJson(login, `${apiBase}${formsPath}`, { method: "GET" }, `回查试考场次试卷 ${binding.sessionId}`);
+    emitLog(`[试考默认卷] 回查 forms responseBody = ${compactBody(formsPayload)}`);
+    const papers = normalizeFormList(formsPayload);
+    const matchedPaper = papers.find((candidate) => {
+      const courseCode = String(candidate.courseCode || "").trim();
+      return (!courseCode || courseCode === binding.courseCode) && trialPaperMatches(candidate, expectedCodes);
+    });
+    if (matchedPaper) {
+      emitLog("[试考默认卷] 回查确认试考试卷已绑定");
+      return {
+        status: "success",
+        results: [{
+          session_id: binding.sessionId,
+          course_name: DEFAULT_TRIAL_COURSE_NAME,
+          course_code: binding.courseCode,
+          form_codes: [matchedPaper.code].filter(Boolean),
+          paper_names: [matchedPaper.name || paper?.name || DEFAULT_TRIAL_PAPER_NAME],
+          source: "session_forms",
+        }],
+      };
+    }
+  } catch (error) {
+    emitLog(`[试考默认卷] forms 回查失败：${error instanceof Error ? error.message : String(error)}`, "warning");
+  }
+
+  const detailPath = `/tenant/api/session/${encodeURIComponent(binding.sessionId)}/`;
+  emitLog(`[试考默认卷] 回查 GET ${detailPath}`);
+  const detailPayload = await requestJson(login, `${apiBase}${detailPath}`, { method: "GET" }, `回查试考场次详情 ${binding.sessionId}`);
+  emitLog(`[试考默认卷] 回查 session responseBody = ${compactBody(detailPayload)}`);
+  const courses = extractSessionCourses(detailPayload, binding.sessionId);
+  const matchedCourse = courses.find((candidate) => candidate.code === binding.courseCode || (!candidate.code && candidate.name === DEFAULT_TRIAL_COURSE_NAME));
+  const matchedPaper = (matchedCourse?.papers || []).find((candidate) => trialPaperMatches(candidate, expectedCodes));
+  if (matchedPaper) {
+    emitLog("[试考默认卷] 回查确认试考试卷已绑定");
+    return {
+      status: "success",
+      results: [{
+        session_id: binding.sessionId,
+        course_name: matchedCourse.name || DEFAULT_TRIAL_COURSE_NAME,
+        course_code: matchedCourse.code || binding.courseCode,
+        form_codes: [matchedPaper.code].filter(Boolean),
+        paper_names: [matchedPaper.name || paper?.name || DEFAULT_TRIAL_PAPER_NAME],
+        source: "session_detail",
+      }],
+    };
+  }
+
+  emitLog("[试考默认卷] 回查未发现固定试考试卷，已保留试考科目绑定，等待人工确认试卷", "warning");
+  return { status: "waiting_manual", missingCourseCodes: [binding.courseCode] };
+}
+
 async function bindDefaultTrialPaperToSession({
   login,
   apiBase,
@@ -278,23 +419,23 @@ async function bindDefaultTrialPaperToSession({
     formCodes: paper?.code ? [paper.code] : [],
   });
   if (!binding) {
+    const courseBinding = validateDefaultTrialCourseBinding({
+      sessionId,
+      courseCode: course.code || DEFAULT_TRIAL_COURSE_CODE,
+    });
+    await postDefaultTrialCourseBinding({ login, apiBase, binding: courseBinding, requestJson, emitLog });
     emitLog(`[试考默认卷] 未找到固定试考试卷 "${DEFAULT_TRIAL_PAPER_NAME}"，等待人工关联`, "warning");
     return { status: "waiting_manual", missingCourseCodes: [DEFAULT_TRIAL_COURSE_CODE] };
   }
 
   await putDefaultTrialCoursePaper({ login, apiBase, course, binding, requestJson, emitLog });
-  const response = await postDefaultTrialPaperBinding({ login, apiBase, binding, requestJson, emitLog });
+  await postDefaultTrialCourseBinding({ login, apiBase, binding, requestJson, emitLog });
+  const verified = await verifyDefaultTrialPaperBinding({ login, apiBase, binding, paper, requestJson, emitLog });
+  if (verified.status === "waiting_manual") return verified;
   emitLog("[试考默认卷] 试考试卷绑定完成");
   return {
     status: "success",
-    results: [{
-      session_id: binding.sessionId,
-      course_name: course.name || DEFAULT_TRIAL_COURSE_NAME,
-      course_code: binding.courseCode,
-      form_codes: binding.formCodes,
-      paper_names: [paper?.name || DEFAULT_TRIAL_PAPER_NAME],
-      responseBody: response.responseBody,
-    }],
+    results: verified.results,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   isExamTaskEnded,
   matchesExamTask,
   resolveCandidateTaskContext,
+  resolveUnifiedExamCode,
 } from "../web/exam_task_view_model.mjs";
 
 const sessions = [
@@ -118,6 +119,30 @@ test("keeps task progress from sessions for exam list status display", () => {
   ]);
 
   assert.equal(tasks[0].progress, 50);
+});
+
+test("resolves unified exam code from explicit config or uniform exam url", () => {
+  assert.equal(resolveUnifiedExamCode({ config: { unifiedExamCode: "E5678" } }), "E5678");
+  assert.equal(
+    resolveUnifiedExamCode({ config: { examUrl: "https://eztest.org/exam/1234/uniform/login/" } }),
+    "E1234",
+  );
+});
+
+test("aggregates unified exam code for exam list project column", () => {
+  const tasks = aggregateExamSessions([
+    {
+      taskId: "task-unified",
+      projectName: "统一考试项目",
+      sessionType: "formal",
+      session_id: "7001",
+      name: "统一考试项目",
+      status: "success",
+      config: { examUrl: "https://eztest.org/exam/1234/uniform/login/" },
+    },
+  ]);
+
+  assert.equal(tasks[0].unifiedExamCode, "E1234");
 });
 
 test("detects exam tasks ended by formal exam time", () => {

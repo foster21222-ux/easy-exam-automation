@@ -1,3 +1,5 @@
+import { DEFAULT_TRIAL_COURSE_CODE } from "./trial_default_paper.mjs";
+
 function normalizeCourseRecords(courses = []) {
   return (Array.isArray(courses) ? courses : [])
     .map((course) => ({
@@ -25,6 +27,7 @@ export function prepareCandidatesForCourseImport(candidates = [], task = null, o
   const errors = [];
   const sessionType = options.sessionType || resolveSessionType(task, options.sessionId);
   const isTrialSession = sessionType === "trial";
+  if (isTrialSession) validCodes.add(DEFAULT_TRIAL_COURSE_CODE);
 
   if (courses.length === 1) {
     for (const candidate of nextCandidates) {

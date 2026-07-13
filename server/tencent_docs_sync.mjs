@@ -165,8 +165,14 @@ function monitorRule(config) {
   return "不使用";
 }
 
-function leaveLimitText(config, deviceText) {
-  const count = Number(config?.leaveLimit || config?.clientLoginLimit || 10) || 10;
+function leaveLimitText(config, session, deviceText) {
+  const isClientExam = deviceText === "客户端";
+  const isTrial = session?.kind === "mock" || session?.sessionType === "trial";
+  const count = Number(
+    isClientExam
+      ? session?.clientLoginLimit || session?.login_times || session?.loginTimes || (isTrial ? 20 : config?.clientLoginLimit || 10)
+      : session?.leaveLimit || session?.lock_screen_time || session?.lockScreenTime || config?.leaveLimit || 10,
+  ) || 10;
   return `${deviceText}，${count}次`;
 }
 
@@ -232,7 +238,7 @@ function sessionRow(config, session, template = []) {
     loginWindowText(config, kind),
     startForSheet && endForSheet ? `${startForSheet}-${endForSheet}` : "",
     `${duration}分钟`,
-    leaveLimitText(config, deviceText),
+    leaveLimitText(config, session, deviceText),
     isTrial ? "是，作答10分钟可交卷" : "是，作答60分钟可交卷",
     answerTimeRange(config, duration, isTrial),
     text(config.loginMode) || "准考证号",

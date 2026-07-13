@@ -17,11 +17,19 @@
         --soft: #eef2f6;
         --blue: #1f75cb;
         --blue-dark: #185b9e;
+        --workflow-progress-early: #fbbf24;
+        --workflow-progress-mid: #60a5fa;
+        --workflow-progress-major: #2563eb;
+        --workflow-progress-complete: #16a34a;
+        --workflow-step-running: var(--blue);
+        --workflow-step-complete: var(--green);
         --teal: #16827a;
         --green: #20865a;
         --amber: #c77700;
         --red: #b42318;
         --shadow: 0 14px 36px rgba(31, 41, 55, 0.08);
+        --radius-card: 8px;
+        --radius-button: 6px;
       }
 
       * {
@@ -144,14 +152,76 @@
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel-soft);
+        cursor: default;
+        font-size: 14px;
       }
 
       .status-line {
         display: flex;
         justify-content: space-between;
         gap: 12px;
-        font-size: 13px;
+        font-size: 14px;
         margin: 8px 0;
+      }
+      .side-status:not(.expanded) .side-status-extra {
+        display: none;
+      }
+      .side-status-summary {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .side-status-toggle {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        position: relative;
+      }
+      .side-status-toggle[data-email]:hover::after,
+      .side-status-toggle[data-email]:focus-visible::after {
+        content: attr(data-email);
+        position: absolute;
+        left: 0;
+        bottom: calc(100% + 8px);
+        z-index: 30;
+        width: max-content;
+        max-width: calc(100vw - 48px);
+        padding: 7px 9px;
+        border: 1px solid #d8e0ea;
+        border-radius: 6px;
+        background: #ffffff;
+        color: var(--text);
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .side-status-toggle span:first-child {
+        white-space: nowrap;
+      }
+      .side-status-toggle span:last-child {
+        color: var(--text);
+        font-weight: 700;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: left;
+      }
+      .side-status-logout {
+        margin-top: 8px;
+        white-space: nowrap;
       }
 
       .ok {
@@ -322,17 +392,22 @@
       .workflow-inline {
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+        background: #fbfcfe;
         padding: 16px;
         margin-top: 18px;
         display: grid;
         gap: 14px;
+        container-type: inline-size;
+      }
+
+      .auto-workflow-card {
+        min-width: 0;
       }
 
       .workflow-inline-head {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(176px, 0.22fr);
-        gap: 14px;
+        grid-template-columns: minmax(0, 1fr) var(--workflow-progress-width, 104px);
+        gap: 16px;
         align-items: center;
       }
 
@@ -342,14 +417,16 @@
 
       .workflow-summary {
         align-self: stretch;
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        display: grid;
-        gap: 10px;
+        background: transparent;
+        border: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
         min-width: 0;
         overflow-x: hidden;
-        padding: 12px;
+        overflow-y: visible;
+        padding: 0;
       }
 
       .workflow-summary .subtitle {
@@ -359,8 +436,20 @@
       .workflow-title-row {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 10px;
+        justify-content: flex-start;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .workflow-title-row .panel-title {
+        font-size: 15px;
+        letter-spacing: 0;
+      }
+
+      .workflow-title-row .panel-meta {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
       }
 
       .dashboard {
@@ -468,6 +557,234 @@
         outline: 0;
         border-color: var(--blue);
         box-shadow: 0 0 0 3px rgba(31, 117, 203, 0.1);
+      }
+
+      .session-time-field {
+        grid-column: 1 / -1;
+      }
+
+      .session-time-range {
+        display: grid;
+        grid-template-columns: minmax(180px, 270px) 34px minmax(180px, 270px) auto;
+        align-items: center;
+        gap: 10px;
+        position: relative;
+      }
+
+      .session-time-control {
+        position: relative;
+      }
+
+      .session-time-range .field-input {
+        min-height: 42px;
+        font-size: 16px;
+        padding-right: 42px;
+        cursor: pointer;
+      }
+
+      .session-time-icon {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 22px;
+        height: 22px;
+        border: 0;
+        background: transparent;
+        color: #111827;
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      .session-time-arrow {
+        color: #8a96a8;
+        font-size: 28px;
+        font-weight: 900;
+        line-height: 1;
+        text-align: center;
+      }
+
+      .session-time-zone {
+        color: #7b8797;
+        font-size: 14px;
+        white-space: nowrap;
+      }
+
+      .session-time-picker {
+        position: fixed;
+        z-index: 1000;
+        width: min(620px, calc(100vw - 48px));
+        border: 1px solid #d8e0ea;
+        border-radius: 4px;
+        background: #fff;
+        box-shadow: 0 20px 48px rgba(15, 23, 42, 0.18);
+        overflow: hidden;
+      }
+
+      .session-time-picker-main {
+        display: grid;
+        grid-template-columns: minmax(320px, 1fr) 190px;
+      }
+
+      .session-time-picker-calendar {
+        border-right: 1px solid #e5ebf2;
+      }
+
+      .session-time-picker-head {
+        display: grid;
+        grid-template-columns: 70px 1fr 70px;
+        align-items: center;
+        min-height: 50px;
+        border-bottom: 1px solid #eef2f6;
+        text-align: center;
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .session-time-nav {
+        border: 0;
+        background: transparent;
+        color: #a3adba;
+        cursor: pointer;
+        font-size: 24px;
+      }
+
+      .session-time-week,
+      .session-time-days {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+      }
+
+      .session-time-week span,
+      .session-time-day {
+        min-height: 36px;
+        display: grid;
+        place-items: center;
+        font-size: 15px;
+      }
+
+      .session-time-day {
+        border: 0;
+        background: #fff;
+        color: #1f2937;
+        cursor: pointer;
+      }
+
+      .session-time-day.is-muted {
+        color: #b9c0c9;
+        background: #f7f8fa;
+      }
+
+      .session-time-day.is-selected {
+        background: #1e8cff;
+        color: #fff;
+        border-radius: 3px;
+      }
+
+      .session-time-picker-columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        height: 344px;
+        overflow: hidden;
+        position: relative;
+        background: #fff;
+      }
+
+      .session-time-picker-columns::before {
+        content: "";
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        top: calc(50% - 60px);
+        height: 44px;
+        border-radius: 999px;
+        background: rgba(120, 126, 138, 0.22);
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .session-time-picker-columns::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0) 28%, rgba(255,255,255,0) 72%, rgba(255,255,255,0.92));
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .session-time-column {
+        position: relative;
+        overflow: hidden;
+        border-right: 1px solid #eef2f6;
+        transform: translateY(1px);
+      }
+
+      .session-time-column:last-child {
+        border-right: 0;
+      }
+
+      .session-time-option {
+        min-height: 38px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        width: 100%;
+        background: transparent;
+        color: #1f2937;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        position: relative;
+        z-index: 3;
+        transition: color 0.12s ease, font-size 0.12s ease, opacity 0.12s ease;
+      }
+
+      .session-time-option.is-selected {
+        color: #0f172a;
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .session-time-option.distance-1 {
+        font-size: 20px;
+        opacity: 0.82;
+      }
+
+      .session-time-option.distance-2 {
+        font-size: 18px;
+        opacity: 0.56;
+      }
+
+      .session-time-option.distance-3 {
+        font-size: 16px;
+        opacity: 0.34;
+      }
+
+      .session-time-option.distance-4 {
+        font-size: 14px;
+        opacity: 0.32;
+      }
+
+      .session-time-option.distance-5 {
+        font-size: 13px;
+        opacity: 0.26;
+      }
+
+      .session-time-picker-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px;
+        border-top: 1px solid #eef2f6;
+      }
+
+      .session-time-now {
+        border: 0;
+        background: transparent;
+        color: var(--blue);
+        cursor: pointer;
+        font-weight: 700;
       }
 
       .settings-actions {
@@ -601,27 +918,67 @@
 
       .summary-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+        gap: 14px;
+        margin-top: 18px;
       }
 
       .metric {
-        padding: 12px;
-        background: var(--panel-soft);
+        min-height: 96px;
+        padding: 16px 18px;
+        background: #ffffff;
         border: 1px solid var(--line);
         border-radius: 8px;
+        position: relative;
+        display: grid;
+        align-content: space-between;
+        overflow: hidden;
       }
 
       .metric-label {
         color: var(--muted);
-        font-size: 12px;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.25;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
       }
 
       .metric-value {
-        margin-top: 6px;
-        font-size: 20px;
+        margin-top: 10px;
+        color: #05070a;
+        font-size: 15px;
         font-weight: 800;
+        line-height: 1;
+      }
+
+      .metric-icon {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        color: transparent;
+        opacity: 0.88;
+        background: #9ba1af;
+        -webkit-mask: var(--metric-mask) center / contain no-repeat;
+        mask: var(--metric-mask) center / contain no-repeat;
+      }
+
+      .metric[data-metric-icon="fields"] {
+        --metric-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11Zm4 1.75a1.25 1.25 0 1 0 0 2.5a1.25 1.25 0 0 0 0-2.5Zm4 0a1 1 0 1 0 0 2h4.5a1 1 0 1 0 0-2H12Zm-4 4.5a1.25 1.25 0 1 0 0 2.5a1.25 1.25 0 0 0 0-2.5Zm4 .25a1 1 0 1 0 0 2h4.5a1 1 0 1 0 0-2H12Z'/%3E%3C/svg%3E");
+      }
+
+      .metric[data-metric-icon="review"] {
+        --metric-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 12a4 4 0 1 0-4-4a4 4 0 0 0 4 4Zm-7 8a7 7 0 0 1 10.56-6.02a5.2 5.2 0 0 0-.55 2.35c0 1.38.53 2.64 1.39 3.59c-.24.05-.49.08-.75.08H5Zm14.2-6.2a3.2 3.2 0 1 0 0 6.4a3.2 3.2 0 0 0 0-6.4Zm1.67 2.73l-1.85 1.84a.65.65 0 0 1-.92 0l-.78-.78a.65.65 0 0 1 .92-.92l.32.32l1.39-1.38a.65.65 0 1 1 .92.92Z'/%3E%3C/svg%3E");
+      }
+
+      .metric[data-metric-icon="time"] {
+        --metric-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.2'/%3E%3Cpath d='M12 7.5v5l3.2 2.2'/%3E%3C/svg%3E");
+      }
+
+      .metric[data-metric-icon="status"] {
+        --metric-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M12 22a2.75 2.75 0 0 0 2.58-1.8H9.42A2.75 2.75 0 0 0 12 22Zm7-5.4l-1.3-1.56V11a5.72 5.72 0 0 0-4.2-5.52V4a1.5 1.5 0 0 0-3 0v1.48A5.72 5.72 0 0 0 6.3 11v4.04L5 16.6A1.45 1.45 0 0 0 6.12 19h11.76A1.45 1.45 0 0 0 19 16.6Z'/%3E%3C/svg%3E");
       }
 
       .progress-wrap {
@@ -631,15 +988,15 @@
 
       .progress-top {
         display: flex;
-        justify-content: space-between;
+        justify-content: flex-end;
         align-items: center;
-        gap: 12px;
+        gap: 22px;
       }
 
       .progress-number {
-        font-size: 26px;
+        font-size: 25px;
         font-weight: 800;
-        color: var(--blue-dark);
+        color: #747b89;
         line-height: 1;
         position: relative;
         z-index: 1;
@@ -648,7 +1005,7 @@
       .progress-circle {
         --progress-circumference: 238.76;
         --progress-offset: 238.76;
-        width: 92px;
+        width: 104px;
         aspect-ratio: 1;
         display: grid;
         place-items: center;
@@ -667,80 +1024,295 @@
       .progress-ring-track,
       .progress-ring-value {
         fill: none;
-        stroke-width: 10;
+        stroke-width: 12;
       }
 
       .progress-ring-track {
-        stroke: #e4e8ee;
+        stroke: #dfe2ea;
       }
 
       .progress-ring-value {
-        stroke: var(--blue);
+        stroke: var(--workflow-progress-major);
         stroke-linecap: round;
         stroke-dasharray: var(--progress-circumference);
         stroke-dashoffset: var(--progress-offset);
         transition: stroke-dashoffset 180ms ease;
       }
 
+      .progress-circle[data-progress-tone="early"] .progress-ring-value {
+        stroke: var(--workflow-progress-early);
+      }
+
+      .progress-circle[data-progress-tone="mid"] .progress-ring-value {
+        stroke: var(--workflow-progress-mid);
+      }
+
+      .progress-circle[data-progress-tone="major"] .progress-ring-value {
+        stroke: var(--workflow-progress-major);
+      }
+
+      .progress-circle[data-progress-tone="complete"] .progress-ring-value {
+        stroke: var(--workflow-progress-complete);
+      }
+
+      .progress-circle[data-progress-empty="true"] .progress-ring-value {
+        opacity: 0;
+      }
+
       .step-list {
+        --workflow-icon-size: 34px;
+        --workflow-line-gap: 12px;
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 8px;
+        gap: 0;
+        align-items: start;
+        min-width: 0;
       }
 
       .step {
-        border: 1px solid var(--line);
-        background: #ffffff;
-        border-radius: 8px;
-        padding: 9px;
-        min-height: 64px;
+        position: relative;
+        display: grid;
+        justify-items: center;
+        min-height: 84px;
+        padding-top: 44px;
+      }
+
+      .workflow-connector {
+        position: absolute;
+        left: calc(50% + (var(--workflow-icon-size) / 2) + var(--workflow-line-gap));
+        right: calc(-50% + (var(--workflow-icon-size) / 2) + var(--workflow-line-gap));
+        top: 14px;
+        z-index: 0;
+        height: 6px;
+        border-radius: 999px;
+        background: #b8bdc8;
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.18);
+      }
+
+      .workflow-step-icon {
+        position: absolute;
+        left: 50%;
+        top: 0;
+        z-index: 1;
+        width: var(--workflow-icon-size);
+        height: var(--workflow-icon-size);
+        border-radius: 50%;
+        background: #969daa;
+        display: grid;
+        place-items: center;
+        color: #ffffff;
+        box-shadow: 0 2px 7px rgba(88, 96, 112, 0.2);
+        transform: translateX(-50%);
+      }
+
+      .workflow-step-icon svg {
+        width: 23px;
+        height: 23px;
+        display: block;
+        fill: currentColor;
+        transform-origin: center;
+      }
+
+      .workflow-file-icon .file-line {
+        fill: #9ba1af;
       }
 
       .step-index {
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
-        background: #e8edf3;
-        display: grid;
-        place-items: center;
-        font-size: 12px;
-        font-weight: 800;
-        margin-bottom: 9px;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
 
       .step.active {
-        border-color: var(--blue);
-        background: #f3f8ff;
+        color: #1f2937;
       }
 
-      .step.active .step-index {
-        background: var(--blue);
+      .step.active .workflow-step-icon {
+        background: var(--workflow-step-running);
         color: white;
       }
 
-      .step.done .step-index {
-        background: var(--green);
+      .step.done .workflow-step-icon {
+        background: var(--workflow-step-complete);
         color: white;
+      }
+
+      .workflow-connector.done,
+      .workflow-connector.active {
+        background: #91a7c4;
       }
 
       .step-title {
-        font-size: 13px;
-        font-weight: 750;
+        color: #101114;
+        font-size: 15px;
+        font-weight: 800;
         line-height: 1.25;
+        white-space: nowrap;
+        max-width: 100%;
       }
 
       .step-state {
-        color: var(--muted);
-        font-size: 12px;
-        margin-top: 6px;
+        color: #8a909d;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.3;
+        margin-top: 8px;
       }
 
       .workflow-inline .progress-number {
-        font-size: 24px;
+        font-size: 25px;
       }
 
       .workflow-inline .progress-top {
         align-items: center;
+      }
+
+      .workflow-progress-copy {
+        display: none;
+        color: #15171c;
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.45;
+        min-width: 90px;
+      }
+
+      @container (max-width: 640px) {
+        .workflow-inline-head {
+          --workflow-progress-width: 82px;
+          gap: 10px;
+        }
+
+        .step-list {
+          --workflow-icon-size: 28px;
+          --workflow-line-gap: 8px;
+        }
+
+        .step {
+          min-height: 76px;
+          padding-top: 38px;
+        }
+
+        .workflow-connector {
+          top: 12px;
+          height: 5px;
+        }
+
+        .workflow-step-icon svg {
+          width: 20px;
+          height: 20px;
+        }
+
+        .step-title {
+          font-size: 13px;
+        }
+
+        .step-state {
+          font-size: 12px;
+          margin-top: 6px;
+        }
+
+        .progress-circle {
+          width: 84px;
+        }
+
+        .workflow-inline .progress-number {
+          font-size: 20px;
+        }
+      }
+
+      @container (max-width: 520px) {
+        .workflow-inline {
+          padding: 12px;
+        }
+
+        .workflow-inline-head {
+          --workflow-progress-width: 68px;
+          gap: 6px;
+        }
+
+        .step-list {
+          --workflow-icon-size: 24px;
+          --workflow-line-gap: 6px;
+        }
+
+        .step {
+          min-height: 68px;
+          padding-top: 32px;
+        }
+
+        .workflow-connector {
+          top: 10px;
+          height: 4px;
+        }
+
+        .workflow-step-icon svg {
+          width: 18px;
+          height: 18px;
+        }
+
+        .step-title {
+          font-size: 12px;
+        }
+
+        .step-state {
+          font-size: 11px;
+        }
+
+        .progress-circle {
+          width: 70px;
+        }
+
+        .workflow-inline .progress-number {
+          font-size: 16px;
+        }
+      }
+
+      @container (max-width: 430px) {
+        .workflow-inline-head {
+          --workflow-progress-width: 70px;
+          grid-template-columns: minmax(0, 1fr) var(--workflow-progress-width);
+          align-items: center;
+          gap: 10px;
+        }
+
+        .step-list {
+          grid-template-columns: 1fr;
+          gap: 0;
+        }
+
+        .step {
+          min-height: 58px;
+          padding: 0 0 12px 40px;
+          justify-items: start;
+          align-content: start;
+        }
+
+        .step:last-child {
+          padding-bottom: 0;
+        }
+
+        .workflow-step-icon {
+          left: 0;
+          top: 0;
+          transform: none;
+        }
+
+        .workflow-connector {
+          left: calc(var(--workflow-icon-size) / 2 - 2px);
+          right: auto;
+          top: calc(var(--workflow-icon-size) + 6px);
+          bottom: 6px;
+          width: 4px;
+          height: auto;
+        }
+
+        .step-title {
+          white-space: normal;
+        }
       }
 
       .lower-grid {
@@ -1565,7 +2137,7 @@
       .custom-field-title {
         color: #253044;
         font-size: 14px;
-        font-weight: 850;
+        font-weight: 800;
       }
 
       .custom-field-actions {
@@ -1692,7 +2264,7 @@
         border-color: #0071e3;
         color: #ffffff;
         font-size: 16px;
-        font-weight: 850;
+        font-weight: 800;
       }
 
       .candidate-form-block {
@@ -1703,7 +2275,7 @@
       .candidate-form-title {
         color: #111827;
         font-size: 14px;
-        font-weight: 850;
+        font-weight: 800;
       }
 
       .candidate-form-note {
@@ -1734,7 +2306,7 @@
         background: linear-gradient(135deg, #0a84ff 0%, #005bbf 100%);
         color: #ffffff;
         font-size: 18px;
-        font-weight: 850;
+        font-weight: 800;
         box-shadow: 0 12px 24px rgba(0, 113, 227, 0.18);
       }
 
@@ -1816,7 +2388,7 @@
         margin: 0 0 12px;
         color: #111827;
         font-size: 15px;
-        font-weight: 850;
+        font-weight: 800;
       }
 
       .candidate-preview {
@@ -1851,7 +2423,7 @@
         background: #f3f4f6;
         color: #425066;
         font-size: 13px;
-        font-weight: 850;
+        font-weight: 800;
       }
 
       .candidate-preview table td {
@@ -1908,26 +2480,235 @@
       @media (max-width: 768px) { .card-actions { grid-template-columns: 1fr; } }
       .project-title { font-size: 17px; font-weight: 800; margin-bottom: 6px; }
       .task-meta { color: var(--muted); font-size: 12px; line-height: 1.7; }
+      .gap-2 { gap: 8px; }
+      .mb-2 { margin-bottom: 8px; }
+      .h-10 { height: 40px; min-height: 40px; }
+      .items-center { align-items: center; }
+      .m-0 { margin: 0; }
+      .text-gray-500 { color: #6b7280; }
       #wechatCollectorConfig { min-height: 0; max-height: 720px; overflow: auto; }
       .status-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 12px; font-weight: 800; white-space: nowrap; }
       .status-chip.success { background: #ecfdf3; color: #15803d; }
       .status-chip.running { background: #eaf3ff; color: #0670d8; }
       .status-chip.failed { background: #fff1f2; color: #dc2626; }
       .status-chip.waiting_manual { background: #fff7e6; color: #b56700; }
+      .progress-chip { --progress-fill: 0%; --progress-color: #cbd5e1; position: relative; isolation: isolate; min-width: 62px; justify-content: center; overflow: hidden; border: 1px solid #d8dee8; background: #f3f4f6; color: #334155; }
+      .progress-chip::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--progress-fill); border-radius: inherit; background: var(--progress-color); z-index: -1; transition: width .25s ease, background .25s ease; }
+      .progress-chip.early { --progress-color: #fbbf24; border-color: #fde68a; background: #f8f6ed; color: #5f4a13; }
+      .progress-chip.mid { --progress-color: #60a5fa; border-color: #bfdbfe; background: #eef6ff; color: #1e4f86; }
+      .progress-chip.major { --progress-color: #2563eb; border-color: #bfdbfe; background: #eaf3ff; color: #ffffff; }
+      .progress-chip.major::before { box-shadow: inset -18px 0 18px rgba(255,255,255,.12); }
+      .progress-chip.complete { --progress-color: #16a34a; border-color: #bbf7d0; background: #ecfdf3; color: #ffffff; }
+      .progress-chip.failed { --progress-color: #ef4444; border-color: #fecaca; background: #fff1f2; color: #ffffff; }
       .mini-progress { height: 7px; background: #e8edf4; border-radius: 999px; overflow: hidden; margin-top: 14px; }
       .mini-progress > span { display: block; height: 100%; background: #1683f5; border-radius: inherit; }
       .exam-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
       .exam-table { min-width: 980px; }
+      .exam-list-table { min-width: 1180px; }
       .exam-table td { vertical-align: middle; }
+      .fanwei-workbench {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.35fr);
+        gap: 16px;
+        align-items: start;
+      }
+      #fanweiTestView {
+        gap: 0;
+      }
+      .fanwei-toolbar {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.35fr);
+        gap: 16px;
+        align-items: start;
+      }
+      .fanwei-toolbar-content {
+        grid-column: 2;
+        display: grid;
+        gap: 8px;
+        justify-items: end;
+      }
+      .fanwei-action-stack {
+        display: grid;
+        justify-items: stretch;
+        justify-self: end;
+        width: max-content;
+        max-width: 100%;
+      }
+      .fanwei-toolbar-content .view-actions {
+        margin: 0;
+        justify-content: flex-end;
+      }
+      .fanwei-toolbar-status {
+        width: 100%;
+        font-size: 12px;
+        line-height: 20px;
+        text-align: left;
+      }
+      @media (max-width: 1120px) {
+        .fanwei-toolbar,
+        .fanwei-workbench {
+          grid-template-columns: 1fr;
+        }
+        .fanwei-toolbar-content {
+          grid-column: 1;
+          justify-items: stretch;
+        }
+        .fanwei-toolbar-content .view-actions {
+          justify-content: flex-start;
+        }
+      }
+      .fanwei-field-list {
+        display: grid;
+        gap: 8px;
+        padding-right: 4px;
+      }
+      .fanwei-field-card {
+        display: grid;
+        grid-template-columns: minmax(108px, 150px) minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: start;
+        border: 1px solid #e3edf8;
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px 12px;
+      }
+      .fanwei-field-label {
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 800;
+        line-height: 1.45;
+      }
+      .fanwei-field-value {
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 800;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .fanwei-source-pill {
+        align-self: start;
+        border-radius: 999px;
+        background: #e7f1ff;
+        color: #1d64d8;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+        padding: 6px 9px;
+        white-space: nowrap;
+      }
+      .fanwei-table-wrap {
+        border-radius: 8px;
+      }
+      .fanwei-requirement-sheet {
+        min-width: 760px;
+        border-collapse: collapse;
+        border: 2px solid #1f2937;
+      }
+      .fanwei-requirement-sheet th,
+      .fanwei-requirement-sheet td {
+        border: 1px solid #6b7280;
+      }
+      .fanwei-requirement-sheet th {
+        background: #1f66d1;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 800;
+      }
+      .fanwei-requirement-sheet th:nth-child(3) {
+        background: #ffd9a8;
+        color: #7a3b00;
+      }
+      .fanwei-requirement-sheet td {
+        background: #fff;
+        color: var(--text);
+        font-weight: 700;
+      }
+      .fanwei-requirement-sheet td:nth-child(3) {
+        background: #fff8ee;
+      }
+      .fanwei-requirement-sheet .fanwei-highlight {
+        background: #fff200;
+        font-weight: 800;
+      }
+      .fanwei-requirement-sheet .fanwei-warn-item {
+        color: #e11d1d;
+        font-weight: 800;
+      }
+      .fanwei-select {
+        width: 100%;
+        min-height: 30px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        font-weight: 800;
+      }
+      .fanwei-select:focus {
+        outline: 2px solid rgba(31, 102, 209, 0.22);
+        background: #fff;
+      }
+      .fanwei-editable {
+        min-height: 28px;
+        outline: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .fanwei-editable:focus {
+        border-radius: 6px;
+        background: #fff;
+        box-shadow: 0 0 0 2px rgba(31, 102, 209, 0.18);
+      }
+      .exam-list-table th,
+      .exam-list-table td { vertical-align: middle; }
+      .exam-list-row td { height: 82px; padding-top: 12px; padding-bottom: 12px; }
+      .exam-project-cell { display: grid; gap: 4px; align-content: center; }
       .exam-name-button { border: 0; padding: 0; background: transparent; color: var(--blue); font: inherit; font-weight: 700; cursor: pointer; text-align: left; }
       .exam-name-button:hover { text-decoration: underline; }
-      .exam-session-summary { min-width: 190px; line-height: 1.65; }
-      .exam-session-summary strong { display: block; color: var(--text); }
+      .exam-unified-code { color: var(--text); font-size: 12px; font-weight: 800; white-space: nowrap; }
+      .exam-session-summary { min-width: 220px; line-height: 1.55; }
+      .exam-session-summary strong { display: block; color: var(--text); font-weight: 800; }
+      .exam-session-time { margin-top: 4px; color: var(--text); font-weight: 800; white-space: nowrap; }
+      .exam-session-counts { display: flex; align-items: center; gap: 14px; margin-top: 7px; color: var(--muted); font-size: 13px; }
+      .exam-session-count { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+      .exam-session-count svg { width: 18px; height: 18px; color: var(--blue); flex: 0 0 auto; }
+      .exam-session-count.class-count-icon svg { display: none; }
+      .exam-session-count.class-count-icon::before {
+        content: "";
+        width: 20px;
+        height: 20px;
+        flex: 0 0 20px;
+        display: inline-block;
+        background-image: url("/web/assets/class-icon-exact-person-blue.png");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: contain;
+        transform: translateY(1px);
+      }
+      .exam-session-empty { color: var(--muted); }
+      .exam-row-status { display: grid; gap: 6px; min-width: 170px; align-items: center; }
+      .exam-row-status .progress-chip { width: 160px; min-width: 160px; min-height: 16px; height: 16px; padding: 0 8px; }
+      .exam-row-actions { align-items: center; justify-content: flex-start; }
+      .exam-link-button {
+        border: 0;
+        background: transparent;
+        padding: 0;
+        min-height: auto;
+        color: var(--blue);
+        font-weight: 800;
+        cursor: pointer;
+      }
+      .exam-link-button:hover { text-decoration: underline; }
       .task-session-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
       .task-session-card { border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: #fff; }
       .task-session-card.empty { color: var(--muted); background: #f8fafc; }
       .task-session-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-      .task-session-card h3 { margin: 0; font-size: 16px; }
+      .task-session-card h3 { margin: 0; font-size: 16px; font-weight: 800; }
+      .task-session-summary { margin-top: 2px; }
+      .task-session-card .exam-session-time { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; }
+      .session-calendar-icon { width: 22px; height: 22px; flex: 0 0 22px; display: block; color: var(--text); }
+      .task-session-card .exam-session-counts { margin-top: 10px; }
       .task-session-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
       .task-session-details > div { min-width: 0; }
       .task-session-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
@@ -1935,7 +2716,7 @@
       .task-overview-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 20px; margin-top: 18px; }
       .task-overview-label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
       .task-overview-value { font-weight: 800; overflow-wrap: anywhere; }
-      .task-progress-value { color: var(--blue); font-size: 28px; font-weight: 850; }
+      .task-progress-value { color: var(--blue); font-size: 28px; font-weight: 800; }
       .task-step-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
       .task-step-card { border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 15px; cursor: pointer; min-height: 156px; }
       .task-step-card.running { border-color: #87bfff; background: #f7fbff; }
@@ -1974,15 +2755,41 @@
         max-height: none;
         overflow: visible;
       }
-      .sms-expand-button { margin-top: 6px; border: 0; background: transparent; color: var(--blue); padding: 0; font-size: 12px; font-weight: 850; cursor: pointer; }
-      .sms-copy-button { border: 0; background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 850; cursor: pointer; }
+      .sms-expand-button { margin-top: 6px; border: 0; background: transparent; color: var(--blue); padding: 0; font-size: 12px; font-weight: 800; cursor: pointer; }
+      .sms-copy-button { border: 0; background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 800; cursor: pointer; }
       .sms-copy-button:disabled { opacity: .72; cursor: default; }
-      .sms-platform-link { background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 850; text-decoration: none; display: inline-block; }
+      .sms-platform-link { background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 800; text-decoration: none; display: inline-block; }
       .sms-candidate-empty { color: var(--muted); font-size: 12px; display: inline-block; }
-      .sms-candidate-download { border: 0; background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 850; cursor: pointer; }
+      .sms-candidate-download { border: 0; background: var(--blue); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 800; cursor: pointer; }
       .sms-candidate-download:disabled { opacity: .7; cursor: default; }
       .task-step-detail { display: none; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 12px; color: #475569; white-space: pre-wrap; }
       .task-step-card.open .task-step-detail { display: block; }
+      .session-change-progress { margin-top: 12px; border: 1px solid #dce6f2; background: #f8fbff; border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+      .session-change-progress[hidden] { display: none; }
+      .session-change-progress-row { display: flex; align-items: center; gap: 8px; color: #64748b; font-size: 13px; }
+      .session-change-progress-dot { width: 9px; height: 9px; border-radius: 999px; background: #cbd5e1; flex: 0 0 auto; }
+      .session-change-progress-row.running { color: #1d4ed8; font-weight: 800; }
+      .session-change-progress-row.running .session-change-progress-dot { background: var(--blue); box-shadow: 0 0 0 4px rgba(31,117,203,.12); }
+      .session-change-progress-row.success { color: #166534; }
+      .session-change-progress-row.success .session-change-progress-dot { background: #16a34a; }
+      .session-change-progress-row.failed { color: #b42318; }
+      .session-change-progress-row.failed .session-change-progress-dot { background: #ef4444; }
+      .session-change-success { margin-top: 10px; border: 1px solid #bbf7d0; background: #ecfdf3; color: #166534; border-radius: 8px; padding: 10px; font-size: 13px; line-height: 1.7; }
+      .session-change-record-list { margin-top: 8px; display: grid; gap: 6px; }
+      .session-change-record-list.is-collapsed .session-change-record-card.is-extra { display: none; }
+      .session-change-record-card { border: 1px solid #bbf7d0; background: #ecfdf3; border-radius: 8px; color: #166534; font-size: 12px; line-height: 1.45; overflow: hidden; }
+      .session-change-record-card summary { list-style: none; }
+      .session-change-record-card summary::-webkit-details-marker { display: none; }
+      .session-change-record-toggle { width: 100%; border: 0; background: transparent; padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto 14px; gap: 6px; align-items: center; color: var(--text); font-weight: 800; cursor: pointer; text-align: left; }
+      .session-change-record-time { grid-column: 1 / -1; color: #166534; font-weight: 750; white-space: nowrap; font-size: 11px; letter-spacing: 0; }
+      .session-change-record-chevron { color: #166534; transition: transform .18s ease; }
+      .session-change-record-card[open] .session-change-record-chevron { transform: rotate(180deg); }
+      .session-change-record-diff { display: grid; gap: 4px; padding: 0 8px 8px; }
+      .session-change-record-diff-row { border-left: 3px solid #86efac; padding-left: 7px; overflow-wrap: anywhere; }
+      .session-change-record-label { color: #64748b; font-weight: 800; }
+      .session-change-record-meta { color: #64748b; overflow-wrap: anywhere; }
+      .session-change-record-more { margin-top: 8px; border: 0; background: transparent; color: var(--blue); font-size: 12px; font-weight: 800; padding: 0; cursor: pointer; text-align: left; }
+      .session-change-confirm-label { color: #c62828; font-weight: 800; }
       .retry-step { margin-top: 10px; border: 1px solid #f0a5a5; background: #fff; color: #c62828; border-radius: 9px; padding: 6px 10px; font-weight: 750; cursor: pointer; }
       .empty-state { padding: 48px 20px; text-align: center; color: var(--muted); border: 1px dashed #ccd6e3; border-radius: 14px; background: #fff; }
 
@@ -2030,6 +2837,56 @@
         padding: 0;
         cursor: pointer;
         font-weight: 700;
+      }
+
+      .panel,
+      .side-status,
+      .summary-card,
+      .step-card,
+      .import-box,
+      .drop-zone,
+      .progress-panel,
+      .metric-card,
+      .field-block,
+      .support-card,
+      .workflow-inline,
+      .workflow-step,
+      .workflow-panel,
+      .capture-panel,
+      .capture-card,
+      .capture-empty,
+      .preview-card,
+      .project-card,
+      .exam-table-wrap,
+      .task-session-card,
+      .task-overview,
+      .task-step-card,
+      .paper-bind-feedback,
+      .course-bind-feedback,
+      .empty-state,
+      .login-card,
+      .candidate-panel,
+      .candidate-card,
+      .candidate-preview,
+      .mapping-card,
+      .custom-field-panel,
+      .candidate-session-summary,
+      .room-size-card,
+      .selected-session,
+      .monitor-account-card {
+        border-radius: var(--radius-card);
+      }
+
+      .btn,
+      .task-step-action,
+      .retry-step,
+      .sms-copy-button,
+      .sms-platform-link,
+      .sms-candidate-download,
+      .custom-field-actions .btn,
+      .load-sessions-action .btn.primary,
+      .candidate-session-actions .btn.primary {
+        border-radius: var(--radius-button);
       }
 
       @media (max-width: 1120px) {
@@ -2083,7 +2940,11 @@
         }
 
         .workflow-inline-head {
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr) var(--workflow-progress-width, 104px);
+        }
+
+        .workflow-summary {
+          justify-content: center;
         }
       }
 
@@ -2108,8 +2969,6 @@
           justify-content: center;
         }
 
-        .summary-grid,
-        .step-list,
         .capture-grid,
         .mapping-grid,
         .candidate-stats,
@@ -2121,6 +2980,20 @@
           align-items: flex-start;
           flex-direction: column;
           gap: 8px;
+        }
+
+        .workflow-inline-head {
+          grid-template-columns: minmax(0, 1fr) var(--workflow-progress-width, 104px);
+        }
+
+        .workflow-inline .progress-top {
+          align-items: center;
+          flex-direction: row;
+          gap: 0;
+        }
+
+        .workflow-inline .step-list {
+          grid-template-columns: repeat(5, minmax(0, 1fr));
         }
 
         th,
@@ -2214,11 +3087,6 @@
             </svg>
             需求单记录
           </button>
-          <button class="nav-item nav-button" id="usersNavBtn" data-route-menu="users" type="button" hidden>
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M16 11h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-            用户管理
           <button class="nav-item nav-button" id="wechatCollectorNavBtn" data-route-menu="wechat-collector" type="button">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 5h16v10H7l-3 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
@@ -2240,6 +3108,12 @@
             </svg>
             配置模板
           </button>
+          <button class="nav-item nav-button" id="usersNavBtn" data-route-menu="users" type="button" hidden>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M16 11h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            用户管理
+          </button>
           <button class="nav-item nav-button" id="logsNavBtn" data-route-menu="logs" type="button">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M5 19V5h14v14zM8 9h8M8 13h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
@@ -2248,12 +3122,13 @@
           </button>
         </nav>
 
-        <div class="side-status">
-          <div class="status-line"><span>登录账号</span><span id="authEmailText">未登录</span></div>
-          <div class="status-line"><span>会话</span><button class="logout-button" id="logoutBtn" type="button">退出登录</button></div>
-          <div class="status-line"><span>易考后台</span><span>待配置</span></div>
-          <div class="status-line"><span>脚本引擎</span><span class="ok">可用</span></div>
-          <div class="status-line"><span>最终创建</span><span>人工确认</span></div>
+        <div class="side-status" id="sideStatusCard">
+          <div class="side-status-summary">
+            <button class="side-status-toggle" id="sideStatusToggle" type="button" aria-expanded="false"><span>账号</span><span id="authEmailText">未登录</span></button>
+          </div>
+          <div class="side-status-extra">
+            <button class="logout-button side-status-logout" id="logoutBtn" type="button">退出登录</button>
+          </div>
         </div>
       </aside>
 
@@ -2351,6 +3226,7 @@
               </div>
 
               <div class="workflow-inline" aria-label="配置流程">
+                <div class="auto-workflow-card">
                 <div class="workflow-inline-head">
                   <div class="workflow-steps">
                     <div class="workflow-title-row">
@@ -2360,63 +3236,96 @@
                     <div class="step-list" id="stepList">
                       <div class="step" data-step="0">
                         <div class="step-index">1</div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-step-icon" aria-hidden="true">
+                          <svg class="workflow-file-icon" viewBox="0 0 24 24">
+                            <path d="M6.6 3h7.8l4 4v14H6.6A1.6 1.6 0 0 1 5 19.4V4.6A1.6 1.6 0 0 1 6.6 3Z" />
+                            <path d="M13.8 4.6v3.8h3.8l-3.8-3.8Z" opacity=".72" />
+                            <path class="file-line" d="M8.4 11.5h7.2v1.8H8.4z" />
+                            <path class="file-line" d="M8.4 15.5h5.8v1.8H8.4z" />
+                          </svg>
+                        </div>
                         <div class="step-title">读取需求单</div>
-                        <div class="step-state">等待</div>
+                        <div class="step-state">等待中</div>
                       </div>
                       <div class="step" data-step="1">
                         <div class="step-index">2</div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-step-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M5.8 4h12.4A1.8 1.8 0 0 1 20 5.8v12.4a1.8 1.8 0 0 1-1.8 1.8H5.8A1.8 1.8 0 0 1 4 18.2V5.8A1.8 1.8 0 0 1 5.8 4Zm2.9 4.2a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 0 0 0-3.2Zm4.1.3v2.1h4V8.5h-4Zm-4.1 4.1a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 0 0 0-3.2Zm4.1.3V15h4v-2.1h-4Z" />
+                          </svg>
+                        </div>
                         <div class="step-title">基础信息</div>
-                        <div class="step-state">等待</div>
+                        <div class="step-state">等待中</div>
                       </div>
                       <div class="step" data-step="2">
                         <div class="step-index">3</div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-step-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M4 6.1A2.1 2.1 0 0 1 6.1 4h11.8A2.1 2.1 0 0 1 20 6.1v11.8a2.1 2.1 0 0 1-2.1 2.1H6.1A2.1 2.1 0 0 1 4 17.9V6.1Zm5 2.1a1.9 1.9 0 1 0 0 3.8a1.9 1.9 0 0 0 0-3.8Zm-3 8.5h6c-.33-1.78-1.48-3-3-3s-2.67 1.22-3 3Zm8-8h3.8V7H14v1.7Zm0 4.2h4v-1.7h-4v1.7Zm0 4.2h3.2v-1.7H14v1.7Z" />
+                          </svg>
+                        </div>
                         <div class="step-title">个人信息</div>
-                        <div class="step-state">等待</div>
+                        <div class="step-state">等待中</div>
                       </div>
                       <div class="step" data-step="3">
                         <div class="step-index">4</div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-step-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.3 7.3 0 0 0-1.69-.98L14.5 2.42A.5.5 0 0 0 14 2h-4a.5.5 0 0 0-.5.42L9.12 5.07c-.61.24-1.18.56-1.69.98l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.07.65-.07.98s.02.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.13.23.4.32.6.22l2.49-1c.51.4 1.08.74 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65c.61-.24 1.18-.56 1.69-.98l2.49 1c.2.1.47.01.6-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65ZM12 15.5a3.5 3.5 0 1 1 0-7a3.5 3.5 0 0 1 0 7Z" />
+                          </svg>
+                        </div>
                         <div class="step-title">考试配置</div>
-                        <div class="step-state">等待</div>
+                        <div class="step-state">等待中</div>
                       </div>
                       <div class="step" data-step="4">
                         <div class="step-index">5</div>
+                        <div class="workflow-step-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18Zm4.1 7.5l-4.7 4.7a1 1 0 0 1-1.4 0l-2.1-2.1a1 1 0 0 1 1.4-1.4l1.4 1.4l4-4a1 1 0 0 1 1.4 1.4Z" />
+                          </svg>
+                        </div>
                         <div class="step-title">确认核对</div>
-                        <div class="step-state">等待</div>
+                        <div class="step-state">等待中</div>
                       </div>
                     </div>
                   </div>
                   <div class="workflow-summary" aria-label="配置进度">
                     <div class="progress-top">
-                      <div class="progress-circle" id="progressCircle" role="img" aria-label="配置进度 0%">
+                      <div class="progress-circle" id="progressCircle" role="img" aria-label="配置进度 0%" data-progress-empty="true">
                         <svg class="progress-ring" viewBox="0 0 92 92" aria-hidden="true">
                           <circle class="progress-ring-track" cx="46" cy="46" r="38"></circle>
                           <circle class="progress-ring-value" id="progressRingValue" cx="46" cy="46" r="38"></circle>
                         </svg>
                         <div class="progress-number" id="progressNumber">0%</div>
                       </div>
-                      <div>
+                      <div class="workflow-progress-copy">
                         <p class="subtitle" id="progressCaption">导入需求单后可开始配置</p>
                       </div>
                     </div>
                   </div>
                 </div>
+                </div>
               </div>
 
               <div class="summary-grid" aria-label="导入摘要">
-                <div class="metric">
-                  <div class="metric-label">识别配置项</div>
+                <div class="metric" data-metric-icon="fields">
+                  <div class="metric-label">识别配置项<span class="metric-icon" aria-hidden="true"></span></div>
                   <div class="metric-value" id="metricFields">0</div>
                 </div>
-                <div class="metric">
-                  <div class="metric-label">需人工确认</div>
+                <div class="metric" data-metric-icon="review">
+                  <div class="metric-label">需人工确认<span class="metric-icon" aria-hidden="true"></span></div>
                   <div class="metric-value" id="metricReview">0</div>
                 </div>
-                <div class="metric">
-                  <div class="metric-label">预计耗时</div>
+                <div class="metric" data-metric-icon="time">
+                  <div class="metric-label">预计耗时<span class="metric-icon" aria-hidden="true"></span></div>
                   <div class="metric-value" id="metricTime">0m</div>
                 </div>
-                <div class="metric">
-                  <div class="metric-label">当前状态</div>
+                <div class="metric" data-metric-icon="status">
+                  <div class="metric-label">当前状态<span class="metric-icon" aria-hidden="true"></span></div>
                   <div class="metric-value" id="metricStatus">待导入</div>
                 </div>
               </div>
@@ -2432,7 +3341,7 @@
                   <span class="tag amber" id="captureState">待截取</span>
                 </div>
                 <div class="capture-grid" id="captureGrid">
-                  <div class="capture-empty">到达确认页后自动截取基本信息完整页，以及考试配置开考前、考试中、考试后三段完整页</div>
+                  <div class="capture-empty">考试基本信息</div>
                 </div>
               </div>
 
@@ -2587,7 +3496,7 @@
                       <label class="room-size-card">
                         <span class="candidate-form-title">每个班级人数</span>
                         <span class="candidate-form-note">自动分班人数，可手动调整</span>
-                        <input class="field-input" id="roomTargetSizeInput" type="number" min="1" step="1" value="30" />
+                        <input class="field-input" id="roomTargetSizeInput" type="number" min="1" step="1" value="0" />
                       </label>
                     </div>
                     <div class="load-sessions-action" id="loadSessionsAction">
@@ -2605,7 +3514,7 @@
                         <table>
                           <thead>
                             <tr>
-                              <th>场次ID</th>
+                              <th>考试口令</th>
                               <th>场次名称</th>
                               <th>班级名称</th>
                               <th>考生人数</th>
@@ -2722,10 +3631,45 @@
           <div class="project-grid" id="projectGrid"><div class="empty-state">暂无项目记录</div></div>
         </section>
 
+        <section class="task-view" id="fanweiTestView" hidden>
+          <div class="fanwei-toolbar mb-2">
+            <div class="fanwei-toolbar-content">
+              <div class="fanwei-action-stack gap-2">
+                <div class="view-actions items-center">
+                  <input class="field-input h-10" id="fanweiSerialInput" placeholder="请输入泛微流水号" style="width:220px;" />
+                  <button class="btn h-10" id="fanweiCopyScriptBtn" type="button">读取泛微信息</button>
+                  <button class="btn h-10" id="fanweiInstallHelperBtn" type="button" hidden>安装本机助手</button>
+                  <button class="btn primary h-10" id="fanweiImportBtn" type="button" disabled>生成需求单并进入自动配置</button>
+                </div>
+                <p class="task-meta fanwei-toolbar-status m-0 text-gray-500" id="fanweiImportState">正在检查本机 Chrome 自动读取环境...</p>
+              </div>
+            </div>
+          </div>
+          <div class="fanwei-workbench">
+            <div class="panel">
+              <div class="panel-head"><div><h2 class="panel-title">泛微需求单</h2><p class="subtitle">泛微主表和服务确认单字段会在这里合并展示。</p></div></div>
+              <div class="panel-body"><div class="fanwei-field-list" id="fanweiParsedFields"><div class="empty-state">等待读取泛微单</div></div></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div><h2 class="panel-title">易考需求单</h2><p class="subtitle">生成内容会保持原模板下拉和默认配置。</p></div>
+              </div>
+              <div class="panel-body">
+                <div class="exam-table-wrap fanwei-table-wrap">
+                  <table class="exam-table fanwei-requirement-sheet" id="fanweiRequirementTable">
+                    <thead><tr><th style="width:72px;">序号</th><th style="width:260px;">配置项</th><th>填写内容</th></tr></thead>
+                    <tbody><tr><td colspan="3">等待生成</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="task-view" id="projectDetailView" hidden>
           <div class="view-heading"><div><button class="btn" id="backToProjectsBtn" type="button">返回项目</button><h1 style="margin-top:12px;">项目详情</h1><p class="subtitle" id="projectDetailSubtitle"></p></div><button class="btn primary" id="projectAutoConfigBtn" type="button">进入自动配置</button></div>
           <div class="task-overview" id="projectDetailOverview"></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">考试任务与场次</h2></div><div class="panel-body"><div class="exam-table-wrap"><table class="exam-table"><thead><tr><th>类型</th><th>场次</th><th>session_id</th><th>时间</th><th>考生</th><th>班级</th><th>状态</th></tr></thead><tbody id="projectDetailSessionRows"></tbody></table></div></div></div>
+          <div class="panel"><div class="panel-head"><h2 class="panel-title">考试任务与场次</h2></div><div class="panel-body"><div class="exam-table-wrap"><table class="exam-table"><thead><tr><th>类型</th><th>场次</th><th>考试口令</th><th>时间</th><th>考生</th><th>班级</th><th>状态</th></tr></thead><tbody id="projectDetailSessionRows"></tbody></table></div></div></div>
           <div class="panel"><div class="panel-head"><h2 class="panel-title">相关文件</h2></div><div class="panel-body" id="projectFiles">暂无已归档文件</div></div>
           <div class="panel"><div class="panel-head"><h2 class="panel-title">项目日志</h2></div><div class="panel-body"><div class="log-list" id="projectLogs"></div></div></div>
         </section>
@@ -2733,20 +3677,43 @@
         <section class="task-view" id="examListView" hidden>
           <div class="view-heading"><div><h1>考试列表</h1><p class="subtitle">按考试任务汇总正式考试与试考。</p></div><button class="btn" id="refreshExamsBtn" type="button">刷新</button></div>
           <div class="task-overview" id="examStats"></div>
-          <div class="panel"><div class="panel-body"><label class="field"><span class="field-label">搜索考试</span><input class="field-input" id="examSearchInput" placeholder="考试名称 / 场次名称 / session_id / 账号" /></label></div></div>
+          <div class="panel"><div class="panel-body"><label class="field"><span class="field-label">搜索考试</span><input class="field-input" id="examSearchInput" placeholder="考试名称 / 场次名称 / 考试口令 / 账号" /></label></div></div>
           <div class="view-actions" style="margin: -4px 0 12px;"><button class="btn" id="endedExamsToggleBtn" type="button">查看已结束考试</button></div>
           <div class="exam-table-wrap">
-            <table class="exam-table"><thead><tr><th>考试名称</th><th>正式考试</th><th>试考</th><th>来源账号</th><th>考生数</th><th>班级数</th><th>状态</th><th>操作</th></tr></thead><tbody id="examListRows"><tr><td colspan="8">暂无考试记录</td></tr></tbody></table>
+            <table class="exam-table exam-list-table"><thead><tr><th>项目名称</th><th>正式考试</th><th>试考</th><th>来源账号</th><th>配置进度</th><th>操作</th></tr></thead><tbody id="examListRows"><tr><td colspan="6">暂无考试记录</td></tr></tbody></table>
           </div>
         </section>
 
         <section class="task-view" id="taskDetailView" hidden>
-          <div class="view-heading"><div><button class="btn" id="backToExamsBtn" type="button">返回</button><h1 style="margin-top:12px;">考试任务详情</h1><p class="subtitle" id="taskDetailSubtitle"></p></div><div class="view-actions"><button class="btn" id="refreshTaskBtn" type="button">刷新状态</button></div></div>
+          <div class="view-heading"><div><button class="btn" id="backToExamsBtn" type="button">返回</button><h1 style="margin-top:12px;">考试任务详情</h1></div><div class="view-actions"><button class="btn" id="refreshTaskBtn" type="button">刷新状态</button></div></div>
           <div class="task-overview" id="taskOverview"></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">正式考试与试考</h2></div><div class="panel-body"><div class="task-session-grid" id="taskSessionCards"></div></div></div>
+          <div class="panel"><div class="panel-body"><div class="task-session-grid" id="taskSessionCards"></div></div></div>
+          <div class="panel" id="sessionChangePanel" hidden>
+            <div class="panel-head">
+              <div><h2 class="panel-title">修改场次信息</h2><p class="subtitle" id="sessionChangeMeta">仅测试控制台可用，提交会真实调用易考 API。</p></div>
+              <button class="btn" id="sessionChangeCancelBtn" type="button">关闭</button>
+            </div>
+            <div class="panel-body">
+              <div class="log warn" id="sessionChangeAlert" style="margin-bottom:12px;" hidden></div>
+              <div class="settings-grid">
+                <label class="field"><span class="field-label">场次名称</span><input class="field-input" id="sessionChangeName" /></label>
+                <label class="field session-time-field"><span class="field-label">考试时间</span><span class="session-time-range"><span class="session-time-control"><input class="field-input" id="sessionChangeStart" data-session-time-input="start" readonly placeholder="年/月/日 --:--" /><button class="session-time-icon" type="button" data-session-time-input="start" aria-label="选择开始时间">◧</button></span><span class="session-time-arrow">→</span><span class="session-time-control"><input class="field-input" id="sessionChangeEnd" data-session-time-input="end" readonly placeholder="年/月/日 --:--" /><button class="session-time-icon" type="button" data-session-time-input="end" aria-label="选择结束时间">◧</button></span><span class="session-time-zone">(Asia/Shanghai)</span></span></label>
+                <label class="field"><span class="field-label">提前登录分钟</span><input class="field-input" id="sessionChangeEarly" type="number" min="0" /></label>
+                <label class="field"><span class="field-label">迟到限制分钟</span><input class="field-input" id="sessionChangeLater" type="number" min="0" /></label>
+                <label class="field"><span class="field-label">欢迎语</span><textarea class="field-input" id="sessionChangeMessage" rows="2"></textarea></label>
+                <label class="field"><span class="field-label">登录提示</span><textarea class="field-input" id="sessionChangeNotice" rows="2"></textarea></label>
+              </div>
+              <div class="log-list" id="sessionChangeDiff" style="margin-top:12px;"><div class="empty-state">打开场次后显示修改差异。</div></div>
+              <label class="field session-change-confirm-label" style="margin-top:12px;"><span><input id="sessionChangeConfirm" type="checkbox" /> 确认修改场次信息</span></label>
+              <div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="sessionChangeSubmitBtn" type="button" disabled>提交修改</button></div>
+              <div class="session-change-progress" id="sessionChangeProgress" hidden></div>
+              <div class="task-meta" id="sessionChangeState" style="margin-top:8px;"></div>
+              <div class="session-time-picker" id="sessionTimePicker" hidden></div>
+            </div>
+          </div>
           <div class="panel"><div class="panel-head"><div><h2 class="panel-title">进度步骤</h2><p class="subtitle">各步骤独立更新，按实际执行结果展示。</p></div></div><div class="panel-body"><div class="task-step-grid" id="taskStepGrid"></div></div></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">科目、试卷、考生与班级</h2></div><div class="panel-body" id="examResources">根据已持久化的任务步骤和场次信息汇总。</div></div>
-          <div class="panel"><div class="panel-head"><h2 class="panel-title">监考账号文件</h2></div><div class="panel-body">监考账号文件在名单导入和自动分班完成后生成，可在对应场次下载。</div></div>
+          <div class="panel" hidden><div class="panel-head"><h2 class="panel-title">科目、试卷、考生与班级</h2></div><div class="panel-body" id="examResources">根据已持久化的任务步骤和场次信息汇总。</div></div>
+          <div class="panel" hidden><div class="panel-head"><h2 class="panel-title">监考账号文件</h2></div><div class="panel-body">监考账号文件在名单导入和自动分班完成后生成，可在对应场次下载。</div></div>
           <div class="panel"><div class="panel-head"><h2 class="panel-title">快捷操作与执行日志</h2></div><div class="panel-body"><div class="view-actions"><button class="btn" id="examContinueBtn" type="button">继续</button><button class="btn" id="examRefreshBtn" type="button">刷新状态</button></div><div class="log-list" id="examExecutionLogs" style="margin-top:12px;"></div></div></div>
         </section>
 
@@ -2819,6 +3786,8 @@
       const authLoginPasswordInput = document.querySelector("#authLoginPasswordInput");
       const loginError = document.querySelector("#loginError");
       const loginSubmitBtn = document.querySelector("#loginSubmitBtn");
+      const sideStatusCard = document.querySelector("#sideStatusCard");
+      const sideStatusToggle = document.querySelector("#sideStatusToggle");
       const authEmailText = document.querySelector("#authEmailText");
       const logoutBtn = document.querySelector("#logoutBtn");
       const fileInput = document.querySelector("#fileInput");
@@ -2870,6 +3839,7 @@
       const autoConfigStack = document.querySelector("#autoConfigStack");
       const candidateImportPanel = document.querySelector("#candidateImportPanel");
       const projectManagementView = document.querySelector("#projectManagementView");
+      const fanweiTestView = document.querySelector("#fanweiTestView");
       const projectDetailView = document.querySelector("#projectDetailView");
       const examListView = document.querySelector("#examListView");
       const taskDetailView = document.querySelector("#taskDetailView");
@@ -2927,7 +3897,6 @@
       const taskOverview = document.querySelector("#taskOverview");
       const taskSessionCards = document.querySelector("#taskSessionCards");
       const taskStepGrid = document.querySelector("#taskStepGrid");
-      const taskDetailSubtitle = document.querySelector("#taskDetailSubtitle");
       const refreshProjectsBtn = document.querySelector("#refreshProjectsBtn");
       const refreshExamsBtn = document.querySelector("#refreshExamsBtn");
       const refreshTaskBtn = document.querySelector("#refreshTaskBtn");
@@ -2938,6 +3907,14 @@
       const backToRequirementsBtn = document.querySelector("#backToRequirementsBtn");
       const projectAutoConfigBtn = document.querySelector("#projectAutoConfigBtn");
       const newProjectBtn = document.querySelector("#newProjectBtn");
+      const backFromFanweiBtn = document.querySelector("#backFromFanweiBtn");
+      const fanweiSerialInput = document.querySelector("#fanweiSerialInput");
+      const fanweiCopyScriptBtn = document.querySelector("#fanweiCopyScriptBtn");
+      const fanweiInstallHelperBtn = document.querySelector("#fanweiInstallHelperBtn");
+      const fanweiImportBtn = document.querySelector("#fanweiImportBtn");
+      const fanweiImportState = document.querySelector("#fanweiImportState");
+      const fanweiParsedFields = document.querySelector("#fanweiParsedFields");
+      const fanweiRequirementTable = document.querySelector("#fanweiRequirementTable");
       const projectSearchInput = document.querySelector("#projectSearchInput");
       const projectStatusFilter = document.querySelector("#projectStatusFilter");
       const projectStats = document.querySelector("#projectStats");
@@ -3050,7 +4027,98 @@
         return `${(Number.isFinite(progress) ? progress : 0).toFixed(1)}%`;
       }
 
-      const taskViewState = { tasks: [], sessions: [], requirements: [], users: [], currentTaskId: "", currentProjectId: "", currentRequirementId: "", examListMode: "active", wechatRequirementDetails: {} };
+      function progressTone(progress, status = "") {
+        if (status === "failed") return "failed";
+        const normalized = Math.max(0, Math.min(100, Number.isFinite(Number(progress)) ? Number(progress) : 0));
+        if (normalized >= 100) return "complete";
+        if (normalized >= 51) return "major";
+        if (normalized >= 26) return "mid";
+        if (normalized >= 1) return "early";
+        return "empty";
+      }
+
+      function progressChip(value, status = "") {
+        const raw = Number(value || 0);
+        const progress = Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : 0));
+        const text = `${progress.toFixed(1)}%`;
+        return `<span class="status-chip progress-chip ${progressTone(progress, status)}" style="--progress-fill:${progress}%">${text}</span>`;
+      }
+
+      const CONFIG_PROGRESS_STEP_KEYS = new Set([
+        ["requirement_parse", "需求单解析"],
+        ["formal_session_create", "正式场次创建"],
+        ["trial_session_create", "试考场次创建"],
+        ["course_create", "科目创建"],
+        ["trial_paper_bind", "试考试卷绑定"],
+        ["paper_bind", "正式场次绑定科目"],
+        ["paper_bind_display", "试卷绑定"],
+        ["trial_candidate_import_and_rooms", "试考考生导入 & 自动分班"],
+        ["formal_candidate_import_and_rooms", "正式考试考生导入 & 自动分班"],
+      ].map(([key]) => key));
+
+      function clampProgress(value) {
+        const progress = Number(value || 0);
+        return Math.max(0, Math.min(100, Number.isFinite(progress) ? progress : 0));
+      }
+
+      function isConfigurationProgressStep(step) {
+        return CONFIG_PROGRESS_STEP_KEYS.has(step?.stepKey);
+      }
+
+      function taskConfigurationProgressFromSteps(progressSteps, fallbackProgress = 0) {
+        if (!progressSteps.length) return clampProgress(fallbackProgress);
+        const completedSteps = progressSteps.filter((step) => step.status === "success").length;
+        return Math.round((completedSteps / progressSteps.length) * 1000) / 10;
+      }
+
+      function taskConfigurationProgress(task) {
+        const progressSteps = buildTaskDisplaySteps(task).filter(isConfigurationProgressStep);
+        return taskConfigurationProgressFromSteps(progressSteps, task?.progress);
+      }
+
+      function currentTaskProgress(task) {
+        return taskConfigurationProgress(task);
+      }
+
+      function isCompletedAutoConfigProject(task) {
+        return task?.status === "success";
+      }
+
+      function taskConfigurationStageFromSteps(progressSteps, fallbackStage = "等待执行") {
+        if (!progressSteps.length) return String(fallbackStage || "等待执行");
+        const failedStep = progressSteps.find((step) => step.status === "failed");
+        if (failedStep) return failedStep.stepName;
+        const currentStep = progressSteps.find((step) => step.status !== "success");
+        if (currentStep) return currentStep.status === "running" ? `${currentStep.stepName}进行中` : currentStep.stepName;
+        return "配置完成";
+      }
+
+      const taskViewState = {
+        tasks: [],
+        sessions: [],
+        examTaskDetails: {},
+        requirements: [],
+        users: [],
+        currentTaskId: "",
+        currentProjectId: "",
+        currentRequirementId: "",
+        examListMode: "active",
+        wechatRequirementDetails: {},
+        paperUnitRefreshTimers: {},
+        sessionChange: {
+          taskId: "",
+          sessionId: "",
+          apiBase: "",
+          current: {},
+        },
+        sessionTimePicker: {
+          field: "",
+          value: null,
+          viewYear: 0,
+          viewMonth: 0,
+          aligning: false,
+        },
+      };
 
 
       async function fetchJson(url, options) {
@@ -3060,7 +4128,14 @@
           const next = `${window.location.pathname}${window.location.search}`;
           window.location.href = `/login?next=${encodeURIComponent(next)}`;
         }
-        if (!response.ok) throw new Error(data.error || `请求失败：${response.status}`);
+        if (!response.ok) {
+          const error = new Error(data.error || `请求失败：${response.status}`);
+          error.status = response.status;
+          error.detail = data.detail;
+          error.errors = data.errors;
+          error.response = data;
+          throw error;
+        }
         return data;
       }
 
@@ -3076,6 +4151,7 @@
         function render() {
           const email = state.user?.email || (state.enabled ? "未登录" : "本机模式");
           authEmailText.textContent = email;
+          sideStatusToggle.dataset.email = email;
           logoutBtn.hidden = !state.enabled || !state.authenticated;
           usersNavBtn.hidden = state.enabled ? state.user?.role !== "admin" : false;
         }
@@ -3160,22 +4236,24 @@
       function renderProjectList() {
         const query = String(projectSearchInput.value || "").trim().toLowerCase();
         const status = projectStatusFilter.value;
-        const projects = taskViewState.tasks.filter((task) => {
+        const visibleTasks = taskViewState.tasks.filter(isCompletedAutoConfigProject);
+        const projects = visibleTasks.filter((task) => {
           const searchable = `${task.projectName || ""} ${task.customerName || ""} ${task.sourceAccount || ""}`.toLowerCase();
           return (!query || searchable.includes(query)) && (!status || task.status === status);
         });
-        const completed = taskViewState.tasks.filter((task) => task.status === "success").length;
-        const active = taskViewState.tasks.filter((task) => ["running", "waiting_manual"].includes(task.status)).length;
-        projectStats.innerHTML = `<div class="task-summary"><div><div class="project-title">项目状态统计</div><div class="task-meta">项目总数 ${taskViewState.tasks.length} · 进行/待处理 ${active} · 已完成 ${completed}</div></div></div>`;
+        const completed = visibleTasks.filter((task) => task.status === "success").length;
+        const active = visibleTasks.filter((task) => ["running", "waiting_manual"].includes(task.status)).length;
+        projectStats.innerHTML = `<div class="task-summary"><div><div class="project-title">项目状态统计</div><div class="task-meta">项目总数 ${visibleTasks.length} · 进行/待处理 ${active} · 已完成 ${completed}</div></div></div>`;
         projectGrid.innerHTML = projects.length
           ? projects.map((task) => {
               const sessions = task.sessions || [];
               const formalCount = sessions.filter((session) => session.sessionType === "formal").length;
               const trialCount = sessions.filter((session) => session.sessionType === "trial").length;
+              const displayProgress = currentTaskProgress(task);
               return `<article class="project-card" data-task-id="${safeText(task.taskId)}">
                 <div class="project-card-head"><div><div class="project-title">${safeText(task.projectName)}</div><div class="task-meta">客户名称：${safeText(task.customerName || "未记录")}<br>来源账号：${safeText(task.sourceAccount || "未记录")}<br>考试任务：1 · 正式场次：${formalCount} · 试考场次：${trialCount}<br>更新时间：${formatTaskTime(task.updatedAt)}</div></div>${statusChip(task.status)}</div>
-                <div class="mini-progress"><span style="width:${Math.max(0, Math.min(100, Number(task.progress || 0)))}%"></span></div>
-                <div class="task-meta" style="margin-top:7px;">当前进度 ${Number(task.progress || 0).toFixed(1)}%</div>
+                <div class="mini-progress"><span style="width:${displayProgress}%"></span></div>
+                <div class="task-meta" style="margin-top:7px;">当前进度 ${displayProgress.toFixed(1)}%</div>
                 <div class="card-actions" style="margin-top:12px;"><button class="btn project-action" data-action="view" type="button">查看</button><button class="btn project-action" data-action="edit" type="button">编辑</button><button class="btn project-action" data-action="auto" type="button">进入自动配置</button><button class="btn project-action" data-action="delete" type="button">删除</button></div>
               </article>`;
             }).join("")
@@ -3201,9 +4279,22 @@
         renderProjectList();
       }
 
+      function examTaskWithDetail(task) {
+        const detail = taskViewState.examTaskDetails[task.taskId];
+        if (!detail) return task;
+        return {
+          ...task,
+          ...detail,
+          sessions: Array.isArray(detail.sessions) && detail.sessions.length ? detail.sessions : task.sessions,
+          formalSession: task.formalSession,
+          trialSession: task.trialSession,
+          unifiedExamCode: task.unifiedExamCode || detail.unifiedExamCode || "",
+        };
+      }
+
       function renderExamList() {
         const query = String(examSearchInput.value || "").trim().toLowerCase();
-        const allExams = aggregateExamSessions(taskViewState.sessions);
+        const allExams = aggregateExamSessions(taskViewState.sessions).map(examTaskWithDetail);
         const endedExams = allExams.filter((task) => isExamTaskEnded(task));
         const activeExams = allExams.filter((task) => !isExamTaskEnded(task));
         const sourceExams = taskViewState.examListMode === "ended" ? endedExams : activeExams;
@@ -3215,35 +4306,80 @@
         endedExamsToggleBtn.textContent = taskViewState.examListMode === "ended" ? "查看当前考试" : "查看已结束考试";
         examStats.innerHTML = `<div class="task-summary"><div><div class="project-title">考试统计</div><div class="task-meta">当前分类：${activeLabel} ${sourceExams.length} · 已结束 ${endedExams.length} · 考试任务 ${taskCount} · 正式考试 ${formalCount} · 试考 ${trialCount}</div></div></div>`;
 
-        function sessionSummary(session) {
-          if (!session) return `<div class="exam-session-summary">尚未创建</div>`;
-          return `<div class="exam-session-summary"><strong>${safeText(session.name || "未命名场次")}</strong><div>session_id：${safeText(session.session_id || "--")}</div><div>${safeText(session.start || "--")}<br>${safeText(session.end || "--")}</div></div>`;
+        function formatSessionTime(session) {
+          const start = safeText(session?.start || "--");
+          const end = safeText(session?.end || "--");
+          const startDate = String(session?.start || "").slice(0, 10);
+          const endText = startDate && String(session?.end || "").startsWith(startDate)
+            ? String(session?.end || "").slice(11) || end
+            : end;
+          return `${start} ~ ${safeText(endText)}`;
         }
 
-        function countSummary(task, field) {
-          return `<div>正式：${Number(task.formalSession?.[field] || 0)}</div><div>试考：${Number(task.trialSession?.[field] || 0)}</div>`;
+        function sessionStartDay(session) {
+          const match = String(session?.start || "").match(/(?:^|\D)(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\D|$)/);
+          return match ? String(Number(match[3])).padStart(2, "0") : "--";
         }
 
-        const rowStatusChip = (task) => taskViewState.examListMode === "ended" ? `<span class="status-chip success">已结束</span>` : `<span class="status-chip pending">${formatProgressPercent(task.progress)}</span>`;
+        function sessionCalendarIcon(session) {
+          return `<svg class="session-calendar-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.4 3.2v3.1M17.6 3.2v3.1" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+            <path d="M4.7 5.4h14.6a2.3 2.3 0 0 1 2.3 2.3v11a2.3 2.3 0 0 1-2.3 2.3H4.7a2.3 2.3 0 0 1-2.3-2.3v-11a2.3 2.3 0 0 1 2.3-2.3Z" fill="none" stroke="currentColor" stroke-width="2.2"/>
+            <path d="M3.4 10h17.2" fill="none" stroke="currentColor" stroke-width="2.2"/>
+            <text x="12" y="17.2" text-anchor="middle" font-size="7.4" font-weight="800" fill="currentColor">${sessionStartDay(session)}</text>
+          </svg>`;
+        }
+
+        function sessionSummary(session, label) {
+          if (!session) return `<div class="exam-session-summary exam-session-empty">${label}：尚未创建</div>`;
+          return `<div class="exam-session-summary">
+            <strong>${safeText(session.name || label)}（ID:${safeText(session.session_id || "--")}）</strong>
+            <div class="exam-session-time">${formatSessionTime(session)}</div>
+            <div class="exam-session-counts">
+              <span class="exam-session-count" title="考生数"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" fill="currentColor"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0" fill="currentColor"/></svg>${Number(session.candidateCount || 0)}</span>
+              <span class="exam-session-count class-count-icon" title="班级数"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6Z" fill="currentColor"/><path d="M5.8 21a6.2 6.2 0 0 1 12.4 0" fill="currentColor"/><path d="M5.4 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="currentColor" opacity=".75"/><path d="M.8 21a4.9 4.9 0 0 1 7.5-4.1" fill="currentColor" opacity=".75"/><path d="M18.6 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="currentColor" opacity=".75"/><path d="M15.7 16.9A4.9 4.9 0 0 1 23.2 21" fill="currentColor" opacity=".75"/></svg>${Number(session.roomCount || 0)}</span>
+            </div>
+          </div>`;
+        }
+
+        function projectNameCell(task) {
+          const unifiedCode = String(task.unifiedExamCode || "").trim();
+          return `<div class="exam-project-cell">
+            <button class="exam-name-button task-detail-btn" data-task-id="${safeText(task.taskId)}" type="button">${safeText(task.projectName)}</button>
+            ${unifiedCode ? `<div class="exam-unified-code">统一口令 ${safeText(unifiedCode)}</div>` : ""}
+          </div>`;
+        }
+
+        const rowStatusChip = (task) => progressChip(currentTaskProgress(task), task.status);
+        const rowStatus = (task) => taskViewState.examListMode === "ended"
+          ? `<div class="exam-row-status">${rowStatusChip(task)}</div>`
+          : `<div class="exam-row-status">${rowStatusChip(task)}</div>`;
 
         examListRows.innerHTML = exams.length
           ? exams.map((task) => `
-              <tr>
-                <td><button class="exam-name-button task-detail-btn" data-task-id="${safeText(task.taskId)}" type="button">${safeText(task.projectName)}</button></td>
-                <td>${sessionSummary(task.formalSession)}</td>
-                <td>${sessionSummary(task.trialSession)}</td>
+              <tr class="exam-list-row">
+                <td>${projectNameCell(task)}</td>
+                <td>${sessionSummary(task.formalSession, "正式考试")}</td>
+                <td>${sessionSummary(task.trialSession, "试考")}</td>
                 <td>${safeText(task.sourceAccount || "未记录")}</td>
-                <td>${countSummary(task, "candidateCount")}</td>
-                <td>${countSummary(task, "roomCount")}</td>
-                <td>${rowStatusChip(task)}</td>
-                <td><div class="view-actions"><button class="btn task-detail-btn" data-task-id="${safeText(task.taskId)}" type="button">查看</button><button class="btn exam-row-action" data-action="refresh" type="button">刷新</button></div></td>
+                <td>${rowStatus(task)}</td>
+                <td><div class="view-actions exam-row-actions"><button class="exam-link-button task-detail-btn" data-task-id="${safeText(task.taskId)}" type="button">查看详情</button></div></td>
               </tr>`).join("")
-          : `<tr><td colspan="8">${taskViewState.examListMode === "ended" ? "暂无已结束考试。" : "暂无当前考试。新创建场次会自动显示在这里。"}</td></tr>`;
+          : `<tr><td colspan="6">${taskViewState.examListMode === "ended" ? "暂无已结束考试。" : "暂无当前考试。新创建场次会自动显示在这里。"}</td></tr>`;
       }
 
       async function loadExams() {
         const data = await fetchJson(`/api/exams?_=${Date.now()}`);
         taskViewState.sessions = data.sessions || [];
+        const taskIds = [...new Set(taskViewState.sessions.map((session) => session.taskId).filter(Boolean))];
+        const detailEntries = await Promise.all(taskIds.map(async (taskId) => {
+          try {
+            return [taskId, await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}?_=${Date.now()}`)];
+          } catch {
+            return [taskId, null];
+          }
+        }));
+        taskViewState.examTaskDetails = Object.fromEntries(detailEntries.filter(([, task]) => task));
         renderExamList();
       }
 
@@ -3537,6 +4673,20 @@
         });
       }
 
+      function sessionCandidateStatusChip(task, sessionType, session) {
+        if (!session) return statusChip("pending");
+        const stepMap = new Map((task.steps || []).map((step) => [step.stepKey, step]));
+        const importKey = sessionType === "formal" ? "formal_candidate_import" : "trial_candidate_import";
+        const subKey = sessionType === "formal" ? "formalExamStatus" : "trialExamStatus";
+        const importStatus = stepMap.get(importKey)?.status || "pending";
+        const roomStep = stepMap.get("sessions_auto_rooms");
+        const roomStatus = roomStep?.subStatus?.[subKey] || roomStep?.status || "pending";
+        if (importStatus === "success" && roomStatus === "success") return statusChip("success");
+        if (importStatus === "failed" || roomStatus === "failed") return statusChip("failed");
+        if (importStatus === "running" || roomStatus === "running") return statusChip("running");
+        return `<span class="status-chip waiting_manual">待导入名单</span>`;
+      }
+
       function buildTaskDisplaySteps(task) {
         const sourceSteps = task.steps || [];
         const stepMap = new Map(sourceSteps.map((step) => [step.stepKey, step]));
@@ -3595,7 +4745,52 @@
           triggerActionHtml: buildScoreProcessAction(task, scoreStep),
           extraDetail: scoreStep?.result?.fileName ? `成绩反馈单文件：${scoreStep.result.fileName}` : "",
         }));
+        const sessionChangeHistoryStep = buildSessionChangeRecordStep(task, stepMap);
+        if (sessionChangeHistoryStep) display.push(sessionChangeHistoryStep);
         return display;
+      }
+
+      function buildSessionChangeRecordStep(task, stepMap) {
+        const step = stepMap.get("session_change");
+        const history = sessionChangeHistory(step);
+        if (!history.length) return null;
+        const hasMore = history.length > 3;
+        const extraHtml = `<div class="session-change-record-list${hasMore ? " is-collapsed" : ""}" data-session-change-record-list>${history.map((record, index) => sessionChangeHistoryCard(record, index)).join("")}</div>${hasMore ? `<button class="session-change-record-more" data-session-change-record-toggle type="button" aria-expanded="false">展开全部</button>` : ""}`;
+        return cloneTaskStep(step, {
+          stepKey: "session_change",
+          stepName: "场次变更记录",
+          status: history.length ? step?.status || "success" : "pending",
+          extraHtml,
+          hideLogs: true,
+        });
+      }
+
+      function sessionChangeHistory(step = {}) {
+        if (Array.isArray(step?.result?.history) && step.result.history.length) return step.result.history;
+        const diff = Array.isArray(step?.result?.diff) ? step.result.diff : [];
+        if (!diff.length) return [];
+        return [{
+          id: `${step.result.sessionId || "session"}-legacy`,
+          changedAt: step.completedAt || step.startedAt || "",
+          operator: step.result.operator || "",
+          sessionId: step.result.sessionId || "",
+          sessionType: step.result.sessionType || "",
+          sessionLabel: step.result.sessionType === "formal" ? "正式考试" : step.result.sessionType === "trial" ? "试考" : "场次",
+          apiBase: step.result.apiBase || "",
+          status: step.status || "success",
+          tenantStatus: step.result.tenantStatus || 200,
+          verifyStatus: step.result.verifyStatus || "",
+          diff,
+          verifiedSession: step.result.verifiedSession || null,
+        }];
+      }
+
+      function sessionChangeHistoryCard(record = {}, index = 0) {
+        const diff = Array.isArray(record.diff) ? record.diff : [];
+        return `<details class="session-change-record-card${index >= 3 ? " is-extra" : ""}">
+          <summary class="session-change-record-toggle"><span>${safeText(record.sessionLabel || "场次")}</span><span>变更完成</span><span class="session-change-record-chevron">▾</span><span class="session-change-record-time"><span class="session-change-record-label">变更时间：</span>${safeText(formatTaskTime(record.changedAt))}</span></summary>
+          <div class="session-change-record-diff">${diff.length ? diff.map((item) => `<div class="session-change-record-diff-row"><strong class="session-change-record-label">${safeText(item.label || item.field)}</strong><br><span class="session-change-record-label">原值：</span>${safeText(item.before ?? "")}<br><span class="session-change-record-label">新值：</span>${safeText(item.after ?? "")}</div>`).join("") : `<div class="session-change-record-diff-row">无字段差异</div>`}</div>
+        </details>`;
       }
 
       function inferredPaperName(item = {}, courses = []) {
@@ -3609,15 +4804,41 @@
         return courseCode && courseName ? `${courseCode}${courseName}` : "";
       }
 
+      function paperUnitInfoText(item = {}) {
+        const info = item.unit_info || (Array.isArray(item.unit_infos) && item.unit_infos.length === 1 ? item.unit_infos[0] : null);
+        if (!info) return "";
+        return info.unit_label || (Number.isFinite(Number(info.unit_count)) ? `${Number(info.unit_count)}个单元` : "");
+      }
+
+      function paperUnitTimeText(item = {}) {
+        const info = item.unit_info || (Array.isArray(item.unit_infos) && item.unit_infos.length === 1 ? item.unit_infos[0] : null);
+        const sections = Array.isArray(info?.sections) ? info.sections : [];
+        const values = sections
+          .map((section) => {
+            const time = String(section.time_label || "").trim();
+            if (!time) return "";
+            const name = String(section.name || "").trim();
+            return name ? `${name} ${time}` : time;
+          })
+          .filter(Boolean);
+        return values.join(" / ");
+      }
+
       function buildPaperBindFeedback(paperState = {}, courses = []) {
         const results = paperState.result?.bindResult?.results || [];
         if (paperState.status === "success" && results.length) {
-          return `<div class="paper-bind-feedback success"><strong>已绑定试卷</strong>${results.map((item) => `
-            <div class="paper-bind-row">
-              <div class="paper-bind-line"><span class="paper-bind-label">科目</span>${safeText(item.course_name || "科目")}</div>
-              <div class="paper-bind-line"><span class="paper-bind-label">试卷名</span>${safeText(inferredPaperName(item, courses))}</div>
-            </div>
-          `).join("")}</div>`;
+          return `<div class="paper-bind-feedback success"><strong>已绑定试卷</strong>${results.map((item) => {
+            const unitInfoText = paperUnitInfoText(item);
+            const unitTimeText = paperUnitTimeText(item);
+            return `
+              <div class="paper-bind-row">
+                <div class="paper-bind-line"><span class="paper-bind-label">科目</span>${safeText(item.course_name || "科目")}</div>
+                <div class="paper-bind-line"><span class="paper-bind-label">试卷名</span>${safeText(inferredPaperName(item, courses))}</div>
+                ${unitInfoText ? `<div class="paper-bind-line"><span class="paper-bind-label">单元信息</span>${safeText(unitInfoText)}</div>` : ""}
+                ${unitTimeText ? `<div class="paper-bind-line"><span class="paper-bind-label">单元时间</span>${safeText(unitTimeText)}</div>` : ""}
+              </div>
+            `;
+          }).join("")}</div>`;
         }
         if (paperState.status === "failed") {
           return `<div class="paper-bind-feedback failed"><strong>试卷绑定未完成</strong><span>${safeText(paperState.errorMessage || "等待试卷上传后可手动重试，系统也会在考前一天内每小时自动检查。")}</span></div>`;
@@ -3656,17 +4877,468 @@
         return `<button class="retry-step" data-retry-step="${safeText(step.stepKey)}" type="button">${retryStepActionLabel(step)}</button>`;
       }
 
-      function renderTaskDetail(task) {
+      function taskCurrentStageText(task, progress = currentTaskProgress(task), progressSteps = buildTaskDisplaySteps(task).filter(isConfigurationProgressStep)) {
+        return progress >= 100 ? "配置完成" : taskConfigurationStageFromSteps(progressSteps, task?.currentStage);
+      }
+
+      function paperBindingNeedsUnitRefresh(task = {}) {
+        const paperState = task.config?.paperFormBind || {};
+        const results = paperState.result?.bindResult?.results || [];
+        if (paperState.status !== "success" || !Array.isArray(results) || !results.length) return false;
+        return results.some((item) => {
+          const formCodes = Array.isArray(item.form_codes) ? item.form_codes.filter(Boolean) : [];
+          if (!formCodes.length) return false;
+          if (formCodes.length === 1) return !item.unit_info;
+          return !Array.isArray(item.unit_infos) || item.unit_infos.length < formCodes.length;
+        });
+      }
+
+      function schedulePaperUnitRefresh(task = {}) {
+        const taskId = String(task.taskId || "");
+        if (!taskId) return;
+        const current = taskViewState.paperUnitRefreshTimers[taskId] || {};
+        if (current.timer) clearTimeout(current.timer);
+        if (!paperBindingNeedsUnitRefresh(task)) {
+          delete taskViewState.paperUnitRefreshTimers[taskId];
+          return;
+        }
+        const attempts = Number(current.attempts || 0);
+        if (attempts >= 5) return;
+        taskViewState.paperUnitRefreshTimers[taskId] = {
+          attempts: attempts + 1,
+          timer: setTimeout(async () => {
+            try {
+              if (taskViewState.currentTaskId !== taskId) return;
+              const refreshed = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}?_=${Date.now()}`);
+              if (taskViewState.currentTaskId === taskId) renderTaskDetail(refreshed);
+            } catch {
+              schedulePaperUnitRefresh({ ...task, taskId });
+            }
+          }, 1200),
+        };
+      }
+
+      function sessionChangeFeatureEnabled(task = {}) {
+        return Boolean(task.sessionChangeFeatureEnabled || task.featureFlags?.sessionChange);
+      }
+
+      function padTimePart(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function parseDisplayTime(value) {
+        const raw = String(value || "").trim();
+        const match = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})\s+(\d{1,2}):(\d{1,2})/);
+        if (!match) return null;
+        return {
+          year: Number(match[1]),
+          month: Number(match[2]),
+          day: Number(match[3]),
+          hour: Number(match[4]),
+          minute: Number(match[5]),
+        };
+      }
+
+      function tenantTimeToDisplayTime(value) {
+        const parsed = parseDisplayTime(String(value || "").replace(/-/g, "/"));
+        if (!parsed) return "";
+        return `${parsed.year}/${padTimePart(parsed.month)}/${padTimePart(parsed.day)} ${padTimePart(parsed.hour)}:${padTimePart(parsed.minute)}`;
+      }
+
+      function displayTimeToTenantTime(value) {
+        const parsed = parseDisplayTime(value);
+        if (!parsed) return "";
+        return `${parsed.year}-${padTimePart(parsed.month)}-${padTimePart(parsed.day)} ${padTimePart(parsed.hour)}:${padTimePart(parsed.minute)}`;
+      }
+
+      function pickerDateFromValue(value) {
+        const parsed = parseDisplayTime(value);
+        const now = new Date();
+        return parsed || {
+          year: now.getFullYear(),
+          month: now.getMonth() + 1,
+          day: now.getDate(),
+          hour: now.getHours(),
+          minute: now.getMinutes(),
+        };
+      }
+
+      function sessionTimeInputForField(field) {
+        return field === "end" ? sessionChangeEnd : sessionChangeStart;
+      }
+
+      function placeSessionTimePicker(input) {
+        const inputRect = input.getBoundingClientRect();
+        const pickerWidth = Math.min(620, window.innerWidth - 48);
+        const left = Math.max(12, Math.min(inputRect.left, window.innerWidth - pickerWidth - 12));
+        sessionTimePicker.style.left = `${left}px`;
+        sessionTimePicker.style.top = `${inputRect.bottom + 6}px`;
+      }
+
+      function syncSessionTimePickerPosition() {
+        const field = taskViewState.sessionTimePicker.field;
+        if (sessionTimePicker.hidden || !field) return;
+        placeSessionTimePicker(sessionTimeInputForField(field));
+      }
+
+      function openSessionTimePicker(field) {
+        const input = sessionTimeInputForField(field);
+        const value = pickerDateFromValue(input.value);
+        taskViewState.sessionTimePicker = {
+          field,
+          value,
+          viewYear: value.year,
+          viewMonth: value.month,
+          aligning: false,
+        };
+        renderSessionTimePicker();
+        sessionTimePicker.hidden = false;
+        placeSessionTimePicker(input);
+      }
+
+      function closeSessionTimePicker() {
+        sessionTimePicker.hidden = true;
+      }
+
+      function renderSessionTimePicker() {
+        const state = taskViewState.sessionTimePicker;
+        const value = state.value || pickerDateFromValue("");
+        const firstDay = new Date(state.viewYear, state.viewMonth - 1, 1);
+        const startOffset = (firstDay.getDay() + 6) % 7;
+        const daysInMonth = new Date(state.viewYear, state.viewMonth, 0).getDate();
+        const prevDays = new Date(state.viewYear, state.viewMonth - 1, 0).getDate();
+        const dayButtons = [];
+        for (let index = 0; index < 42; index += 1) {
+          const dayNum = index - startOffset + 1;
+          const inMonth = dayNum >= 1 && dayNum <= daysInMonth;
+          const displayDay = inMonth ? dayNum : (dayNum < 1 ? prevDays + dayNum : dayNum - daysInMonth);
+          const selected = inMonth && value.year === state.viewYear && value.month === state.viewMonth && value.day === dayNum;
+          dayButtons.push(`<button class="session-time-day ${inMonth ? "" : "is-muted"} ${selected ? "is-selected" : ""}" type="button" data-session-picker-day="${inMonth ? dayNum : ""}">${displayDay}</button>`);
+        }
+        const wheelOptions = (current, max, attr) => Array.from({ length: 9 }, (_, index) => {
+          const offset = index - 3;
+          const raw = (current + offset + max + 1) % (max + 1);
+          const distance = Math.abs(offset);
+          return `<button class="session-time-option ${offset === 0 ? "is-selected" : ""} distance-${distance}" type="button" data-session-picker-${attr}="${raw}">${padTimePart(raw)}</button>`;
+        }).join("");
+        const hourButtons = wheelOptions(value.hour, 23, "hour");
+        const minuteButtons = wheelOptions(value.minute, 59, "minute");
+        sessionTimePicker.innerHTML = `
+          <div class="session-time-picker-main">
+            <div class="session-time-picker-calendar">
+              <div class="session-time-picker-head"><button class="session-time-nav" type="button" data-session-picker-month="-1">‹</button><div>${state.viewYear}年 ${state.viewMonth}月</div><button class="session-time-nav" type="button" data-session-picker-month="1">›</button></div>
+              <div class="session-time-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+              <div class="session-time-days">${dayButtons.join("")}</div>
+            </div>
+            <div>
+              <div class="session-time-picker-head"><div></div><div>${value.year}/${padTimePart(value.month)}/${padTimePart(value.day)} ${padTimePart(value.hour)}:${padTimePart(value.minute)}</div><div></div></div>
+              <div class="session-time-picker-columns"><div class="session-time-column" data-session-picker-wheel="hour">${hourButtons}</div><div class="session-time-column" data-session-picker-wheel="minute">${minuteButtons}</div></div>
+            </div>
+          </div>
+          <div class="session-time-picker-actions"><button class="session-time-now" type="button" data-session-picker-now>此刻</button><button class="btn primary" type="button" data-session-picker-confirm>确定</button></div>
+        `;
+        requestAnimationFrame(alignSessionTimeColumns);
+      }
+
+      function setPickerValue(patch = {}) {
+        const state = taskViewState.sessionTimePicker;
+        taskViewState.sessionTimePicker.value = { ...(state.value || pickerDateFromValue("")), ...patch };
+        renderSessionTimePicker();
+      }
+
+      function alignSessionTimeColumns() {
+        taskViewState.sessionTimePicker.aligning = false;
+      }
+
+      function sessionTimeWheelIndex(current, delta, max) {
+        return (current + delta + max + 1) % (max + 1);
+      }
+
+      function syncSessionTimeColumnSelection(column) {
+        if (taskViewState.sessionTimePicker.aligning) return;
+        const field = column.dataset.sessionPickerWheel;
+        const value = taskViewState.sessionTimePicker.value || pickerDateFromValue("");
+        if (field === "hour") {
+          const hour = sessionTimeWheelIndex(value.hour, 1, 23);
+          setPickerValue({ hour });
+        } else if (field === "minute") {
+          const minute = sessionTimeWheelIndex(value.minute, 1, 59);
+          setPickerValue({ minute });
+        }
+      }
+
+      function handleSessionTimeWheel(event) {
+        const column = event.target.closest("[data-session-picker-wheel]");
+        if (!column || sessionTimePicker.hidden) return;
+        event.preventDefault();
+        const field = column.dataset.sessionPickerWheel;
+        const value = taskViewState.sessionTimePicker.value || pickerDateFromValue("");
+        const delta = event.deltaY > 0 ? 1 : -1;
+        if (field === "hour") {
+          setPickerValue({ hour: sessionTimeWheelIndex(value.hour, delta, 23) });
+        } else if (field === "minute") {
+          setPickerValue({ minute: sessionTimeWheelIndex(value.minute, delta, 59) });
+        }
+      }
+
+      function confirmSessionTimePicker() {
+        const state = taskViewState.sessionTimePicker;
+        if (!state.field || !state.value) return;
+        const input = sessionTimeInputForField(state.field);
+        const value = state.value;
+        const previousValue = input.value;
+        input.value = `${value.year}/${padTimePart(value.month)}/${padTimePart(value.day)} ${padTimePart(value.hour)}:${padTimePart(value.minute)}`;
+        if (!validateSessionChangeTimeRange({ report: true })) {
+          input.value = previousValue;
+          renderSessionChangeDiff();
+          return;
+        }
+        closeSessionTimePicker();
+        renderSessionChangeDiff();
+      }
+
+      function sessionChangeFormValues() {
+        return {
+          name: sessionChangeName.value,
+          start: displayTimeToTenantTime(sessionChangeStart.value),
+          end: displayTimeToTenantTime(sessionChangeEnd.value),
+          early: sessionChangeEarly.value === "" ? null : Number(sessionChangeEarly.value),
+          later: sessionChangeLater.value === "" ? null : Number(sessionChangeLater.value),
+          message: sessionChangeMessage.value,
+          notice: sessionChangeNotice.value,
+        };
+      }
+
+      function sessionChangeChangedValues() {
+        const current = taskViewState.sessionChange.current || {};
+        const next = sessionChangeFormValues();
+        const changes = {};
+        if (String(current.name ?? "") !== String(next.name ?? "")) changes.name = next.name;
+        if (String(current.start ?? "") !== String(next.start ?? "")) changes.start = next.start;
+        if (String(current.end ?? "") !== String(next.end ?? "")) changes.end = next.end;
+        if (next.early !== null && String(current.early ?? "") !== String(next.early)) changes.early = next.early;
+        if (next.later !== null && String(current.later ?? "") !== String(next.later)) changes.later = next.later;
+        if (next.message !== "" && String(current.message ?? "") !== String(next.message)) changes.message = next.message;
+        if (next.notice !== "" && String(current.notice ?? "") !== String(next.notice)) changes.notice = next.notice;
+        return changes;
+      }
+
+      function sessionChangeDisplayTimeValue(value) {
+        const match = String(value || "").match(/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})$/);
+        if (!match) return null;
+        const [, year, month, day, hour, minute] = match;
+        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), 0, 0);
+        return Number.isNaN(date.getTime()) ? null : date.getTime();
+      }
+
+      function sessionChangeCurrentMinuteValue() {
+        const now = new Date();
+        now.setSeconds(0, 0);
+        return now.getTime();
+      }
+
+      function validateSessionChangeTimeRange({ report = false } = {}) {
+        const start = sessionChangeDisplayTimeValue(sessionChangeStart.value);
+        const end = sessionChangeDisplayTimeValue(sessionChangeEnd.value);
+        const now = sessionChangeCurrentMinuteValue();
+        let message = "";
+        if (start !== null && start < now) {
+          message = "考试时间不能早于当前时间";
+        } else if (end !== null && end < now) {
+          message = "考试时间不能早于当前时间";
+        } else if (start !== null && end !== null && end < start) {
+          message = "结束时间不能早于开始时间";
+        }
+        const valid = !message;
+        if (!valid && report) {
+          taskViewState.sessionChange.timeRangeError = true;
+          setSessionChangeAlert(message, "warn");
+          sessionChangeState.textContent = "请先调整考试结束时间。";
+        } else if (valid && taskViewState.sessionChange.timeRangeError) {
+          taskViewState.sessionChange.timeRangeError = false;
+          if (sessionChangeAlert.textContent.includes("结束时间不能早于开始时间") || sessionChangeAlert.textContent.includes("考试时间不能早于当前时间")) {
+            setSessionChangeAlert("");
+          }
+          sessionChangeState.textContent = "请核对差异后确认提交。";
+        }
+        return valid;
+      }
+
+      function renderSessionChangeDiff() {
+        const current = taskViewState.sessionChange.current || {};
+        const changes = sessionChangeChangedValues();
+        const labels = {
+          name: "场次名称",
+          start: "开始时间",
+          end: "结束时间",
+          early: "提前登录分钟",
+          later: "迟到限制分钟",
+          message: "欢迎语",
+          notice: "登录提示",
+        };
+        const rows = Object.keys(changes)
+          .map((field) => `<div class="log"><div>${safeText(labels[field])}<br><span class="task-meta">原值：${safeText(current[field] ?? "")}</span><br><span class="task-meta">新值：${safeText(changes[field] ?? "")}</span></div></div>`);
+        sessionChangeDiff.innerHTML = rows.length ? rows.join("") : `<div class="empty-state">暂无字段变化。</div>`;
+        const timeRangeValid = validateSessionChangeTimeRange({ report: false });
+        sessionChangeSubmitBtn.disabled = !rows.length || !sessionChangeConfirm.checked || !timeRangeValid;
+      }
+
+      function formatApiErrorDetail(error) {
+        const parts = [];
+        if (error?.detail !== undefined) {
+          const detail = typeof error.detail === "string" ? error.detail : JSON.stringify(error.detail);
+          if (detail && detail !== "{}") parts.push(`接口返回：${detail.slice(0, 800)}`);
+        }
+        if (Array.isArray(error?.errors) && error.errors.length) {
+          parts.push(`参数错误：${error.errors.join("；")}`);
+        }
+        return parts.join("；");
+      }
+
+      function setSessionChangeAlert(message = "", tone = "warn", detail = "") {
+        sessionChangeAlert.hidden = !message;
+        sessionChangeAlert.className = `log ${tone}`;
+        sessionChangeAlert.innerHTML = message
+          ? `<div>${safeText(message)}${detail ? `<br><span class="task-meta">${safeText(detail)}</span>` : ""}</div>`
+          : "";
+      }
+
+      const sessionChangeProgressSteps = [
+        "校验修改内容",
+        "调用易考修改接口",
+        "同步本地场次记录",
+        "回查易考场次信息",
+      ];
+
+      function renderSessionChangeProgress(activeIndex = -1, failedIndex = -1) {
+        sessionChangeProgress.hidden = activeIndex < 0 && failedIndex < 0;
+        if (sessionChangeProgress.hidden) {
+          sessionChangeProgress.innerHTML = "";
+          return;
+        }
+        sessionChangeProgress.innerHTML = sessionChangeProgressSteps.map((label, index) => {
+          const state = failedIndex === index ? "failed" : index < activeIndex ? "success" : index === activeIndex ? "running" : "";
+          const suffix = state === "success" ? "已完成" : state === "running" ? "进行中" : state === "failed" ? "失败" : "等待中";
+          return `<div class="session-change-progress-row ${state}"><span class="session-change-progress-dot"></span><span>${safeText(label)} · ${safeText(suffix)}</span></div>`;
+        }).join("");
+      }
+
+      function renderSessionChangeSuccess(result = {}) {
+        renderSessionChangeProgress(sessionChangeProgressSteps.length);
+        const verified = result.verifiedSession || result.session || {};
+        sessionChangeState.innerHTML = `<div class="session-change-success">
+          <strong>易考修改成功</strong><br>
+          session_id：${safeText(result.sessionId || verified.session_id || taskViewState.sessionChange.sessionId || "--")}<br>
+          场次名称：${safeText(verified.name || "--")}<br>
+          考试时间：${safeText(verified.start || "--")} ~ ${safeText(verified.end || "--")}<br>
+          易考 API：${safeText(result.apiBase || taskViewState.sessionChange.apiBase || "--")} · 修改状态 ${safeText(result.tenantStatus || 200)} · 回查状态 ${safeText(result.verifyStatus || "未回查")}
+        </div>`;
+      }
+
+      async function openSessionChange(taskId, sessionId) {
+        sessionChangePanel.hidden = false;
+        setSessionChangeAlert("");
+        renderSessionChangeProgress();
+        sessionChangeState.textContent = "正在读取易考场次详情...";
+        sessionChangeConfirm.checked = false;
+        const preview = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/change-preview?_=${Date.now()}`);
+        taskViewState.sessionChange = {
+          taskId,
+          sessionId,
+          apiBase: preview.apiBase || "",
+          current: preview.current || {},
+        };
+        sessionChangeName.value = preview.current?.name || "";
+        sessionChangeStart.value = tenantTimeToDisplayTime(preview.current?.start);
+        sessionChangeEnd.value = tenantTimeToDisplayTime(preview.current?.end);
+        sessionChangeEarly.value = preview.current?.early ?? "";
+        sessionChangeLater.value = preview.current?.later ?? "";
+        sessionChangeMessage.value = preview.current?.message || "";
+        sessionChangeNotice.value = preview.current?.notice || "";
+        sessionChangeMeta.textContent = `API：${preview.apiBase || "--"} · session_id：${sessionId}`;
+        sessionChangeState.textContent = "请核对差异后确认提交。";
+        if (preview.warning) {
+          setSessionChangeAlert("读取易考场次详情失败，已使用本地场次信息填充。", "warn", "仍可修改场次名称和考试时间等基础字段；提交时会真实调用易考修改接口。");
+        }
+        renderSessionChangeDiff();
+      }
+
+      async function submitSessionChange() {
+        const { taskId, sessionId } = taskViewState.sessionChange;
+        if (!taskId || !sessionId) return;
+        if (!validateSessionChangeTimeRange({ report: true })) return;
+        sessionChangeSubmitBtn.disabled = true;
+        sessionChangeSubmitBtn.textContent = "修改中...";
+        renderSessionChangeProgress(0);
+        setSessionChangeAlert("正在提交流程，请不要重复点击。", "running");
+        sessionChangeState.textContent = "正在提交易考场次修改...";
+        try {
+          renderSessionChangeProgress(1);
+          const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/sessions/${encodeURIComponent(sessionId)}/change`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              changes: sessionChangeChangedValues(),
+              confirm: true,
+            }),
+          });
+          renderSessionChangeProgress(2);
+          taskViewState.sessionChange.current = result.session || taskViewState.sessionChange.current || {};
+          renderTaskDetail(result.task, { keepSessionChangePanel: true });
+          renderSessionChangeProgress(3);
+          renderSessionChangeSuccess(result);
+          setSessionChangeAlert("易考场次修改成功，已生成变更记录。", "success");
+        } catch (error) {
+          const detail = formatApiErrorDetail(error) || error.message || String(error);
+          renderSessionChangeProgress(1, 1);
+          setSessionChangeAlert(error.message || String(error), "warn", detail);
+          sessionChangeState.textContent = "提交失败，请查看上方错误信息。";
+          throw error;
+        } finally {
+          sessionChangeSubmitBtn.textContent = "提交修改";
+          renderSessionChangeDiff();
+        }
+      }
+
+      function formatSessionTime(session) {
+        const start = safeText(session?.start || "--");
+        const end = safeText(session?.end || "--");
+        const startDate = String(session?.start || "").slice(0, 10);
+        const endText = startDate && String(session?.end || "").startsWith(startDate)
+          ? String(session?.end || "").slice(11) || end
+          : end;
+        return `${start} ~ ${safeText(endText)}`;
+      }
+
+      function sessionStartDay(session) {
+        const match = String(session?.start || "").match(/(?:^|\D)(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\D|$)/);
+        return match ? String(Number(match[3])).padStart(2, "0") : "--";
+      }
+
+      function sessionCalendarIcon(session) {
+        return `<svg class="session-calendar-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6.4 3.2v3.1M17.6 3.2v3.1" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+          <path d="M4.7 5.4h14.6a2.3 2.3 0 0 1 2.3 2.3v11a2.3 2.3 0 0 1-2.3 2.3H4.7a2.3 2.3 0 0 1-2.3-2.3v-11a2.3 2.3 0 0 1 2.3-2.3Z" fill="none" stroke="currentColor" stroke-width="2.2"/>
+          <path d="M3.4 10h17.2" fill="none" stroke="currentColor" stroke-width="2.2"/>
+          <text x="12" y="17.2" text-anchor="middle" font-size="7.4" font-weight="800" fill="currentColor">${sessionStartDay(session)}</text>
+        </svg>`;
+      }
+
+      function renderTaskDetail(task, options = {}) {
         taskViewState.currentTaskId = task.taskId;
-        taskDetailSubtitle.textContent = task.projectName || "";
+        if (!options.keepSessionChangePanel) sessionChangePanel.hidden = true;
+        const displaySteps = buildTaskDisplaySteps(task);
+        const progressSteps = displaySteps.filter(isConfigurationProgressStep);
+        const displayProgress = taskConfigurationProgressFromSteps(progressSteps, task.progress);
+        const overviewStatus = task.status === "pending" ? "" : statusChip(task.status);
         taskOverview.innerHTML = `
-          <div class="task-summary"><div><div class="project-title">${safeText(task.projectName)}</div>${statusChip(task.status)}</div><div class="task-progress-value">${Number(task.progress || 0).toFixed(1)}%</div></div>
+          <div class="task-summary"><div><div class="project-title">${safeText(task.projectName)}</div>${overviewStatus}</div><div class="task-progress-value">${displayProgress.toFixed(1)}%</div></div>
           <div class="task-overview-grid">
             <div><div class="task-overview-label">任务编号</div><div class="task-overview-value">${safeText(task.taskId)}</div></div>
             <div><div class="task-overview-label">来源账号</div><div class="task-overview-value">${safeText(task.sourceAccount || "未记录")}</div></div>
             <div><div class="task-overview-label">创建时间</div><div class="task-overview-value">${formatTaskTime(task.createdAt)}</div></div>
             <div><div class="task-overview-label">最后更新时间</div><div class="task-overview-value">${formatTaskTime(task.updatedAt)}</div></div>
-            <div><div class="task-overview-label">当前总体阶段</div><div class="task-overview-value">${safeText(task.currentStage || "等待执行")}</div></div>
+            <div><div class="task-overview-label">当前总体阶段</div><div class="task-overview-value">${safeText(taskCurrentStageText(task, displayProgress, progressSteps))}</div></div>
           </div>`;
         const sessionByType = new Map((task.sessions || []).map((session) => [session.sessionType, session]));
         taskSessionCards.innerHTML = ["formal", "trial"].map((sessionType) => {
@@ -3676,24 +5348,29 @@
             return `<article class="task-session-card empty"><div class="task-session-card-head"><h3>${label}</h3>${statusChip("pending")}</div><div>尚未创建</div></article>`;
           }
           return `<article class="task-session-card">
-            <div class="task-session-card-head"><h3>${label}</h3>${statusChip(session.status)}</div>
-            <div class="task-session-details">
-              <div><div class="task-overview-label">场次名称</div><div class="task-overview-value">${safeText(session.name || "未命名场次")}</div></div>
-              <div><div class="task-overview-label">session_id</div><div class="task-overview-value">${safeText(session.session_id || "--")}</div></div>
-              <div><div class="task-overview-label">考试时间</div><div>${safeText(session.start || "--")} ~ ${safeText(session.end || "--")}</div></div>
-              <div><div class="task-overview-label">考生数 / 班级数</div><div>${Number(session.candidateCount || 0)} / ${Number(session.roomCount || 0)}</div></div>
+            <div class="task-session-card-head"><h3>${label}</h3>${sessionCandidateStatusChip(task, sessionType, session)}</div>
+            <div class="task-session-summary exam-session-summary">
+              <strong>${safeText(session.name || label)}（ID:${safeText(session.session_id || "--")}）</strong>
+              <div class="exam-session-time">${sessionCalendarIcon(session)}<span>${formatSessionTime(session)}</span></div>
+              <div class="exam-session-counts">
+                <span class="exam-session-count" title="考生数"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" fill="currentColor"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0" fill="currentColor"/></svg>${Number(session.candidateCount || 0)}</span>
+                <span class="exam-session-count class-count-icon" title="班级数"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6Z" fill="currentColor"/><path d="M5.8 21a6.2 6.2 0 0 1 12.4 0" fill="currentColor"/><path d="M5.4 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="currentColor" opacity=".75"/><path d="M.8 21a4.9 4.9 0 0 1 7.5-4.1" fill="currentColor" opacity=".75"/><path d="M18.6 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="currentColor" opacity=".75"/><path d="M15.7 16.9A4.9 4.9 0 0 1 23.2 21" fill="currentColor" opacity=".75"/></svg>${Number(session.roomCount || 0)}</span>
+              </div>
             </div>
-            <div class="task-session-actions"><button class="btn primary" data-candidate-task-id="${safeText(task.taskId)}" data-session-id="${safeText(session.session_id || "")}" type="button" ${session.session_id ? "" : "disabled"}>管理考生</button></div>
+            <div class="task-session-actions">
+              <button class="btn primary" data-candidate-task-id="${safeText(task.taskId)}" data-session-id="${safeText(session.session_id || "")}" type="button" ${session.session_id ? "" : "disabled"}>管理考生</button>
+              ${sessionChangeFeatureEnabled(task) && session.session_id ? `<button class="btn" data-session-change-task-id="${safeText(task.taskId)}" data-session-change-session-id="${safeText(session.session_id)}" type="button">修改场次</button>` : ""}
+            </div>
           </article>`;
         }).join("");
-        taskStepGrid.innerHTML = buildTaskDisplaySteps(task).map((step) => {
+        taskStepGrid.innerHTML = displaySteps.map((step) => {
           const sub = step.subStatus || {};
           const subHtml = Object.keys(sub).length
             ? `<div>正式考试：${taskStatusLabels[sub.formalExamStatus] || "未开始"}<br>试考：${taskStatusLabels[sub.trialExamStatus] || "未开始"}</div>` : "";
           const stepStatus = statusChip(step.status);
           return `<article class="task-step-card ${safeText(step.status)}" data-step-key="${safeText(step.stepKey)}">
             <div class="task-step-head"><div class="task-step-name">${safeText(step.stepName)}</div>${stepStatus}</div>
-            <div class="task-step-times">开始：${formatTaskTime(step.startedAt)}<br>完成：${formatTaskTime(step.completedAt)}<br>耗时：${formatDuration(step.durationMs)}</div>
+            <div class="task-step-times">开始：${formatTaskTime(step.startedAt)}<br>完成：${formatTaskTime(step.completedAt)}</div>
             ${step.monitorActionHtml || ""}
             ${step.triggerActionHtml || ""}
             ${step.extraHtml || ""}
@@ -3709,11 +5386,12 @@
           ...syntheticLogs,
         ];
         examExecutionLogs.innerHTML = stepLogs.length ? stepLogs.map((log) => `<div class="log"><div>[${safeText(log.stepName)}] ${safeText(log.message)}</div><div class="log-time">${formatTaskTime(log.time)}</div></div>`).join("") : `<div class="empty-state">暂无执行日志</div>`;
+        schedulePaperUnitRefresh(task);
       }
 
       async function downloadTaskMonitorAccounts(button) {
         const sessionId = String(button.dataset.sessionId || "");
-        if (!sessionId) throw new Error("缺少场次 session_id");
+        if (!sessionId) throw new Error("缺少场次考试口令");
         const sessionName = String(button.dataset.sessionName || "");
         const payload = await fetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/monitor-accounts?name=${encodeURIComponent(sessionName)}`);
         const response = await fetch(`${runtime.apiBase}/api/rooms/monitor-accounts/excel`, {
@@ -3773,7 +5451,8 @@
         const sessions = task.sessions || [];
         const candidates = sessions.reduce((sum, session) => sum + Number(session.candidateCount || 0), 0);
         const rooms = sessions.reduce((sum, session) => sum + Number(session.roomCount || 0), 0);
-        projectDetailOverview.innerHTML = `<div class="task-summary"><div><div class="project-title">${safeText(task.projectName)}</div>${statusChip(task.status)}</div><div class="task-progress-value">${Number(task.progress || 0).toFixed(1)}%</div></div><div class="task-overview-grid"><div><div class="task-overview-label">项目编号</div><div class="task-overview-value">${safeText(task.taskId)}</div></div><div><div class="task-overview-label">来源账号</div><div class="task-overview-value">${safeText(task.sourceAccount || "未记录")}</div></div><div><div class="task-overview-label">考生总数</div><div class="task-overview-value">${candidates}</div></div><div><div class="task-overview-label">班级总数</div><div class="task-overview-value">${rooms}</div></div><div><div class="task-overview-label">更新时间</div><div class="task-overview-value">${formatTaskTime(task.updatedAt)}</div></div></div>`;
+        const displayProgress = currentTaskProgress(task);
+        projectDetailOverview.innerHTML = `<div class="task-summary"><div><div class="project-title">${safeText(task.projectName)}</div>${statusChip(task.status)}</div><div class="task-progress-value">${displayProgress.toFixed(1)}%</div></div><div class="task-overview-grid"><div><div class="task-overview-label">项目编号</div><div class="task-overview-value">${safeText(task.taskId)}</div></div><div><div class="task-overview-label">来源账号</div><div class="task-overview-value">${safeText(task.sourceAccount || "未记录")}</div></div><div><div class="task-overview-label">考生总数</div><div class="task-overview-value">${candidates}</div></div><div><div class="task-overview-label">班级总数</div><div class="task-overview-value">${rooms}</div></div><div><div class="task-overview-label">更新时间</div><div class="task-overview-value">${formatTaskTime(task.updatedAt)}</div></div></div>`;
         projectDetailSessionRows.innerHTML = sessions.length ? sessions.map((session) => `<tr><td>${session.sessionType === "formal" ? "正式考试" : "试考"}</td><td>${safeText(session.name)}</td><td>${safeText(session.session_id || "--")}</td><td>${safeText(session.start || "--")} ~ ${safeText(session.end || "--")}</td><td>${Number(session.candidateCount || 0)}</td><td>${Number(session.roomCount || 0)}</td><td>${statusChip(session.status)}</td></tr>`).join("") : `<tr><td colspan="7">尚未创建场次</td></tr>`;
         const logs = (task.steps || []).flatMap((step) => (step.logs || []).map((log) => ({ ...log, stepName: step.stepName })));
         projectLogs.innerHTML = logs.length ? logs.map((log) => `<div class="log"><div>[${safeText(log.stepName)}] ${safeText(log.message)}</div><div class="log-time">${formatTaskTime(log.time)}</div></div>`).join("") : `<div class="empty-state">暂无项目日志</div>`;
@@ -4746,6 +6425,7 @@
         jobId: "",
         eventSource: null,
         imported: null,
+        fanweiRead: null,
         logs: [],
         captures: [],
         running: false,
@@ -4757,6 +6437,12 @@
         },
         customerServiceSchedulerProfiles: [],
       };
+
+      let fanweiBridgeToken = "";
+      let fanweiBridgePolling = null;
+      const FANWEI_HELPER_BASE = "http://127.0.0.1:18765";
+      const IS_LOOPBACK_CONSOLE = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(location.hostname);
+      let fanweiReadTransport = "helper";
 
       const candidateUiState = {
         uploadId: "",
@@ -5368,10 +7054,15 @@
         const isValid = candidateUiState.candidates.length > 0 && mappingComplete && candidateUiState.errors.length === 0;
         loadSessionsBtn.disabled = !isValid;
         renderLoadSessionsAction();
-        candidateImportBtn.disabled = !isValid || !candidateUiState.selectedSession;
+        candidateImportBtn.disabled = !isValid || !candidateUiState.selectedSession || !candidateRoomTargetSizeIsValid();
         candidateState.classList.toggle("is-ok", Boolean(candidateUiState.uploadId && isValid));
         candidateState.classList.toggle("is-error", Boolean(candidateUiState.uploadId && !isValid));
         candidateState.textContent = !candidateUiState.uploadId ? "等待上传" : isValid ? "校验通过" : "存在错误";
+      }
+
+      function candidateRoomTargetSizeIsValid() {
+        const targetSize = Number(roomTargetSizeInput.value);
+        return Number.isInteger(targetSize) && targetSize > 0;
       }
 
       async function parseCandidateFile(file) {
@@ -5464,7 +7155,7 @@
           );
         }
         if (diagnostics.droppedInvalid) {
-          candidateLog(`[场次选择] ${diagnostics.droppedInvalid} 个场次缺少 session_id 或 name，已忽略`, "warn");
+          candidateLog(`[场次选择] ${diagnostics.droppedInvalid} 个场次缺少考试口令或场次名称，已忽略`, "warn");
         }
         if (diagnostics.expiredCount && !diagnostics.unexpiredCount) {
           const samples = (diagnostics.expiredSamples || [])
@@ -5491,10 +7182,10 @@
       function renderSelectedSession() {
         const session = candidateUiState.selectedSession;
         selectedSession.innerHTML = session
-          ? `<div>当前选择场次：</div><div>场次名称：${escapeHtml(session.name)}</div><div>考试口令 / session_id：${escapeHtml(session.session_id)}</div><div>考试时间：${escapeHtml(session.start)} ~ ${escapeHtml(session.end)}</div>`
+          ? `<div>当前选择场次：</div><div>场次名称：${escapeHtml(session.name)}</div><div>考试口令：${escapeHtml(session.session_id)}</div><div>考试时间：${escapeHtml(session.start)} ~ ${escapeHtml(session.end)}</div>`
           : "<div>当前选择场次：未选择</div>";
         candidateImportBtn.disabled =
-          !session || !candidateUiState.candidates.length || candidateUiState.errors.length > 0;
+          !session || !candidateUiState.candidates.length || candidateUiState.errors.length > 0 || !candidateRoomTargetSizeIsValid();
       }
 
       async function loadCandidateTaskContext() {
@@ -5515,9 +7206,9 @@
           renderSelectedSession();
           rebuildCandidatesFromMapping();
           const selectionMessage = context.selectedSession
-            ? `，已选择 session_id=${context.selectedSession.session_id}`
+            ? `，已选择考试口令=${context.selectedSession.session_id}`
             : sessionId
-              ? "，目标 session_id 不属于该任务"
+              ? "，目标考试口令不属于该任务"
               : "";
           candidateLog(`[场次选择] 已带入目标考试场次，共 ${context.sessions.length} 个场次${selectionMessage}`, context.sessions.length ? "success" : "warn");
         } catch (error) {
@@ -5647,9 +7338,9 @@
         if (!session) {
           throw new Error("未选择场次，无法自动分班");
         }
-        const targetSize = Number(roomTargetSizeInput.value || 30);
+        const targetSize = Number(roomTargetSizeInput.value);
         if (!Number.isInteger(targetSize) || targetSize <= 0) {
-          throw new Error("每个班级人数必须是正整数");
+          throw new Error("请填写每个班级人数，且必须是正整数");
         }
 
         candidateUiState.rooms = [];
@@ -5659,7 +7350,7 @@
         renderMonitorAccountCard();
 
         candidateLog("[自动分班] 开始读取场次最新考生统计和班级状态");
-        candidateLog(`[自动分班] session_id = ${session.session_id}`);
+        candidateLog(`[自动分班] 考试口令 = ${session.session_id}`);
         const previewResponse = await fetch(`${runtime.apiBase}/api/sessions/${encodeURIComponent(session.session_id)}/rooms/preview`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -5951,20 +7642,37 @@
         addLog(`在线客服定时试跑：${summary.totalProfiles || 0} 个 Key，计划调整 ${summary.planned || 0} 个场次。`, summary.failedProfiles ? "warn" : "success");
       }
 
+      function inferProgressStageIndex(normalizedPercent, stageIndex) {
+        if (normalizedPercent >= 100) return steps.length;
+        if (Number.isFinite(Number(stageIndex)) && Number(stageIndex) >= 0) return Number(stageIndex);
+        if (normalizedPercent >= 88) return 4;
+        if (normalizedPercent >= 66) return 3;
+        if (normalizedPercent >= 46) return 2;
+        if (normalizedPercent >= 8) return 1;
+        return -1;
+      }
+
       function setProgress(percent, caption, stageIndex) {
         const normalizedPercent = Math.max(0, Math.min(100, Number(percent) || 0));
+        const effectiveStageIndex = inferProgressStageIndex(normalizedPercent, stageIndex);
         const circumference = 2 * Math.PI * 38;
         const progressOffset = circumference * (1 - normalizedPercent / 100);
         progressCircle.style.setProperty("--progress-circumference", String(circumference));
         progressCircle.style.setProperty("--progress-offset", String(progressOffset));
         progressCircle.setAttribute("aria-label", `配置进度 ${normalizedPercent}%`);
+        progressCircle.dataset.progressEmpty = normalizedPercent <= 0 ? "true" : "false";
+        progressCircle.dataset.progressTone = progressTone(normalizedPercent);
         progressNumber.textContent = `${normalizedPercent}%`;
         progressCaption.textContent = caption;
+        document.querySelectorAll(".workflow-connector").forEach((connector, index) => {
+          connector.classList.toggle("done", effectiveStageIndex > index);
+          connector.classList.toggle("active", effectiveStageIndex === index);
+        });
         steps.forEach((step, index) => {
-          step.classList.toggle("done", stageIndex >= 0 && index < stageIndex);
-          step.classList.toggle("active", index === stageIndex);
+          step.classList.toggle("done", effectiveStageIndex >= 0 && index < effectiveStageIndex);
+          step.classList.toggle("active", index === effectiveStageIndex);
           step.querySelector(".step-state").textContent =
-            stageIndex < 0 ? "等待" : index < stageIndex ? "完成" : index === stageIndex ? "进行中" : "等待";
+            effectiveStageIndex < 0 ? "等待中" : index < effectiveStageIndex ? "已完成" : index === effectiveStageIndex ? "进行中" : "等待中";
         });
       }
 
@@ -5989,7 +7697,7 @@
           captureState.textContent = "待截取";
           captureState.className = "tag amber";
           captureGrid.innerHTML =
-            '<div class="capture-empty">到达确认页后自动截取基本信息完整页，以及考试配置开考前、考试中、考试后三段完整页</div>';
+            '<div class="capture-empty">考试基本信息</div>';
           return;
         }
 
@@ -6219,6 +7927,7 @@
         metricStatus.textContent = "已校验";
         runBtn.disabled = false;
         renderPreview(data.previewRows);
+        setProgress(8, "需求单已读取，等待开始配置", 1);
         addLog(`已导入需求单：${fileName}`, "success");
         if (data.config) {
           addLog(`识别到考试名称：${data.config.examName || "空"}`, "success");
@@ -6252,6 +7961,427 @@
         uiState.taskId = data.taskId || "";
         uiState.imported = data;
         applyImportResult(file.name, data);
+      }
+
+      const fanweiRequirementRows = [
+        ["1", "考试名称"],
+        ["2", "考试日期时间"],
+        ["", "试考日期时间"],
+        ["3", "提前登录时间"],
+        ["4", "限制迟到时间"],
+        ["5", "考前等待提示"],
+        ["6", "试卷扣时规则"],
+        ["7", "考试地址"],
+        ["8", "欢迎语"],
+        ["9", "考试承诺书内容"],
+        ["10", "视频监控"],
+        ["11", "视频录制"],
+        ["12", "鹰眼监控"],
+        ["13", "考试类型"],
+        ["14", "登陆次数"],
+        ["15", "允许离开次数（网页考试时填写）"],
+        ["16", "人工判分"],
+        ["17", "科目信息"],
+      ];
+
+      const fanweiSelectOptions = {
+        "试卷扣时规则": ["不扣时", "迟到扣时", "迟到及离开扣时"],
+        "考试地址": ["统一考试地址", "独立考试地址"],
+        "视频监控": ["需要", "不需要"],
+        "视频录制": ["开启录制", "无需录制"],
+        "鹰眼监控": ["需要", "不需要"],
+        "考试类型": ["客户端考试", "网页考试"],
+        "人工判分": ["旧版判分（包含系统判分及悦评对接）", "新版"],
+      };
+
+      function foldedValue(value) {
+        const text = safeText(value || "");
+        if (text.length < 120) return text || "";
+        return `<details><summary>${safeText(text.slice(0, 90))}...</summary><div style="white-space:pre-wrap;margin-top:6px;">${text}</div></details>`;
+      }
+
+      function renderFanweiRequirementValue(item, value) {
+        const options = fanweiSelectOptions[item];
+        if (!options) {
+          return `<div class="fanwei-editable" contenteditable="true" data-fanwei-field="${safeText(item)}">${safeText(value || "")}</div>`;
+        }
+        const currentValue = String(value || options[0] || "");
+        const normalizedOptions = options.includes(currentValue) ? options : [currentValue, ...options];
+        return `<select class="fanwei-select" data-fanwei-field="${safeText(item)}">${normalizedOptions.map((option) => `<option value="${safeText(option)}"${option === currentValue ? " selected" : ""}>${safeText(option)}</option>`).join("")}</select>`;
+      }
+
+      function ensureFanweiRequirementFields() {
+        if (uiState.fanweiRead?.model) {
+          if (!uiState.fanweiRead.model.requirementFields) uiState.fanweiRead.model.requirementFields = {};
+          return uiState.fanweiRead.model.requirementFields;
+        }
+        if (!uiState.imported) uiState.imported = {};
+        if (!uiState.imported.fanwei) uiState.imported.fanwei = {};
+        if (!uiState.imported.fanwei.requirementFields) uiState.imported.fanwei.requirementFields = {};
+        return uiState.imported.fanwei.requirementFields;
+      }
+
+      function syncFanweiRequirementField(field, value) {
+        if (!field) return;
+        const fields = ensureFanweiRequirementFields();
+        fields[field] = String(value ?? "").trim();
+      }
+
+      function collectFanweiEditedRequirementFields() {
+        const fields = {
+          ...(uiState.fanweiRead?.model?.requirementFields || uiState.imported?.fanwei?.requirementFields || {}),
+        };
+        fanweiRequirementTable.querySelectorAll("[data-fanwei-field]").forEach((element) => {
+          const field = element.dataset.fanweiField || "";
+          if (!field) return;
+          fields[field] = element.tagName === "SELECT"
+            ? element.value
+            : String(element.innerText || element.textContent || "").trim();
+        });
+        return fields;
+      }
+
+      function renderFanweiModel(model = {}) {
+        const items = model.previewFields || [];
+        fanweiParsedFields.innerHTML = items.length
+          ? items.map((item) => `<div class="fanwei-field-card"><div class="fanwei-field-label">${safeText(item.label)}</div><div class="fanwei-field-value">${foldedValue(item.value)}</div><div class="fanwei-source-pill">${safeText(item.source || "")}</div></div>`).join("")
+          : `<div class="empty-state">暂无解析字段</div>`;
+        const values = model.requirementFields || {};
+        model.requirementFields = values;
+        fanweiRequirementTable.querySelector("tbody").innerHTML = fanweiRequirementRows.map(([seq, item]) => {
+          const value = item === "考前等待提示" || item === "考试承诺书内容"
+            ? "使用模板默认内容"
+            : values[item] || "";
+          const itemClass = [
+            item === "考前等待提示" || item === "考试承诺书内容" ? "fanwei-highlight" : "",
+            ["考试地址", "登陆次数", "人工判分"].includes(item) ? "fanwei-warn-item" : "",
+          ].filter(Boolean).join(" ");
+          return `<tr><td>${safeText(seq)}</td><td class="${itemClass}">${safeText(item)}</td><td>${renderFanweiRequirementValue(item, value)}</td></tr>`;
+        }).join("");
+      }
+
+      async function acceptFanweiImport(data, serialNo) {
+        renderFanweiModel(data.fanwei || {});
+        uiState.uploadId = data.uploadId;
+        uiState.taskId = data.taskId || "";
+        uiState.imported = data;
+        applyImportResult(data.filename || "泛微需求单.xlsx", data);
+        fanweiImportBtn.disabled = false;
+        fanweiImportState.textContent = `已生成需求单：${data.config?.examName || serialNo || "泛微单"}。请确认左右两侧内容，确认后点击“生成需求单并进入自动配置”。`;
+      }
+
+      async function enterFanweiAutoConfig(data, serialNo) {
+        await acceptFanweiImport(data, serialNo);
+        fanweiImportState.textContent = `已生成需求单：${data.config?.examName || serialNo || "泛微单"}，正在进入自动配置。`;
+        await router.navigate("/auto-config");
+      }
+
+      function buildFanweiReaderScript({ endpoint, token, serialNo }) {
+        return `(() => {
+  const endpoint = ${JSON.stringify(endpoint)};
+  const token = ${JSON.stringify(token)};
+  const serialNo = ${JSON.stringify(serialNo)};
+  const clean = (value) => String(value ?? "")
+    .replace(/\\u00a0/g, " ")
+    .replace(/[ \\t\\r\\n]+/g, " ")
+    .replace(/\\s+([；;])/g, "$1")
+    .trim();
+  const selectedLabels = (container) => Array.from(container.querySelectorAll("input:checked")).map((input) => {
+    const label = input.closest("label") || (input.id ? document.querySelector('label[for="' + input.id + '"]') : null) || input.parentElement;
+    return clean(label?.innerText || label?.textContent || input.value || input.getAttribute("title") || input.getAttribute("name"));
+  }).filter(Boolean);
+  const rows = Array.from(document.querySelectorAll("tr")).map((tr) => {
+    const elements = Array.from(tr.children);
+    const cells = elements.map((td) => clean(td.innerText || td.textContent));
+    return { tr, elements, cells };
+  }).filter((row) => row.cells.length);
+  const fieldKeys = [
+    "标题","申请人","申请人部门","申请日期","运控流水号","项目名称","项目编码","客户名称（仅供参考）","客户及项目属性","业务方向","系统类型","预估科次","预估收入","结算依据","考试服务范围","报名方式","是否需要报名网站","在线报名开始时间","是否需要ATA安排人工监考","是否需要ATA安排集中监考场地","ATA内容制题参与方式","内容来源","试题类型","科目数","试卷数","是否需要封闭制题","是否需要人工阅卷","阅卷安排","EPI测试","性格测试工具","考核内容是否仅性格测试","其他说明","附件","选项项目组长","选择项目经理","项目经理操作"
+  ];
+  const fieldAliases = {"流水号":"运控流水号","销售项目名称":"项目名称","本批次预估科次":"预估科次"};
+  const fields = {};
+  const setField = (key, value) => {
+    const cleaned = clean(value);
+    if (key && cleaned && cleaned !== key) fields[key] = cleaned;
+  };
+  rows.forEach(({ tr, cells }) => {
+    for (let i = 0; i < cells.length; i += 1) {
+      const rawKey = clean(cells[i]).replace(/[:：]$/, "");
+      const key = fieldAliases[rawKey] || rawKey;
+      if (!fieldKeys.includes(key)) continue;
+      const valueCell = tr.children[i + 1] || tr.children[i]?.nextElementSibling || tr;
+      const checked = selectedLabels(valueCell);
+      const next = cells[i + 1] || "";
+      setField(key, checked.length ? checked.join("；") : next);
+    }
+  });
+  if (serialNo && !fields["运控流水号"]) fields["运控流水号"] = serialNo;
+  const text = clean(document.body?.innerText || "");
+  const sceneRows = [];
+  const sceneMatch = text.match(/序号\\s+考试日期\\s+考试时间\\s+场次安排说明\\s+1\\s+(\\d{4}-\\d{1,2}-\\d{1,2})\\s+([^\\s]+)\\s+([0-9：:]+\\s*[-—–~至]\\s*[0-9：:]+)/);
+  if (sceneMatch) {
+    sceneRows.push({ "序号": "1", "考试日期": sceneMatch[1], "考试时间": sceneMatch[2], "场次安排说明": sceneMatch[3] });
+  }
+  const opaRows = [];
+  const opaPattern = /(\\d+)\\s+(SHL[-－]OPQ32)\\s+([^\\s]+(?:（[^）]+）)?)\\s+(.+?)\\s+(是|否)\\s+(\\d+)/g;
+  let match;
+  while ((match = opaPattern.exec(text)) && opaRows.length < 8) {
+    if (!/报告/.test(match[4])) continue;
+    opaRows.push({
+      "序号": match[1],
+      "OPA测评工具": match[2],
+      "常模类型": match[3],
+      "OPA报告类型": clean(match[4]),
+      "是否即测即出报告": match[5],
+      "时长（分钟）": match[6],
+    });
+  }
+  const payload = { token, serialNo, fanwei: { requestid: new URLSearchParams(location.hash.split("?")[1] || location.search).get("requestid") || "", fields, examSceneRows: sceneRows, opaRows } };
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", endpoint, true);
+  xhr.setRequestHeader("Content-Type", "application/json");
+  xhr.onload = () => {
+    let data = {};
+    try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
+    if (xhr.status < 200 || xhr.status >= 300) {
+      alert("泛微读取失败：" + (data.error || "提交失败"));
+      return;
+    }
+      alert("泛微读取完成，已发送到测试平台。请回到测试平台页面。");
+  };
+  xhr.onerror = () => alert("泛微读取失败：无法连接测试平台");
+  xhr.send(JSON.stringify(payload));
+})();`;
+      }
+
+      async function pollFanweiBridgeResult(token, serialNo) {
+        const startedAt = Date.now();
+        clearInterval(fanweiBridgePolling);
+        fanweiBridgePolling = setInterval(async () => {
+          try {
+            const response = await fetch(`${runtime.apiBase}/api/fanwei/bridge-result`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token }),
+            });
+            if (response.status === 202) {
+              if (Date.now() - startedAt > 2 * 60 * 1000) {
+                clearInterval(fanweiBridgePolling);
+                fanweiBridgePolling = null;
+                fanweiImportState.textContent = "还没有收到泛微读取结果；如果脚本已执行，请重新复制脚本再试。";
+              }
+              return;
+            }
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "读取泛微结果失败");
+            clearInterval(fanweiBridgePolling);
+            fanweiBridgePolling = null;
+            await acceptFanweiImport(data, serialNo);
+          } catch (error) {
+            clearInterval(fanweiBridgePolling);
+            fanweiBridgePolling = null;
+            fanweiImportState.textContent = error.message || String(error);
+          }
+        }, 1500);
+      }
+
+      async function fetchFanweiHelper(path, options = {}) {
+        const { timeoutMs = 3000, headers = {}, ...fetchOptions } = options;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetch(`${FANWEI_HELPER_BASE}${path}`, {
+            ...fetchOptions,
+            headers,
+            mode: "cors",
+            cache: "no-store",
+            credentials: "omit",
+            signal: controller.signal,
+          });
+          const responseText = await response.text();
+          let data = {};
+          try {
+            data = responseText ? JSON.parse(responseText) : {};
+          } catch {
+            throw new Error("本机助手返回的数据格式不正确，请重新启动本机助手后重试。");
+          }
+          if (!response.ok) {
+            const error = new Error(data.error?.message || data.message || "本机助手请求失败。");
+            error.code = data.error?.code || data.code || "";
+            throw error;
+          }
+          return data;
+        } catch (error) {
+          if (error?.name === "AbortError") {
+            throw new Error("连接本机助手超时，请确认助手已启动后重试。");
+          }
+          throw error;
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      function resetFanweiReadState() {
+        uiState.fanweiRead = null;
+        fanweiImportBtn.disabled = true;
+        fanweiParsedFields.innerHTML = `<div class="empty-state">等待读取泛微单</div>`;
+        fanweiRequirementTable.querySelector("tbody").innerHTML = `<tr><td colspan="3">等待生成</td></tr>`;
+      }
+
+      function assertCurrentFanweiSerial(serialNo) {
+        if ((fanweiSerialInput.value || "").trim() !== serialNo) {
+          throw new Error("流水号已变化，请重新读取泛微信息。");
+        }
+      }
+
+      async function copyFanweiReaderScript() {
+        const serialNo = (fanweiSerialInput.value || "").trim();
+        resetFanweiReadState();
+        if (!serialNo) throw new Error("请先填写泛微流水号。");
+        fanweiCopyScriptBtn.disabled = true;
+        fanweiImportState.textContent = "正在自动读取已打开的泛微主表页...";
+        try {
+          let data;
+          if (fanweiReadTransport === "server") {
+            const response = await fetch(`${runtime.apiBase}/api/fanwei/local-read`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ serialNo }),
+            });
+            data = await response.json();
+            if (!response.ok) throw new Error(data.error || "本机 Chrome 读取失败。");
+          } else {
+            data = await fetchFanweiHelper("/fanwei/read", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ serialNo }),
+              timeoutMs: 20000,
+            });
+          }
+          if (
+            data.ok !== true ||
+            !data.data ||
+            typeof data.data !== "object" ||
+            !data.data.fields ||
+            typeof data.data.fields !== "object" ||
+            !Object.keys(data.data.fields).length
+          ) {
+            throw new Error("本机助手没有返回可用的泛微需求单数据。");
+          }
+          const returnedSerialNo = String(data.data.fields["运控流水号"] || "").trim();
+          if (returnedSerialNo !== serialNo) {
+            throw new Error(`本机助手返回流水号 ${returnedSerialNo || "为空"}，与输入流水号 ${serialNo} 不一致。`);
+          }
+          assertCurrentFanweiSerial(serialNo);
+          const raw = data.data;
+          const previewResponse = await fetch(`${runtime.apiBase}/api/fanwei/requirement-preview`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ serialNo, fanwei: raw }),
+          });
+          const previewData = await previewResponse.json();
+          if (!previewResponse.ok) throw new Error(previewData.error || "泛微需求单预览失败");
+          assertCurrentFanweiSerial(serialNo);
+          const model = previewData.fanwei;
+          if (!model || typeof model !== "object") throw new Error("共享服务没有返回可用的泛微预览。");
+          uiState.fanweiRead = { serialNo, raw, model };
+          renderFanweiModel(model);
+          fanweiImportBtn.disabled = false;
+          fanweiImportState.textContent = `已读取泛微流水号 ${serialNo}。请核对内容后点击“生成需求单并进入自动配置”。`;
+        } catch (error) {
+          resetFanweiReadState();
+          fanweiImportState.textContent = error.message || "自动读取未完成，请确认已打开对应泛微主表页。";
+        } finally {
+          fanweiCopyScriptBtn.disabled = false;
+        }
+      }
+
+      async function loadFanweiAutoReadStatus() {
+        resetFanweiReadState();
+        fanweiReadTransport = "helper";
+        fanweiInstallHelperBtn.hidden = true;
+        fanweiCopyScriptBtn.disabled = true;
+        fanweiImportState.textContent = "正在检查本机 Chrome 自动读取环境...";
+        try {
+          const health = await fetchFanweiHelper("/health");
+          if (!health.available) {
+            fanweiImportState.textContent = "当前系统暂不支持本机泛微助手，请联系管理员。";
+            return;
+          }
+
+          let status = health;
+          if (!health.chromeConnected) {
+            try {
+              status = await fetchFanweiHelper("/chrome/ensure", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+                timeoutMs: 7000,
+              });
+            } catch (error) {
+              if (error.code === "chrome_not_found") {
+                fanweiImportState.textContent = "未找到本机 Chrome，请先安装 Google Chrome 后重试。";
+              } else {
+                fanweiImportState.textContent = error.message || "专用 Chrome 启动失败，请重试。";
+              }
+              return;
+            }
+          }
+
+          fanweiCopyScriptBtn.disabled = false;
+          if (status.launchedChrome && !status.fanweiTabFound) {
+            fanweiImportState.textContent = "已自动打开专用 Chrome 窗口。首次使用请在新窗口登录泛微并打开对应需求单页面，再回到这里点击读取。";
+          } else if (!status.fanweiTabFound) {
+            fanweiImportState.textContent = "专用 Chrome 已运行。请在该窗口登录泛微并打开对应需求单页面，再回到这里点击读取。";
+          } else {
+            fanweiImportState.textContent = "已检测到泛微需求单页面，可以按流水号读取。";
+          }
+        } catch (error) {
+          if (IS_LOOPBACK_CONSOLE) {
+            try {
+              const response = await fetch(`${runtime.apiBase}/api/fanwei/auto-read/status`, { cache: "no-store" });
+              const status = await response.json();
+              if (response.ok && status.available) {
+                fanweiReadTransport = "server";
+                fanweiCopyScriptBtn.disabled = false;
+                fanweiInstallHelperBtn.hidden = true;
+                fanweiImportState.textContent = status.fanweiTabFound
+                  ? "已检测到本机泛微需求单页面，可以按流水号读取。"
+                  : "已启用本机兼容读取。请在专用 Chrome 中登录泛微并打开对应需求单页面。";
+                return;
+              }
+              fanweiImportState.textContent = status.message || "本机 Chrome 自动读取环境不可用。";
+            } catch (fallbackError) {
+              fanweiImportState.textContent = fallbackError.message || "本机 Chrome 自动读取环境不可用。";
+            }
+            return;
+          }
+          fanweiCopyScriptBtn.disabled = true;
+          fanweiInstallHelperBtn.hidden = false;
+          fanweiImportState.textContent = "本机助手未安装或未启动。请点击“安装本机助手”，安装后刷新页面。";
+        }
+      }
+
+      async function createFanweiRequirementImport() {
+        const serialNo = (fanweiSerialInput.value || "").trim();
+        if (!serialNo) throw new Error("请填写泛微流水号。");
+        if (!uiState.fanweiRead || uiState.fanweiRead.serialNo !== serialNo) {
+          throw new Error("请先读取并核对当前流水号对应的泛微需求单。");
+        }
+        fanweiImportState.textContent = "正在生成泛微需求单...";
+        fanweiImportBtn.disabled = true;
+        const response = await fetch(`${runtime.apiBase}/api/fanwei/requirement-import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            serialNo,
+            fanwei: uiState.fanweiRead.raw,
+            requirementFields: collectFanweiEditedRequirementFields(),
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "泛微需求单生成失败");
+        await enterFanweiAutoConfig(data, serialNo);
       }
 
       async function loadSettings() {
@@ -6433,7 +8563,7 @@
         renderMonitorAccountCard();
         if (candidateUiState.selectedSession) {
           candidateLog(`[场次选择] 已选择场次：${candidateUiState.selectedSession.name}`, "success");
-          candidateLog(`[场次选择] session_id：${candidateUiState.selectedSession.session_id}`, "success");
+          candidateLog(`[场次选择] 考试口令：${candidateUiState.selectedSession.session_id}`, "success");
         }
       });
 
@@ -6449,11 +8579,15 @@
       roomTargetSizeInput.addEventListener("wheel", (event) => {
         if (document.activeElement !== roomTargetSizeInput) return;
         event.preventDefault();
-        const current = Number(roomTargetSizeInput.value || 30);
+        const current = Number(roomTargetSizeInput.value || 0);
         const next = Math.max(1, current + (event.deltaY < 0 ? 1 : -1));
         roomTargetSizeInput.value = String(next);
         roomTargetSizeInput.dispatchEvent(new Event("input", { bubbles: true }));
         roomTargetSizeInput.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      roomTargetSizeInput.addEventListener("input", () => {
+        renderCandidateResult();
+        renderSelectedSession();
       });
 
       candidateImportBtn.addEventListener("click", async () => {
@@ -6470,6 +8604,7 @@
         LoginPage({ root: loginView }),
         ProjectListPage({ root: projectManagementView, loadProjects }),
         ProjectDetailPage({ root: projectDetailView, loadProject: loadProjectDetail }),
+        staticPage("fanwei-test", fanweiTestView, loadFanweiAutoReadStatus),
         AutoConfigPage({ documentObject: document }),
         ExamListPage({ root: examListView, loadExams }),
         ExamDetailPage({ root: taskDetailView, loadExam: openTaskDetail }),
@@ -6509,6 +8644,11 @@
       authController = AuthController({ router });
 
       loginForm.addEventListener("submit", (event) => authController.login(event));
+      sideStatusToggle.addEventListener("click", () => {
+        const expanded = !sideStatusCard.classList.contains("expanded");
+        sideStatusCard.classList.toggle("expanded", expanded);
+        sideStatusToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      });
       logoutBtn.addEventListener("click", () => authController.logout());
       candidateNavBtn.addEventListener("click", () => router.navigate("/candidate-import"));
       autoNavItem.addEventListener("click", () => router.navigate("/auto-config"));
@@ -6583,7 +8723,38 @@
       backToExamsBtn.addEventListener("click", () => router.navigate("/exams"));
       backToProjectsBtn.addEventListener("click", () => router.navigate("/projects"));
       backToRequirementsBtn.addEventListener("click", () => router.navigate("/requirements"));
-      newProjectBtn.addEventListener("click", () => router.navigate("/auto-config"));
+      newProjectBtn.addEventListener("click", () => router.navigate("/fanwei-test"));
+      backFromFanweiBtn?.addEventListener("click", () => {
+        clearInterval(fanweiBridgePolling);
+        fanweiBridgePolling = null;
+        router.navigate("/projects");
+      });
+      fanweiCopyScriptBtn.addEventListener("click", () => copyFanweiReaderScript().catch((error) => {
+        fanweiImportState.textContent = error.message || String(error);
+      }));
+      fanweiInstallHelperBtn.addEventListener("click", () => {
+        const platformName = String(navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+        const platform = platformName.includes("win") ? "windows" : "macos";
+        window.location.assign(`${runtime.apiBase}/api/fanwei/helper-installer?platform=${platform}`);
+      });
+      fanweiSerialInput.addEventListener("input", () => {
+        resetFanweiReadState();
+        fanweiImportState.textContent = "流水号已变化，请重新读取泛微信息。";
+      });
+      fanweiRequirementTable.addEventListener("input", (event) => {
+        const target = event.target.closest("[data-fanwei-field]");
+        if (!target) return;
+        syncFanweiRequirementField(target.dataset.fanweiField, target.innerText || target.textContent || "");
+      });
+      fanweiRequirementTable.addEventListener("change", (event) => {
+        const target = event.target.closest("[data-fanwei-field]");
+        if (!target) return;
+        syncFanweiRequirementField(target.dataset.fanweiField, target.tagName === "SELECT" ? target.value : target.innerText || target.textContent || "");
+      });
+      fanweiImportBtn.addEventListener("click", () => createFanweiRequirementImport().catch((error) => {
+        fanweiImportBtn.disabled = !uiState.fanweiRead || uiState.fanweiRead.serialNo !== (fanweiSerialInput.value || "").trim();
+        fanweiImportState.textContent = error.message || String(error);
+      }));
       projectAutoConfigBtn.addEventListener("click", () => router.navigate(`/auto-config?projectId=${encodeURIComponent(taskViewState.currentProjectId)}`));
       projectSearchInput.addEventListener("input", renderProjectList);
       projectStatusFilter.addEventListener("change", renderProjectList);
@@ -6725,15 +8896,83 @@
       examListRows.addEventListener("click", (event) => {
         const button = event.target.closest(".task-detail-btn");
         if (button) return router.navigate(`/exams/${encodeURIComponent(button.dataset.taskId)}`);
-        const action = event.target.closest(".exam-row-action")?.dataset.action;
-        if (action === "refresh") return loadExams();
-        if (action === "archive") return alert("归档操作尚未接入持久化 API。");
       });
       taskSessionCards.addEventListener("click", (event) => {
+        const changeButton = event.target.closest("[data-session-change-task-id]");
+        if (changeButton && !changeButton.disabled) {
+          openSessionChange(changeButton.dataset.sessionChangeTaskId, changeButton.dataset.sessionChangeSessionId)
+            .catch((error) => {
+              sessionChangePanel.hidden = false;
+              const detail = formatApiErrorDetail(error) || error.message || String(error);
+              setSessionChangeAlert("读取易考场次详情失败", "warn", detail);
+              sessionChangeState.textContent = "打开场次失败，请查看上方错误信息。";
+            });
+          return;
+        }
         const button = event.target.closest("[data-candidate-task-id]");
         if (!button || button.disabled) return;
         router.navigate(`/candidate-import?taskId=${encodeURIComponent(button.dataset.candidateTaskId)}&sessionId=${encodeURIComponent(button.dataset.sessionId)}`);
       });
+      sessionChangeCancelBtn.addEventListener("click", () => {
+        sessionChangePanel.hidden = true;
+        closeSessionTimePicker();
+      });
+      [sessionChangeName, sessionChangeEarly, sessionChangeLater, sessionChangeMessage, sessionChangeNotice].forEach((input) => {
+        input.addEventListener("input", renderSessionChangeDiff);
+      });
+      document.querySelectorAll("[data-session-time-input]").forEach((control) => {
+        control.addEventListener("click", () => openSessionTimePicker(control.dataset.sessionTimeInput));
+      });
+      sessionTimePicker.addEventListener("click", (event) => {
+        const month = event.target.closest("[data-session-picker-month]");
+        if (month) {
+          const delta = Number(month.dataset.sessionPickerMonth || 0);
+          const state = taskViewState.sessionTimePicker;
+          const next = new Date(state.viewYear, state.viewMonth - 1 + delta, 1);
+          taskViewState.sessionTimePicker.viewYear = next.getFullYear();
+          taskViewState.sessionTimePicker.viewMonth = next.getMonth() + 1;
+          renderSessionTimePicker();
+          return;
+        }
+        const day = event.target.closest("[data-session-picker-day]");
+        if (day?.dataset.sessionPickerDay) {
+          setPickerValue({
+            year: taskViewState.sessionTimePicker.viewYear,
+            month: taskViewState.sessionTimePicker.viewMonth,
+            day: Number(day.dataset.sessionPickerDay),
+          });
+          return;
+        }
+        const hour = event.target.closest("[data-session-picker-hour]");
+        if (hour) return setPickerValue({ hour: Number(hour.dataset.sessionPickerHour) });
+        const minute = event.target.closest("[data-session-picker-minute]");
+        if (minute) return setPickerValue({ minute: Number(minute.dataset.sessionPickerMinute) });
+        if (event.target.closest("[data-session-picker-now]")) {
+          const now = new Date();
+          taskViewState.sessionTimePicker.value = {
+            year: now.getFullYear(),
+            month: now.getMonth() + 1,
+            day: now.getDate(),
+            hour: now.getHours(),
+            minute: now.getMinutes(),
+          };
+          taskViewState.sessionTimePicker.viewYear = now.getFullYear();
+          taskViewState.sessionTimePicker.viewMonth = now.getMonth() + 1;
+          renderSessionTimePicker();
+          return;
+        }
+        if (event.target.closest("[data-session-picker-confirm]")) confirmSessionTimePicker();
+      });
+      sessionTimePicker.addEventListener("wheel", handleSessionTimeWheel, { passive: false });
+      window.addEventListener("scroll", syncSessionTimePickerPosition, true);
+      window.addEventListener("resize", syncSessionTimePickerPosition);
+      sessionChangeConfirm.addEventListener("change", renderSessionChangeDiff);
+      sessionChangeSubmitBtn.addEventListener("click", () => submitSessionChange().catch((error) => {
+        const detail = formatApiErrorDetail(error);
+        if (sessionChangeAlert.hidden) setSessionChangeAlert(error.message || String(error), "warn", detail);
+        sessionChangeState.textContent = detail || error.message || String(error);
+        renderSessionChangeDiff();
+      }));
       examRefreshBtn.addEventListener("click", () => taskViewState.currentTaskId && openTaskDetail(taskViewState.currentTaskId));
       examContinueBtn.addEventListener("click", async () => {
         if (!taskViewState.currentTaskId) return;
@@ -6746,6 +8985,17 @@
         }
       });
       taskStepGrid.addEventListener("click", async (event) => {
+        const sessionChangeRecordToggle = event.target.closest("[data-session-change-record-toggle]");
+        if (sessionChangeRecordToggle) {
+          event.stopPropagation();
+          const list = sessionChangeRecordToggle.previousElementSibling;
+          if (!list?.matches("[data-session-change-record-list]")) return;
+          const expanded = sessionChangeRecordToggle.getAttribute("aria-expanded") === "true";
+          list.classList.toggle("is-collapsed", expanded);
+          sessionChangeRecordToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+          sessionChangeRecordToggle.textContent = expanded ? "展开全部" : "收起";
+          return;
+        }
         const smsCandidateDownload = event.target.closest("[data-download-sms-candidates]");
         if (smsCandidateDownload) {
           event.stopPropagation();
@@ -7034,7 +9284,7 @@
         candidateUiState.monitorAccounts = [];
         candidateUiState.logs = [];
         candidateFileInput.value = "";
-        roomTargetSizeInput.value = "30";
+        roomTargetSizeInput.value = "0";
         candidateDropZone.classList.remove("is-ready");
         candidateDropZone.classList.remove("has-upload");
         candidateDropTitle.textContent = "上传客户原始名单";

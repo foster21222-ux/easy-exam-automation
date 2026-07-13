@@ -123,6 +123,54 @@ def normalize_requirement(payload):
     return result
 
 
+def is_present_value(value):
+    return value is not None and value != "" and value != []
+
+
+def merge_requirement_fields(base, updates):
+    merged = dict(base or {})
+    for key, value in (updates or {}).items():
+        if is_present_value(value):
+            if key == "subjects":
+                subjects = normalize_subjects(merged.get("subjects"))
+                for subject in normalize_subjects(value):
+                    if subject not in subjects:
+                        subjects.append(subject)
+                merged[key] = subjects
+            else:
+                merged[key] = value
+    return merged
+
+
+def merge_staff_requirement_fields(base, updates):
+    merged = dict(base or {})
+    edited_fields = []
+    for key, value in (updates or {}).items():
+        if is_present_value(value):
+            merged[key] = value
+            edited_fields.append(key)
+    return merged, edited_fields
+
+
+def change_request_fields(changes):
+    fields = set()
+    if not isinstance(changes, dict):
+        return fields
+    for record in changes.get("changeRecords") or []:
+        record_changes = record.get("changes") if isinstance(record, dict) else {}
+        if not isinstance(record_changes, dict):
+            continue
+        for key in record_changes:
+            fields.add("subjects" if key == "removedSubjects" else key)
+    latest_requirement = changes.get("latestRequirement")
+    if isinstance(latest_requirement, dict):
+        fields.update(latest_requirement.keys())
+    for key in changes:
+        if key not in {"changeRecords", "latestRequirement", "attachments"}:
+            fields.add(key)
+    return fields
+
+
 def validate_requirement(requirement):
     missing = []
     errors = []
@@ -207,30 +255,36 @@ class RequirementStore:
     def create_or_update_requirement(self, customer=None, requirement=None, message="", request_id=None, source="dify", analysis_candidates=None):
         request_id = request_id or str(uuid.uuid4())
         now = utc_now()
-        normalized = normalize_requirement(requirement or {})
-        missing, errors = validate_requirement(normalized)
-        status = "collecting" if missing or errors else "pending_internal_review"
-        title = str(normalized.get("exam_name") or "未命名考试需求")
+        incoming = normalize_requirement(requirement or {})
         customer_json = json.dumps(customer or {}, ensure_ascii=False)
         with self.connect() as db:
             current = db.execute(
                 "SELECT * FROM requirement_requests WHERE request_id=?", (request_id,)
             ).fetchone()
             if not current:
-                db.execute(
-                    """INSERT INTO requirement_requests
-                    (request_id, title, status, customer_json, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                    (request_id, title, status, customer_json, now, now),
-                )
+                normalized = incoming
+                customer_payload = customer_json
                 next_version = 1
             else:
                 customer_payload = customer_json if customer is not None else current["customer_json"]
                 latest = db.execute(
-                    "SELECT MAX(version) AS version FROM requirement_versions WHERE request_id=?",
+                    "SELECT * FROM requirement_versions WHERE request_id=? ORDER BY version DESC LIMIT 1",
                     (request_id,),
                 ).fetchone()
-                next_version = int(latest["version"] or 0) + 1
+                base_requirement = loads(latest["requirement_json"], {}) if latest else {}
+                normalized = normalize_requirement(merge_requirement_fields(base_requirement, incoming))
+                next_version = int(latest["version"] or 0) + 1 if latest else 1
+            missing, errors = validate_requirement(normalized)
+            status = "collecting" if missing or errors else "pending_internal_review"
+            title = str(normalized.get("exam_name") or "未命名考试需求")
+            if not current:
+                db.execute(
+                    """INSERT INTO requirement_requests
+                    (request_id, title, status, customer_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (request_id, title, status, customer_payload, now, now),
+                )
+            else:
                 db.execute(
                     """UPDATE requirement_requests
                     SET title=?, status=?, customer_json=?, updated_at=? WHERE request_id=?""",
@@ -389,7 +443,76 @@ class RequirementStore:
                     })
         return self.get_requirement(request_id)
 
-    def accept_change_request(self, request_id, change_id, reviewer="", message=""):
+    def staff_edit_requirement(self, request_id, requirement=None, reviewer="", message=""):
+        now = utc_now()
+        raw_requirement = dict(requirement or {})
+        incoming = normalize_requirement(raw_requirement)
+        for default_key in ["watermark_enabled", "copy_forbidden"]:
+            if default_key not in raw_requirement:
+                incoming.pop(default_key, None)
+        with self.connect() as db:
+            request = self._require_request(db, request_id)
+            latest = db.execute(
+                "SELECT * FROM requirement_versions WHERE request_id=? ORDER BY version DESC LIMIT 1",
+                (request_id,),
+            ).fetchone()
+            base_requirement = loads(latest["requirement_json"], {}) if latest else {}
+            next_requirement, edited_fields = merge_staff_requirement_fields(base_requirement, incoming)
+            if not edited_fields:
+                raise ValueError("No requirement fields to edit")
+            normalized = normalize_requirement(next_requirement)
+            missing, errors = validate_requirement(normalized)
+            next_version_row = db.execute(
+                "SELECT MAX(version) AS version FROM requirement_versions WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            next_version = int(next_version_row["version"] or 0) + 1
+            status = "collecting" if missing or errors else "pending_internal_review"
+            title = str(normalized.get("exam_name") or request["title"] or "未命名考试需求")
+            db.execute(
+                """INSERT INTO requirement_versions
+                (request_id, version, source, message, requirement_json, missing_fields_json,
+                 validation_errors_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    request_id,
+                    next_version,
+                    "staff_manual_edit",
+                    message or "",
+                    json.dumps(normalized, ensure_ascii=False),
+                    json.dumps(missing, ensure_ascii=False),
+                    json.dumps(errors, ensure_ascii=False),
+                    now,
+                ),
+            )
+            db.execute(
+                "UPDATE requirement_requests SET title=?, status=?, updated_at=? WHERE request_id=?",
+                (title, status, now, request_id),
+            )
+            self._record_event(db, request_id, "requirement_staff_edited", reviewer or "staff", {
+                "version": next_version,
+                "message": message or "",
+                "fields": sorted(set(edited_fields)),
+            })
+        return self.get_requirement(request_id)
+
+    def _manual_edit_conflict_fields(self, db, request_id, change_row, changes):
+        fields = change_request_fields(changes)
+        if not fields:
+            return []
+        rows = db.execute(
+            """SELECT * FROM requirement_events
+            WHERE request_id=? AND event_type='requirement_staff_edited' AND created_at >= ?""",
+            (request_id, change_row["created_at"]),
+        ).fetchall()
+        conflicts = set()
+        for row in rows:
+            payload = loads(row["payload_json"], {})
+            edited = set(payload.get("fields") or [])
+            conflicts.update(fields.intersection(edited))
+        return sorted(conflicts)
+
+    def accept_change_request(self, request_id, change_id, reviewer="", message="", override_manual_edit=False):
         now = utc_now()
         with self.connect() as db:
             request = self._require_request(db, request_id)
@@ -397,6 +520,9 @@ class RequirementStore:
             if change["status"] != "pending_internal_review":
                 raise ValueError("Change request is not pending internal review")
             changes = loads(change["changes_json"], {})
+            conflict_fields = self._manual_edit_conflict_fields(db, request_id, change, changes)
+            if conflict_fields and not override_manual_edit:
+                raise ValueError("人工修订冲突：%s。请先确认是否覆盖人工修订。" % "、".join(conflict_fields))
             latest = db.execute(
                 "SELECT * FROM requirement_versions WHERE request_id=? ORDER BY version DESC LIMIT 1",
                 (request_id,),
@@ -447,6 +573,7 @@ class RequirementStore:
                 "changeId": change_id,
                 "version": next_version,
                 "message": message or "",
+                "overrodeManualEditFields": conflict_fields if override_manual_edit else [],
             })
         return self.get_requirement(request_id)
 
@@ -544,14 +671,41 @@ class RequirementStore:
         return row
 
     def _requirement_from_change(self, base_requirement, changes):
-        if isinstance(changes, dict) and isinstance(changes.get("latestRequirement"), dict):
-            return changes["latestRequirement"]
         merged = dict(base_requirement or {})
         if isinstance(changes, dict):
-            for key, value in changes.items():
-                if key in {"changeRecords", "attachments"}:
+            for record in changes.get("changeRecords") or []:
+                record_changes = record.get("changes") if isinstance(record, dict) else {}
+                if not isinstance(record_changes, dict):
                     continue
-                merged[key] = value
+                if "subjects" in record_changes:
+                    base_subjects = normalize_subjects(merged.get("subjects"))
+                    removed = set(normalize_subjects(record_changes.get("removedSubjects")))
+                    additions = normalize_subjects(record_changes.get("subjects"))
+                    next_subjects = [subject for subject in base_subjects if subject not in removed]
+                    for subject in additions:
+                        if subject not in next_subjects:
+                            next_subjects.append(subject)
+                    merged["subjects"] = next_subjects
+                for key, value in record_changes.items():
+                    if key in {"subjects", "removedSubjects"}:
+                        continue
+                    if is_present_value(value):
+                        merged[key] = value
+            latest_requirement = changes.get("latestRequirement")
+            if isinstance(latest_requirement, dict):
+                for key, value in latest_requirement.items():
+                    if key == "subjects" and any(
+                        isinstance(record, dict) and "subjects" in (record.get("changes") or {})
+                        for record in (changes.get("changeRecords") or [])
+                    ):
+                        continue
+                    if is_present_value(value):
+                        merged[key] = value
+            for key, value in changes.items():
+                if key in {"changeRecords", "latestRequirement", "attachments"}:
+                    continue
+                if is_present_value(value):
+                    merged[key] = value
         return merged
 
     def _record_event(self, db, request_id, event_type, actor, payload):
@@ -654,6 +808,14 @@ def main():
         result = store.accept_change_request(
             payload.get("requestId") or payload.get("request_id"),
             payload.get("changeId") or payload.get("change_id"),
+            payload.get("reviewer") or "",
+            payload.get("message") or "",
+            bool(payload.get("overrideManualEdit") or payload.get("override_manual_edit")),
+        )
+    elif action == "staff_edit":
+        result = store.staff_edit_requirement(
+            payload.get("requestId") or payload.get("request_id"),
+            payload.get("requirement") or {},
             payload.get("reviewer") or "",
             payload.get("message") or "",
         )

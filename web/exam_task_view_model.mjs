@@ -28,6 +28,53 @@ function resolveTaskProgress(sessions) {
   return session ? Number(session.progress) : 0;
 }
 
+function textValue(value) {
+  return String(value ?? "").trim();
+}
+
+export function unifiedExamCodeFromUrl(value) {
+  const match = textValue(value).match(/\/exam\/(\d+)\/uniform\/login\/?/i);
+  return match ? `E${match[1]}` : "";
+}
+
+export function isUnifiedExamAddress(taskOrSession = {}) {
+  const config = taskOrSession.config || {};
+  const addressText = textValue(config.examAddress || config.examUrlType);
+  if (addressText.includes("独立")) return false;
+  if (addressText.includes("统一")) return true;
+  if (config.unifiedExamAddress !== undefined) return Boolean(config.unifiedExamAddress);
+  return Boolean(
+    unifiedExamCodeFromUrl(taskOrSession.url) ||
+      unifiedExamCodeFromUrl(config.examUrl) ||
+      config.unifiedExamCode ||
+      config.unifiedExamPassword ||
+      taskOrSession.unified_exam_code ||
+      taskOrSession.unifiedExamCode,
+  );
+}
+
+export function resolveUnifiedExamCode(taskOrSession = {}) {
+  const config = taskOrSession.config || {};
+  const urlCode = unifiedExamCodeFromUrl(taskOrSession.url) || unifiedExamCodeFromUrl(config.examUrl);
+  if (urlCode) return urlCode;
+
+  const explicitUnifiedCode = textValue(
+    config.unifiedExamCode ||
+      config.unifiedExamPassword ||
+      taskOrSession.unified_exam_code ||
+      taskOrSession.unifiedExamCode,
+  );
+  if (explicitUnifiedCode) return explicitUnifiedCode;
+  if (!isUnifiedExamAddress(taskOrSession)) return "";
+
+  return textValue(
+      config.examPassword ||
+      config.examCode ||
+      taskOrSession.exam_code ||
+      taskOrSession.examCode,
+  );
+}
+
 export function isExamTaskEnded(task, now = new Date()) {
   const formalSession = task?.formalSession || (task?.sessions || []).find((session) => session.sessionType === "formal") || null;
   if (!formalSession) return false;
@@ -46,10 +93,13 @@ export function aggregateExamSessions(sessions = []) {
         taskId: session.taskId,
         projectName: session.projectName || session.name || "未命名考试",
         sourceAccount: session.sourceAccount || "",
+        config: session.config || {},
         sessions: [],
       });
     }
-    tasks.get(session.taskId).sessions.push(session);
+    const task = tasks.get(session.taskId);
+    if (!Object.keys(task.config || {}).length && session.config) task.config = session.config;
+    task.sessions.push(session);
   }
   return [...tasks.values()]
     .map((task, index) => {
@@ -60,6 +110,7 @@ export function aggregateExamSessions(sessions = []) {
         trialSession: task.sessions.find((session) => session.sessionType === "trial") || null,
         status: aggregateStatus(task.sessions),
         progress: resolveTaskProgress(task.sessions),
+        unifiedExamCode: resolveUnifiedExamCode(task) || task.sessions.map(resolveUnifiedExamCode).find(Boolean) || "",
         sortIndex: index,
       };
     })

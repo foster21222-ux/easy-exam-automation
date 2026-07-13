@@ -25,6 +25,28 @@ VALID_STATUSES = {
     "pending", "running", "success", "failed", "waiting_manual", "skipped"
 }
 STEP_ORDER = {step_key: index for index, (step_key, _) in enumerate(STEP_DEFS)}
+CORE_PROGRESS_STEPS = {
+    "requirement_parse",
+    "formal_session_create",
+    "trial_session_create",
+    "trial_paper_bind",
+    "course_create",
+    "paper_bind",
+    "trial_candidate_import",
+    "formal_candidate_import",
+    "sessions_auto_rooms",
+}
+DISPLAY_STAGE_NAMES = {
+    "requirement_parse": "需求单解析",
+    "formal_session_create": "正式场次创建",
+    "trial_session_create": "试考场次创建",
+    "course_create": "科目创建",
+    "trial_paper_bind": "试考试卷绑定",
+    "paper_bind": "正式场次绑定科目",
+    "trial_candidate_import": "试考考生导入 & 自动分班",
+    "formal_candidate_import": "正式考试考生导入 & 自动分班",
+    "sessions_auto_rooms": "试考考生导入 & 自动分班",
+}
 
 
 def utc_now():
@@ -382,23 +404,39 @@ class TaskStore:
             "SELECT step_key, step_name, status FROM exam_task_steps WHERE task_id=?", (task_id,)
         ).fetchall()
         rows = sorted(rows, key=lambda row: STEP_ORDER.get(row["step_key"], len(STEP_ORDER)))
-        effective = [row for row in rows if row["status"] != "skipped"]
-        completed = sum(1 for row in effective if row["status"] == "success")
-        progress = round((completed / len(effective) * 100) if effective else 100, 1)
-        if any(row["status"] == "failed" for row in rows):
+        core_rows = [row for row in rows if row["step_key"] in CORE_PROGRESS_STEPS and row["status"] != "skipped"]
+        core_completed = sum(1 for row in core_rows if row["status"] == "success")
+        progress = round((core_completed / len(core_rows) * 100) if core_rows else 100, 1)
+        if any(row["status"] == "failed" for row in core_rows):
             status = "failed"
-        elif effective and completed == len(effective):
+        elif core_rows and core_completed == len(core_rows):
             status = "success"
-        elif any(row["status"] == "running" for row in rows):
+        elif any(row["status"] == "running" for row in core_rows):
             status = "running"
-        elif any(row["status"] == "waiting_manual" for row in rows):
+        elif any(row["status"] == "waiting_manual" for row in core_rows):
             status = "waiting_manual"
         else:
             status = "pending"
-        active = next((row["step_name"] for row in rows if row["status"] in {"running", "waiting_manual", "failed"}), "")
+        active = next(
+            (
+                DISPLAY_STAGE_NAMES.get(row["step_key"], row["step_name"])
+                for row in core_rows
+                if row["status"] in {"running", "waiting_manual", "failed"}
+            ),
+            "",
+        )
+        if not active and status != "success":
+            active = next(
+                (
+                    DISPLAY_STAGE_NAMES.get(row["step_key"], row["step_name"])
+                    for row in core_rows
+                    if row["status"] == "pending"
+                ),
+                "",
+            )
         db.execute(
             "UPDATE exam_tasks SET status=?, current_stage=?, progress=?, updated_at=? WHERE task_id=?",
-            (status, active or "等待执行", progress, utc_now(), task_id),
+            (status, active or ("已完成" if status == "success" else "等待执行"), progress, utc_now(), task_id),
         )
 
     def list_tasks(self, include_hidden=False):
@@ -412,7 +450,8 @@ class TaskStore:
     def list_sessions(self):
         with self.connect() as db:
             rows = db.execute(
-                """SELECT s.*, t.project_name, t.source_account, t.owner_email, t.progress AS task_progress
+                """SELECT s.*, t.project_name, t.source_account, t.owner_email, t.progress AS task_progress,
+                          t.config_json
                 FROM exam_sessions s JOIN exam_tasks t ON t.task_id=s.task_id
                 ORDER BY s.updated_at DESC"""
             ).fetchall()
@@ -456,6 +495,7 @@ class TaskStore:
             "sourceAccount": data.get("source_account", ""),
             "ownerEmail": data.get("owner_email", ""),
             "progress": data.get("task_progress", 0),
+            "config": loads(data.get("config_json"), {}),
         }
 
     def _step(self, row):

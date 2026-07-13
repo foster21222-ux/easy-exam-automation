@@ -27,6 +27,20 @@ test("does not require course_code for trial session even when task has multiple
   assert.equal(result.candidates[0].course_code, undefined);
 });
 
+test("allows default SKTY course_code for trial session", () => {
+  const result = prepareCandidatesForCourseImport(
+    [{ permit: "P001", full_name: "张三", identity_id: "ID001", course_code: "SKTY" }],
+    {
+      config: { courses: [{ name: "语文", code: "C-01" }, { name: "数学", code: "C-02" }] },
+      sessions: [{ session_id: "T1", sessionType: "trial" }],
+    },
+    { sessionId: "T1" },
+  );
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.candidates[0].course_code, "SKTY");
+});
+
 test("fills course_code when task has a single course", () => {
   const result = prepareCandidatesForCourseImport(
     [{ permit: "P001", full_name: "张三", identity_id: "ID001" }],

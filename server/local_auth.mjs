@@ -197,5 +197,6 @@ export function shouldAllowWithoutAuth(method = "GET", pathname = "") {
   if (pathname === "/api/auth/login") return method === "POST";
   if (pathname === "/api/auth/me") return method === "GET";
   if (pathname === "/api/auth/logout") return method === "POST";
+  if (pathname === "/api/fanwei/bridge/submit") return method === "POST" || method === "OPTIONS";
   return false;
 }

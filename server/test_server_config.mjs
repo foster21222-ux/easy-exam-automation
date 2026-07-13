@@ -18,10 +18,90 @@ test("server exposes exam request template download endpoint", () => {
   assert.ok(serverSource.includes('/api/templates/exam-request'));
 });
 
+test("server exposes authenticated prebuilt Fanwei helper installer downloads", () => {
+  assert.ok(serverSource.includes('path.join(runtimeDir, "fanwei-helper")'));
+  assert.ok(serverSource.includes('path.join(rootDir, "dist", "fanwei-helper")'));
+  assert.ok(serverSource.includes("async function handleFanweiHelperInstaller"));
+  assert.ok(serverSource.includes('/api/fanwei/helper-installer'));
+  const requestHandlerBlock = serverSource.slice(serverSource.indexOf("async function requestHandler"));
+  assert.ok(requestHandlerBlock.indexOf("!getAuthUserFromRequest(auth, req)") < requestHandlerBlock.indexOf("handleFanweiHelperInstaller(url, res)"));
+});
+
 test("EasyExam account settings are stored per console user", () => {
   assert.ok(serverSource.includes('path.join(runtimeDir, "user_settings.json")'));
   assert.ok(serverSource.includes("saveUserLogin(state.userSettings, user"));
   assert.ok(serverSource.includes("currentUserLogin({"));
+});
+
+test("Fanwei auto-read status opens dedicated Chrome when no Fanwei tab exists", () => {
+  const ensureBlock = serverSource.slice(
+    serverSource.indexOf("async function ensureFanweiDevToolsChromeAvailable"),
+    serverSource.indexOf("async function readFanweiFromLocalChrome"),
+  );
+  assert.ok(ensureBlock.includes("status?.fanweiTabFound === false"));
+  assert.ok(ensureBlock.includes("launchFanweiChromeForDevTools()"));
+  assert.ok(ensureBlock.includes("launchedChrome: true"));
+
+  const statusBlock = serverSource.slice(
+    serverSource.indexOf("async function handleFanweiAutoReadStatus"),
+    serverSource.indexOf("async function handleFanweiAutoRead(req"),
+  );
+  assert.ok(statusBlock.includes("available: true"));
+  assert.ok(statusBlock.includes("...status"));
+});
+
+test("Fanwei serial miss does not relaunch Chrome when DevTools is already connected", () => {
+  const readBlock = serverSource.slice(
+    serverSource.indexOf("async function runFanweiDevToolsReadWithAutoLaunch"),
+    serverSource.indexOf("async function ensureFanweiDevToolsChromeAvailable"),
+  );
+  assert.ok(readBlock.includes("return await runChromeDevToolsFanweiRead({ serialNo, timeoutMs });"));
+  assert.equal(readBlock.includes("if (fanwei) return fanwei"), false);
+  assert.equal(readBlock.includes("const launched = await launchFanweiChromeForDevTools();\n    if (!launched) return fanwei"), false);
+});
+
+test("loopback Fanwei read fallback returns raw data without creating an import", () => {
+  const localReadBlock = serverSource.slice(
+    serverSource.indexOf("async function handleFanweiLocalRead"),
+    serverSource.indexOf("async function handleFanweiAutoRead(req"),
+  );
+  assert.ok(localReadBlock.includes("isLoopbackRequest(req)"));
+  assert.ok(localReadBlock.includes("readFanweiFromLocalChrome(serialNo)"));
+  assert.ok(localReadBlock.includes("{ ok: true, data: fanwei }"));
+  assert.equal(localReadBlock.includes("createFanweiRequirementImportFromPayload"), false);
+  assert.equal(localReadBlock.includes("randomUUID"), false);
+  assert.equal(localReadBlock.includes("fs.writeFile"), false);
+  assert.ok(serverSource.includes('url.pathname === "/api/fanwei/local-read"'));
+  assert.ok(serverSource.includes("handleFanweiLocalRead(req, res)"));
+});
+
+test("Fanwei preview route validates raw data and has no persistence side effects", () => {
+  const previewBlock = serverSource.slice(
+    serverSource.indexOf("function buildFanweiRequirementPreviewFromPayload"),
+    serverSource.indexOf("async function createFanweiRequirementImportFromPayload"),
+  );
+  assert.ok(previewBlock.includes("validateFanweiReadPayload"));
+  assert.ok(previewBlock.includes("buildFanweiRequirementModel"));
+  assert.ok(previewBlock.includes("return { fanwei: model }"));
+  assert.equal(previewBlock.includes("randomUUID"), false);
+  assert.equal(previewBlock.includes("fs.writeFile"), false);
+  assert.equal(previewBlock.includes("runPythonJson"), false);
+  assert.equal(previewBlock.includes("createImportFromWorkbook"), false);
+  assert.equal(previewBlock.includes("state.imports"), false);
+  assert.ok(serverSource.includes('url.pathname === "/api/fanwei/requirement-preview"'));
+  assert.ok(serverSource.includes("handleFanweiRequirementPreview(req, res)"));
+});
+
+test("Fanwei requirement import validates raw data before any file or task write", () => {
+  const importBlock = serverSource.slice(
+    serverSource.indexOf("async function createFanweiRequirementImportFromPayload"),
+    serverSource.indexOf("async function handleFanweiRequirementImport"),
+  );
+  assert.ok(importBlock.includes("validateFanweiReadPayload"));
+  assert.ok(importBlock.indexOf("validateFanweiReadPayload") < importBlock.indexOf("randomUUID"));
+  assert.ok(importBlock.indexOf("validateFanweiReadPayload") < importBlock.indexOf("fs.writeFile"));
+  assert.equal(importBlock.includes("sampleFanweiR0042182"), false);
+  assert.equal(importBlock.includes('payload.serialNo === "R0042182"'), false);
 });
 
 test("deleting a console user removes that user's EasyExam account settings", () => {
@@ -268,6 +348,26 @@ test("task detail includes stored candidates for SMS notification review", () =>
   );
   assert.ok(handler.includes('runTaskState("list_candidates"'));
   assert.ok(handler.includes("syncedTask.candidates"));
+});
+
+test("project shared sheet fill refreshes session login limits from tenant detail", () => {
+  const helperBlock = serverSource.slice(
+    serverSource.indexOf("function sharedSheetSessionFieldsFromDetail"),
+    serverSource.indexOf("async function handleProjectSharedSheetFill"),
+  );
+  assert.ok(helperBlock.includes("getTenantSessionDetail(login, sessionId)"));
+  assert.ok(helperBlock.includes("clientLoginLimit"));
+  assert.ok(helperBlock.includes("login_times"));
+  assert.ok(helperBlock.includes("lock_screen_time"));
+  assert.ok(helperBlock.includes("无法保证 L 列与考试配置一致"));
+
+  const handler = serverSource.slice(
+    serverSource.indexOf("async function handleProjectSharedSheetFill"),
+    serverSource.indexOf("function scoreFeedbackFileName"),
+  );
+  assert.ok(handler.includes("const login = getYikaoLoginForRequest(req);"));
+  assert.ok(handler.includes("await enrichSharedSheetSessions(login, sessions, logs)"));
+  assert.ok(handler.indexOf("await enrichSharedSheetSessions(login, sessions, logs)") < handler.indexOf("syncExamConfigToTencentDocs"));
 });
 
 test("candidate import configures selected import fields as visible personal fields before importing", () => {

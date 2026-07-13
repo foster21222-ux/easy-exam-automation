@@ -39,9 +39,18 @@ export function scanWechatDownloadedFiles({
   maxFiles = 200,
   previewChars = 1200,
   modifiedSince = "",
+  visibleText = "",
   imageOcrCommand = path.join(rootDir, "scripts", "ocr_image.swift"),
 } = {}) {
   const scannedAt = new Date().toISOString();
+  const normalizedVisibleText = normalizeAttachmentMatchText(visibleText);
+  if (normalizedVisibleText && !visibleTextMayContainAttachmentName(normalizedVisibleText)) {
+    return {
+      scannedAt,
+      roots: [],
+      files: [],
+    };
+  }
   const resolvedRoots = expandRoots(roots);
   const files = [];
   const seenPaths = new Set();
@@ -54,6 +63,7 @@ export function scanWechatDownloadedFiles({
       imageOcrCommand,
       seenPaths,
       modifiedSinceMs: Number.isFinite(modifiedSinceMs) ? modifiedSinceMs : 0,
+      normalizedVisibleText,
     });
     if (files.length >= maxFiles) break;
   }
@@ -63,6 +73,15 @@ export function scanWechatDownloadedFiles({
     roots: resolvedRoots,
     files: files.slice(0, maxFiles),
   };
+}
+
+export function readWechatDownloadedFilePreview(filePath, {
+  previewChars = 1200,
+  imageOcrCommand = path.join(rootDir, "scripts", "ocr_image.swift"),
+} = {}) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!SUPPORTED_EXTENSIONS.has(ext)) return "";
+  return readPreviewSafely(filePath, ext, { previewChars, imageOcrCommand });
 }
 
 function expandRoots(roots) {
@@ -87,6 +106,11 @@ function collectFiles(currentPath, files, options) {
   } catch {
     return;
   }
+  entries.sort((left, right) => {
+    if (left.isDirectory() && !right.isDirectory()) return -1;
+    if (!left.isDirectory() && right.isDirectory()) return 1;
+    return right.name.localeCompare(left.name);
+  });
   for (const entry of entries) {
     if (files.length >= options.maxFiles) return;
     const fullPath = path.join(currentPath, entry.name);
@@ -98,6 +122,10 @@ function collectFiles(currentPath, files, options) {
     const ext = path.extname(entry.name).toLowerCase();
     const kind = SUPPORTED_EXTENSIONS.get(ext);
     if (!kind) continue;
+    if (options.normalizedVisibleText
+      && !attachmentNameMatchesVisibleText(entry.name, options.normalizedVisibleText)) {
+      continue;
+    }
     if (options.seenPaths.has(fullPath)) continue;
     options.seenPaths.add(fullPath);
     const stat = statSync(fullPath);
@@ -117,6 +145,20 @@ function collectFiles(currentPath, files, options) {
   }
 }
 
+function normalizeAttachmentMatchText(value) {
+  return String(value || "").normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, "");
+}
+
+export function visibleTextMayContainAttachmentName(visibleText = "") {
+  const normalizedText = normalizeAttachmentMatchText(visibleText);
+  if (!normalizedText) return false;
+  return [...SUPPORTED_EXTENSIONS.keys()].some((ext) => {
+    const normalizedExt = normalizeAttachmentMatchText(ext);
+    const extWithoutDot = normalizedExt.replace(/^\./, "");
+    return normalizedText.includes(normalizedExt) || normalizedText.includes(`…${extWithoutDot}`);
+  });
+}
+
 function readPreviewSafely(filePath, ext, options = {}) {
   try {
     return readPreview(filePath, ext, options);
@@ -126,16 +168,33 @@ function readPreviewSafely(filePath, ext, options = {}) {
 }
 
 function readPreview(filePath, ext, { previewChars, imageOcrCommand } = {}) {
+  if (Number(previewChars) <= 0) return "";
   if (ext === ".txt" || ext === ".csv") {
     return readTextPreview(filePath, previewChars);
   }
   if (ext === ".xlsx") {
     return readXlsxPreview(filePath, previewChars);
   }
+  if (ext === ".docx") {
+    return readDocxPreview(filePath, previewChars);
+  }
   if (ext === ".png" || ext === ".jpg" || ext === ".jpeg") {
     return readImagePreview(filePath, imageOcrCommand, previewChars);
   }
   return "";
+}
+
+function attachmentNameMatchesVisibleText(fileName, normalizedVisibleText) {
+  const normalizedName = normalizeAttachmentMatchText(fileName);
+  if (normalizedVisibleText.includes(normalizedName)) return true;
+  const ext = path.extname(fileName).toLowerCase();
+  const stem = normalizeAttachmentMatchText(path.basename(fileName, ext));
+  const normalizedExt = normalizeAttachmentMatchText(ext);
+  if (!stem || stem.length < 8 || !normalizedVisibleText.includes(normalizedExt)) return false;
+  const prefix = stem.slice(0, Math.min(10, stem.length));
+  if (!normalizedVisibleText.includes(prefix)) return false;
+  const suffix = stem.slice(-2);
+  return !/\d/.test(suffix) || normalizedVisibleText.includes(suffix);
 }
 
 function readTextPreview(filePath, previewChars) {
@@ -184,6 +243,17 @@ function readXlsxPreview(filePath, previewChars) {
       parts.push(extractSheetText(sheetXml, sharedStrings));
     }
     return limitPreview(parts.filter(Boolean).join("\n"), previewChars);
+  } catch {
+    return "";
+  }
+}
+
+function readDocxPreview(filePath, previewChars) {
+  try {
+    const xml = unzipText(filePath, "word/document.xml");
+    const values = [...xml.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)]
+      .map((match) => decodeXml(match[1]));
+    return limitPreview(values.filter(Boolean).join("\n"), previewChars);
   } catch {
     return "";
   }

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import { createReadStream } from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -10,6 +11,8 @@ import {
   createSessionsThenConfigureCourses,
 } from "./course_session_binding.mjs";
 import { bindPapersToFormalSession, detectSessionPaperBindings } from "./paper_binding.mjs";
+import { shouldSkipRecentFailedPaperBindCheck } from "./paper_bind_scheduler.mjs";
+import { fetchPaperUnitInfo } from "./paper_unit_info.mjs";
 import { bindDefaultTrialPaperToSession } from "./trial_default_paper.mjs";
 import {
   assignCourseCodesForExamConfig,
@@ -48,6 +51,7 @@ import {
 } from "./local_auth.mjs";
 import { handleRequirementRequest } from "./requirement_request_api.mjs";
 import { deleteTaskSessionsFromTenant } from "./session_deletion.mjs";
+import { calculateRoomSizes } from "./room_assignment.mjs";
 import {
   apiKeyProfilesForUser,
   currentUserLogin,
@@ -62,16 +66,47 @@ import {
 } from "./user_settings.mjs";
 import { runCustomerServiceSchedulerForTargets } from "./customer_service_scheduler.mjs";
 import {
+  appendSessionChangeHistory,
+  buildSessionChangeDiff,
+  editableSessionFieldsFromDetail,
+  fetchTenantSessionDetail,
+  localSessionFieldsForChange,
+  mergeSessionChangePayload,
+  putTenantSessionDetail,
+  sessionChangeBasePayloadFromTask,
+  sessionChangeHistoryFromStep,
+  sessionChangeSummary,
+  tenantSessionChangeErrorMessage,
+  validateSessionChangeRequest,
+} from "./session_change.mjs";
+import {
   syncExamConfigToTencentDocs,
   tencentDocsSettingsFromEnv,
 } from "./tencent_docs_sync.mjs";
 import { handleWechatCollector } from "./wechat_collector_api.mjs";
+import { createFanweiBridgeStore } from "./fanwei_bridge.mjs";
+import {
+  buildFanweiRequirementModel,
+  normalizeFanweiDomPayload,
+  validateFanweiReadPayload,
+} from "./fanwei_requirement_mapper.mjs";
+import {
+  buildWindowsChromeLaunchArgs,
+  fanweiAutoReadPlatform,
+  fanweiAutoReadUnavailableMessage,
+  findMacChromeExecutable,
+  findWindowsChromeExecutable,
+  runChromeDevToolsFanweiRead,
+} from "./fanwei_auto_read.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const webFile = path.join(rootDir, "outputs", "web_prototype", "easy_exam_automation.html");
 const webModulesDir = path.join(rootDir, "web");
-const runtimeDir = path.join(rootDir, ".easy_exam_runtime");
+const runtimeDir = path.resolve(rootDir, process.env.EASY_EXAM_RUNTIME_DIR || ".easy_exam_runtime");
+const sessionChangeFeatureEnabled =
+  process.env.SESSION_CHANGE_ENABLED === "1" ||
+  path.basename(runtimeDir) === ".easy_exam_runtime_test";
 const uploadsDir = path.join(runtimeDir, "uploads");
 const generatedDir = path.join(runtimeDir, "generated");
 const settingsPath = path.join(runtimeDir, "settings.json");
@@ -80,19 +115,39 @@ const authUsersPath = path.join(runtimeDir, "auth_users.json");
 const authSessionsPath = path.join(runtimeDir, "auth_sessions.json");
 const userSettingsPath = path.join(runtimeDir, "user_settings.json");
 const parserScript = path.join(__dirname, "exam_request_parser.py");
+const fanweiWorkbookScript = path.join(__dirname, "fanwei_requirement_workbook.py");
 const candidateParserScript = path.join(__dirname, "candidate_list_parser.py");
 const monitorAccountExporterScript = path.join(__dirname, "monitor_account_exporter.py");
 const scoreFeedbackExporterScript = path.join(__dirname, "score_feedback_exporter.py");
 const taskStateScript = path.join(__dirname, "task_state_db.py");
 const scoreFeedbackTemplatePath = path.join(rootDir, "template", "成绩单模板.xlsx");
 const examRequestTemplatePath = path.join(rootDir, "template", "v2易考新建考试需求单.xlsx");
+const fanweiHelperRuntimePackagesDir = path.join(runtimeDir, "fanwei-helper");
+const fanweiHelperProjectPackagesDir = path.resolve(
+  process.env.EASY_EXAM_FANWEI_HELPER_PACKAGES_DIR || path.join(rootDir, "dist", "fanwei-helper"),
+);
 const taskDbPath = path.join(runtimeDir, "task_state.sqlite3");
-const pythonBin =
-  process.env.CODEX_PYTHON ||
-  process.env.PYTHON ||
-  "python3";
+function resolvePythonBin() {
+  if (process.env.CODEX_PYTHON) return process.env.CODEX_PYTHON;
+  if (process.env.PYTHON) return process.env.PYTHON;
+  const bundledPython = path.join(
+    process.env.HOME || "",
+    ".cache",
+    "codex-runtimes",
+    "codex-primary-runtime",
+    "dependencies",
+    "python",
+    "bin",
+    "python3",
+  );
+  if (fsSync.existsSync(bundledPython)) return bundledPython;
+  return "python3";
+}
+const pythonBin = resolvePythonBin();
 const PAPER_BIND_SCHEDULER_INTERVAL_MS = Number(process.env.PAPER_BIND_SCHEDULER_INTERVAL_MS || 60 * 60 * 1000);
 const PAPER_BIND_SCHEDULER_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PAPER_BIND_FAILURE_COOLDOWN_MS = Number(process.env.PAPER_BIND_FAILURE_COOLDOWN_MS || 60 * 60 * 1000);
+const fanweiBridge = createFanweiBridgeStore();
 
 async function loadEnvFile() {
   const envPath = path.join(rootDir, ".env");
@@ -138,6 +193,17 @@ function json(res, code, payload) {
   res.writeHead(code, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function corsJson(res, code, payload) {
+  res.writeHead(code, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(payload));
 }
@@ -884,6 +950,42 @@ async function parseWorkbook(uploadPath) {
   return await runPythonJson([parserScript, uploadPath]);
 }
 
+async function createImportFromWorkbook({
+  importId,
+  uploadPath,
+  filename,
+  req,
+  messagePrefix = "需求单解析完成",
+  ownerEmail = "",
+}) {
+  const parsed = await parseWorkbook(uploadPath);
+  const taskSummaries = await runTaskState("list_all");
+  const existingTasks = [];
+  for (const summary of taskSummaries || []) {
+    const detail = await runTaskState("get", { taskId: summary.taskId });
+    if (detail) existingTasks.push(detail);
+  }
+  parsed.config = assignCourseCodesForExamConfig(parsed?.config || {}, existingTasks);
+  const projectName = String(parsed?.config?.examName || filename.replace(/\.[^.]+$/, "") || "未命名项目").trim();
+  const authUser = getAuthUserFromRequest(auth, req);
+  const login = getYikaoLoginForRequest(req);
+  const taskOwnerEmail = ownerEmail || authUser?.email || "";
+  const task = await runTaskState("create", {
+    projectName,
+    sourceAccount: login.username || "",
+    ownerEmail: auth.enabled ? taskOwnerEmail : "",
+    config: parsed?.config || {},
+  });
+  const uploadId = importId || randomUUID();
+  await updateTaskStep(task.taskId, "requirement_parse", "success", {
+    message: `${messagePrefix}：${filename}`,
+    result: { filename, uploadId },
+  });
+  const record = { id: uploadId, taskId: task.taskId, filename, uploadPath, parsed, createdAt: new Date().toISOString() };
+  state.imports.set(uploadId, record);
+  return { uploadId, taskId: task.taskId, ...parsed, filename };
+}
+
 function createJob(importRecord, login) {
   const job = {
     id: randomUUID(),
@@ -976,6 +1078,398 @@ async function handleImport(req, res) {
   const record = { id: importId, taskId: task.taskId, filename, uploadPath, parsed, createdAt: new Date().toISOString() };
   state.imports.set(importId, record);
   json(res, 200, { uploadId: importId, taskId: task.taskId, ...parsed, filename });
+}
+
+function sampleFanweiR0042182() {
+  return normalizeFanweiDomPayload({
+    requestid: "1505614",
+    fields: {
+      "ATA内容制题参与方式": "需要ATA制题或使用历史项目试卷",
+      "EPI测试": "需要",
+      "业务方向": "企业",
+      "其他说明": "四川省公路规划勘察设计研究院有限公司\n四川省通川工程技术开发有限公司校招笔试",
+      "内容来源": "ATA现有内容",
+      "客户及项目属性": "老客户新项目",
+      "性格测试工具": "OPA",
+      "报名方式": "客户提供报名表",
+      "是否需要ATA安排人工监考": "需要安排分散人工监考",
+      "是否需要ATA安排集中监考场地": "不需要",
+      "是否需要人工阅卷": "需要",
+      "是否需要封闭制题": "不需要",
+      "是否需要报名网站": "",
+      "科目数": "1",
+      "系统类型": "易考",
+      "结算依据": "按参考科次结算",
+      "考核内容是否仅性格测试": "否",
+      "考试服务范围": "全流程服务（如需提供4项及以上的单项服务，请直接选择全流程服务）",
+      "试卷数": "1",
+      "试题类型": "客观题；主观题",
+      "运控流水号": "R0042182",
+      "阅卷安排": "客户安排阅卷",
+      "附件": "附件2：服务确认单.xlsx",
+      "项目名称": "蜀道投资集团有限责任公司招聘笔试",
+      "项目编码": "F0020795",
+      "预估收入": "11.00",
+      "预估科次": "11",
+    },
+    serviceConfirmation: {
+      fields: {
+        "单位名称": "四川省公路规划勘察设计研究院有限公司",
+        "考试名称": "四川省通川工程技术开发有限公司校招笔试",
+        "考试时间": "2026年7月5日9：30-11：30",
+        "预计人次": "11",
+        "科目数量": "1",
+        "考场规则": "提前登录30分钟，迟到时间20分钟；最小答题时间60分钟",
+        "ATA人工监考": "需要",
+        "在线巡考": "需要（3个）",
+      },
+    },
+    opaRows: [
+      {
+        "OPA报告类型": "全方位胜任力报告-UCF",
+        "OPA测评工具": "SHL-OPQ32",
+        "备注": "SHL20项胜任力维度报告",
+        "常模类型": "OPQ professional（专业人士）",
+        "序号": "1",
+        "时长（分钟）": "30",
+        "是否即测即出报告": "是",
+      },
+      {
+        "OPA报告类型": "情绪倾向报告（标准）-SHLEmotion",
+        "OPA测评工具": "SHL-OPQ32",
+        "备注": "OPA界面风格的报告",
+        "常模类型": "OPQ professional（专业人士）",
+        "序号": "2",
+        "时长（分钟）": "30",
+        "是否即测即出报告": "是",
+      },
+    ],
+    examSceneRows: [
+      {
+        "场次安排说明": "9：30-11：30",
+        "序号": "1",
+        "考试日期": "2026-07-05",
+        "考试时间": "上午",
+      },
+    ],
+  });
+}
+
+function validateFanweiReadPayloadForRequest(payload) {
+  try {
+    return validateFanweiReadPayload(payload?.fanwei ?? payload?.raw, payload?.serialNo);
+  } catch (error) {
+    error.status = 400;
+    throw error;
+  }
+}
+
+function buildFanweiRequirementPreviewFromPayload(payload) {
+  const fanwei = validateFanweiReadPayloadForRequest(payload);
+  const model = buildFanweiRequirementModel(fanwei);
+  return { fanwei: model };
+}
+
+async function handleFanweiRequirementPreview(req, res) {
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  json(res, 200, buildFanweiRequirementPreviewFromPayload(payload));
+}
+
+async function createFanweiRequirementImportFromPayload(payload, req, options = {}) {
+  const fanwei = validateFanweiReadPayloadForRequest(payload);
+  const model = buildFanweiRequirementModel(fanwei);
+  if (payload.requirementFields && typeof payload.requirementFields === "object") {
+    model.requirementFields = {
+      ...model.requirementFields,
+      ...payload.requirementFields,
+    };
+  }
+  const importId = randomUUID();
+  const baseName = safeFileName(`泛微_${model.fields["运控流水号"] || payload.serialNo || importId}_易考新建考试需求单.xlsx`);
+  const payloadPath = path.join(generatedDir, `${importId}-fanwei-requirement.json`);
+  const uploadPath = path.join(uploadsDir, `${importId}-${baseName}`);
+  await fs.writeFile(payloadPath, JSON.stringify(model, null, 2), "utf8");
+  await runPythonJson([fanweiWorkbookScript, examRequestTemplatePath, payloadPath, uploadPath]);
+  const imported = await createImportFromWorkbook({
+    importId,
+    uploadPath,
+    filename: baseName,
+    req,
+    messagePrefix: "泛微需求单生成并解析完成",
+    ownerEmail: options.ownerEmail || "",
+  });
+  return { ...imported, fanwei: model, workbookPath: uploadPath };
+}
+
+async function handleFanweiRequirementImport(req, res) {
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));
+}
+
+async function handleFanweiBridgeToken(req, res) {
+  const user = getAuthUserFromRequest(auth, req);
+  if (auth.enabled && !user) return json(res, 401, { error: "请先登录" });
+  const issued = fanweiBridge.issue({ userEmail: user?.email || "" });
+  json(res, 200, {
+    token: issued.token,
+    expiresAt: new Date(issued.expiresAt).toISOString(),
+  });
+}
+
+async function handleFanweiBridgeSubmit(req, res) {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    return res.end();
+  }
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const bridge = fanweiBridge.consume(payload.token);
+  if (!bridge) return corsJson(res, 401, { error: "泛微读取口令已失效，请回测试平台重新复制读取脚本。" });
+  try {
+    const imported = await createFanweiRequirementImportFromPayload(payload, req, {
+      ownerEmail: bridge.userEmail || "",
+    });
+    fanweiBridge.saveResult(payload.token, imported);
+    return corsJson(res, 200, {
+      ok: true,
+      uploadId: imported.uploadId,
+      taskId: imported.taskId,
+      examName: imported.config?.examName || "",
+    });
+  } catch (error) {
+    return corsJson(res, 500, { error: error?.message || "泛微需求单生成失败" });
+  }
+}
+
+async function handleFanweiBridgeResult(req, res) {
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const token = String(payload.token || "").trim();
+  if (!token) return badRequest(res, "缺少泛微读取口令。");
+  const result = fanweiBridge.takeResult(token);
+  if (!result) return json(res, 202, { pending: true });
+  return json(res, 200, result);
+}
+
+async function runCommandCapture(command, args, { timeoutMs = 15000 } = {}) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = [];
+    const stderr = [];
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("本机 Chrome 自动读取超时，请确认泛微单页已经打开。"));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const output = Buffer.concat(stdout).toString("utf8");
+      const errorOutput = Buffer.concat(stderr).toString("utf8").trim();
+      if (code === 0) return resolve(output);
+      reject(new Error(errorOutput || `本机 Chrome 自动读取失败，退出码 ${code}`));
+    });
+  });
+}
+
+function fanweiAutoReadErrorReason(error) {
+  const message = error?.message || String(error);
+  if (message.includes("通过 AppleScript 执行 JavaScript 的功能已关闭")) {
+    return "chrome_applescript_javascript_disabled";
+  }
+  if (
+    message.includes("ECONNREFUSED") ||
+    message.includes("fetch failed") ||
+    message.includes("无法连接 Chrome DevTools")
+  ) {
+    return "chrome_devtools_unavailable";
+  }
+  return "";
+}
+
+async function launchWindowsFanweiChrome() {
+  const chromePath = findWindowsChromeExecutable({ existsSync: fsSync.existsSync });
+  if (!chromePath) return false;
+  const userDataDir = path.join(runtimeDir, "chrome-fanwei-profile");
+  await fs.mkdir(userDataDir, { recursive: true });
+  const args = buildWindowsChromeLaunchArgs({
+    userDataDir,
+    port: 9222,
+    startUrl: "https://oa.ata.net.cn/",
+  });
+  const child = spawn(chromePath, args, {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return true;
+}
+
+async function launchMacFanweiChrome() {
+  const chromePath = findMacChromeExecutable({ existsSync: fsSync.existsSync });
+  if (!chromePath) return false;
+  const userDataDir = path.join(runtimeDir, "chrome-fanwei-profile");
+  await fs.mkdir(userDataDir, { recursive: true });
+  const args = buildWindowsChromeLaunchArgs({
+    userDataDir,
+    port: 9222,
+    startUrl: "https://oa.ata.net.cn/",
+  });
+  const child = spawn(chromePath, args, {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return true;
+}
+
+async function launchFanweiChromeForDevTools() {
+  if (process.platform === "win32") return await launchWindowsFanweiChrome();
+  if (process.platform === "darwin") return await launchMacFanweiChrome();
+  return false;
+}
+
+async function waitForFanweiDevToolsChrome({ timeoutMs = 5000 } = {}) {
+  const startedAt = Date.now();
+  let lastError = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      return await runChromeDevToolsFanweiRead({ serialNo: "", timeoutMs: 1000, requireFanweiTab: false });
+    } catch (nextError) {
+      lastError = nextError;
+    }
+  }
+  if (lastError) throw lastError;
+  return { connected: false, fanweiTabFound: false };
+}
+
+async function runFanweiDevToolsReadWithAutoLaunch({ serialNo = "", timeoutMs = 5000 } = {}) {
+  try {
+    return await runChromeDevToolsFanweiRead({ serialNo, timeoutMs });
+  } catch (error) {
+    const reason = fanweiAutoReadErrorReason(error);
+    if (reason !== "chrome_devtools_unavailable") throw error;
+    const launched = await launchFanweiChromeForDevTools();
+    if (!launched) throw error;
+    await waitForFanweiDevToolsChrome({ timeoutMs: 5000 });
+    return await runChromeDevToolsFanweiRead({ serialNo, timeoutMs });
+  }
+}
+
+async function ensureFanweiDevToolsChromeAvailable({ timeoutMs = 5000 } = {}) {
+  try {
+    const status = await runChromeDevToolsFanweiRead({ serialNo: "", timeoutMs, requireFanweiTab: false });
+    if (status?.fanweiTabFound === false) {
+      const launched = await launchFanweiChromeForDevTools();
+      if (!launched) return status;
+      const nextStatus = await waitForFanweiDevToolsChrome({ timeoutMs });
+      return { ...nextStatus, launchedChrome: true };
+    }
+    return status;
+  } catch (error) {
+    const reason = fanweiAutoReadErrorReason(error);
+    if (reason !== "chrome_devtools_unavailable") throw error;
+    const launched = await launchFanweiChromeForDevTools();
+    if (!launched) throw error;
+    const status = await waitForFanweiDevToolsChrome({ timeoutMs });
+    return { ...status, launchedChrome: true };
+  }
+}
+
+async function readFanweiFromLocalChrome(serialNo) {
+  const platform = fanweiAutoReadPlatform();
+  if (platform === "windows_devtools" || platform === "chrome_devtools") {
+    return await runFanweiDevToolsReadWithAutoLaunch({ serialNo, timeoutMs: 15000 });
+  }
+  const error = new Error(fanweiAutoReadUnavailableMessage("unsupported_platform", process.platform));
+  error.reason = "unsupported_platform";
+  throw error;
+}
+
+async function handleFanweiAutoReadStatus(_req, res) {
+  const platform = fanweiAutoReadPlatform();
+  if (platform === "unsupported") {
+    return json(res, 200, {
+      available: false,
+      platform,
+      reason: "unsupported_platform",
+      message: fanweiAutoReadUnavailableMessage("unsupported_platform", process.platform),
+    });
+  }
+  try {
+    const status = await ensureFanweiDevToolsChromeAvailable({ timeoutMs: 5000 });
+    return json(res, 200, { available: true, platform, ...status });
+  } catch (error) {
+    const reason = fanweiAutoReadErrorReason(error) || (platform === "windows_devtools" || platform === "chrome_devtools" ? "chrome_devtools_unavailable" : "chrome_applescript_javascript_disabled");
+    return json(res, 200, {
+      available: false,
+      platform,
+      reason,
+      message: fanweiAutoReadUnavailableMessage(reason, process.platform),
+    });
+  }
+}
+
+function isLoopbackRequest(req) {
+  const address = String(req.socket?.remoteAddress || "").toLowerCase();
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+async function handleFanweiLocalRead(req, res) {
+  if (!isLoopbackRequest(req)) {
+    return json(res, 403, { error: "该读取接口仅允许在服务所在电脑本机使用。" });
+  }
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const serialNo = String(payload.serialNo || "").trim();
+  if (!serialNo) return badRequest(res, "请填写泛微流水号。");
+  let fanwei = null;
+  try {
+    fanwei = await readFanweiFromLocalChrome(serialNo);
+  } catch (error) {
+    const reason = error.reason || fanweiAutoReadErrorReason(error);
+    if (reason) return json(res, 503, { error: fanweiAutoReadUnavailableMessage(reason, process.platform), reason });
+    throw error;
+  }
+  if (!fanwei) {
+    return json(res, 404, {
+      error: `没有在已打开的 Chrome 泛微主表页中读到 ${serialNo}，请先打开对应泛微单。`,
+    });
+  }
+  return json(res, 200, { ok: true, data: fanwei });
+}
+
+async function handleFanweiAutoRead(req, res) {
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const serialNo = String(payload.serialNo || "").trim();
+  if (!serialNo) return badRequest(res, "请填写泛微流水号。");
+  let fanwei = null;
+  try {
+    fanwei = await readFanweiFromLocalChrome(serialNo);
+  } catch (error) {
+    const reason = error.reason || fanweiAutoReadErrorReason(error);
+    if (reason) return json(res, 503, { error: fanweiAutoReadUnavailableMessage(reason, process.platform), reason });
+    throw error;
+  }
+  if (!fanwei) {
+    return json(res, 404, {
+      error: `没有在已打开的 Chrome 泛微主表页中读到 ${serialNo}，请先打开对应泛微单。`,
+    });
+  }
+  const user = getAuthUserFromRequest(auth, req);
+  const imported = await createFanweiRequirementImportFromPayload(
+    { serialNo, fanwei },
+    req,
+    { ownerEmail: user?.email || "" },
+  );
+  return json(res, 200, imported);
 }
 
 async function handleCandidateParse(req, res) {
@@ -1386,6 +1880,40 @@ async function handleExamRequestTemplate(req, res) {
   createReadStream(examRequestTemplatePath).pipe(res);
 }
 
+async function handleFanweiHelperInstaller(url, res) {
+  const platform = String(url.searchParams.get("platform") || "").toLowerCase();
+  const packageNames = {
+    windows: "yikao-fanwei-helper-win-x64.zip",
+    macos: "yikao-fanwei-helper-darwin-arm64.zip",
+  };
+  const fileName = packageNames[platform];
+  if (!fileName) {
+    return badRequest(res, "不支持的本机助手平台，请选择 windows 或 macos。");
+  }
+
+  let packagePath = "";
+  for (const directory of [fanweiHelperRuntimePackagesDir, fanweiHelperProjectPackagesDir]) {
+    const candidate = path.join(directory, fileName);
+    try {
+      await fs.access(candidate);
+      packagePath = candidate;
+      break;
+    } catch {}
+  }
+  if (!packagePath) {
+    return json(res, 503, { error: `泛微本机助手安装包（${platform}）尚未生成，请联系管理员。` });
+  }
+
+  const stat = await fs.stat(packagePath);
+  res.writeHead(200, {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename="${fileName}"`,
+    "Content-Length": stat.size,
+    "Cache-Control": "private, no-store",
+  });
+  createReadStream(packagePath).pipe(res);
+}
+
 async function handleMonitorAccountsExcel(req, res) {
   const payload = parseJsonSafe(await readBody(req));
   const session = payload?.session || {};
@@ -1535,28 +2063,6 @@ function parseDateValue(value) {
   const normalized = String(value).replace(/\//g, "-").replace(" ", "T");
   const time = Date.parse(normalized);
   return Number.isFinite(time) ? time : 0;
-}
-
-function calculateRoomSizes(totalEntries, targetSize = 30) {
-  if (!Number.isInteger(totalEntries) || totalEntries <= 0) {
-    return [];
-  }
-
-  if (totalEntries <= targetSize + 2) {
-    return [totalEntries];
-  }
-
-  const fullRooms = Math.floor(totalEntries / targetSize);
-  const remainder = totalEntries % targetSize;
-
-  if (remainder === 0) {
-    return Array(fullRooms).fill(targetSize);
-  }
-
-  const sizes = Array(fullRooms).fill(targetSize);
-  sizes[sizes.length - 1] += remainder;
-
-  return sizes;
 }
 
 function randomRoomPassword() {
@@ -3011,7 +3517,306 @@ async function handleTaskDetail(taskId, req, res) {
   } catch {
     syncedTask.candidates = [];
   }
-  return json(res, 200, syncedTask);
+  const enrichedTask = await enrichTaskPaperUnitInfoForDetail(req, syncedTask);
+  return json(res, 200, { ...enrichedTask, sessionChangeFeatureEnabled });
+}
+
+function sessionChangeDisabled(res) {
+  return json(res, 403, {
+    error: "修改场次信息仅在测试控制台启用。请使用 PORT=8876 EASY_EXAM_RUNTIME_DIR=.easy_exam_runtime_test npm start 启动。",
+    featureEnabled: false,
+  });
+}
+
+function sessionChangeApiBase(login) {
+  return normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
+}
+
+async function visibleTaskSession(taskId, sessionId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) {
+    notFound(res);
+    return {};
+  }
+  const session = taskSessionForId(task, sessionId);
+  if (!session) {
+    json(res, 404, { error: "场次不属于当前任务，不能修改。" });
+    return { task };
+  }
+  return { task, session };
+}
+
+async function handleSessionChangePreview(taskId, sessionId, req, res) {
+  if (!sessionChangeFeatureEnabled) return sessionChangeDisabled(res);
+  const { task, session } = await visibleTaskSession(taskId, sessionId, req, res);
+  if (!task || !session) return;
+  const login = getYikaoLoginForRequest(req);
+  const apiBase = sessionChangeApiBase(login);
+  try {
+    const detail = await fetchTenantSessionDetail({
+      apiBase,
+      sessionId,
+      login,
+      requestJson: readTenantJsonWithLogin,
+    });
+    return json(res, 200, {
+      taskId,
+      sessionId,
+      sessionType: session.sessionType,
+      apiBase,
+      editable: ["name", "start", "end", "early", "later", "message", "notice"],
+      current: editableSessionFieldsFromDetail(detail),
+      featureEnabled: true,
+    });
+  } catch (error) {
+    return json(res, 200, {
+      warning: tenantSessionChangeErrorMessage(error),
+      detail: sessionChangeSummary(error?.detail || error?.message || ""),
+      featureEnabled: true,
+      apiBase,
+      sessionId,
+      taskId,
+      sessionType: session.sessionType,
+      editable: ["name", "start", "end", "early", "later", "message", "notice"],
+      current: localSessionFieldsForChange(session),
+      fallback: true,
+    });
+  }
+}
+
+async function handleSessionChange(taskId, sessionId, req, res) {
+  if (!sessionChangeFeatureEnabled) return sessionChangeDisabled(res);
+  const payload = parseJsonSafe(await readBody(req));
+  if (!payload?.confirm) return badRequest(res, "请确认后再提交场次修改。");
+  const validation = validateSessionChangeRequest(payload?.changes || {});
+  if (!validation.ok) return json(res, 400, { error: "场次修改参数校验失败", errors: validation.errors });
+
+  const { task, session } = await visibleTaskSession(taskId, sessionId, req, res);
+  if (!task || !session) return;
+  const login = getYikaoLoginForRequest(req);
+  const apiBase = sessionChangeApiBase(login);
+  let detail = null;
+  let detailWarning = null;
+  try {
+    detail = await fetchTenantSessionDetail({
+      apiBase,
+      sessionId,
+      login,
+      requestJson: readTenantJsonWithLogin,
+    });
+  } catch (error) {
+    detailWarning = {
+      warning: tenantSessionChangeErrorMessage(error),
+      detail: sessionChangeSummary(error?.detail || error?.message || ""),
+    };
+    detail = sessionChangeBasePayloadFromTask(task, session);
+  }
+
+  const before = editableSessionFieldsFromDetail(detail);
+  const putPayload = mergeSessionChangePayload(detail, validation.changes);
+  const after = editableSessionFieldsFromDetail(putPayload);
+  const diff = buildSessionChangeDiff(before, after);
+  if (!diff.length) return json(res, 400, { error: "没有检测到需要修改的场次字段。", diff });
+
+  let tenantBody = null;
+  try {
+    tenantBody = await putTenantSessionDetail({
+      apiBase,
+      sessionId,
+      payload: putPayload,
+      login,
+      requestJson: readTenantJsonWithLogin,
+    });
+  } catch (error) {
+    return json(res, error?.status && Number(error.status) >= 400 ? Number(error.status) : 502, {
+      error: tenantSessionChangeErrorMessage(error),
+      detail: sessionChangeSummary(error?.detail || error?.message || ""),
+      apiBase,
+      sessionId,
+      diff,
+    });
+  }
+
+  let verifyStatus = "";
+  let verifiedSession = null;
+  let verifyWarning = null;
+  try {
+    const verifyUrl = new URL("/tenant/api/session/", normalizeApiBase(apiBase));
+    verifyUrl.searchParams.set("session_ids", String(sessionId));
+    const verifyPayload = await readTenantJsonWithLogin(
+      login,
+      verifyUrl,
+      { method: "GET", includeResponseMeta: true },
+      `回查场次信息 ${sessionId}`,
+    );
+    verifyStatus = verifyPayload.httpStatus;
+    const matched = normalizeTenantList(verifyPayload.body)
+      .find((item) => String(item.id ?? item.session_id ?? "") === String(sessionId));
+    if (matched) {
+      verifiedSession = {
+        session_id: String(matched.id ?? matched.session_id ?? sessionId),
+        name: String(matched.name ?? ""),
+        start: matched.start ?? "",
+        end: matched.end ?? "",
+        url: matched.url ?? "",
+      };
+    }
+  } catch (error) {
+    verifyWarning = {
+      warning: tenantSessionChangeErrorMessage(error),
+      detail: sessionChangeSummary(error?.detail || error?.message || ""),
+    };
+  }
+
+  const updatedTask = await runTaskState("upsert_session", {
+    taskId,
+    sessionType: session.sessionType,
+    session: {
+      session_id: session.session_id,
+      name: after.name || session.name,
+      start: after.start || session.start,
+      end: after.end || session.end,
+      candidate_count: Number(session.candidateCount || 0),
+      room_count: Number(session.roomCount || 0),
+      status: session.status || "success",
+      url: session.url || "",
+    },
+  });
+  const message = `修改${session.sessionType === "formal" ? "正式考试" : "试考"}场次 ${sessionId}：${diff.map((item) => item.label).join("、")}`;
+  const previousChangeStep = (updatedTask?.steps || task?.steps || []).find((item) => item.stepKey === "session_change");
+  const history = appendSessionChangeHistory(sessionChangeHistoryFromStep(previousChangeStep), {
+    changedAt: new Date().toISOString(),
+    operator: getAuthUserFromRequest(auth, req)?.email || "",
+    sessionId,
+    sessionType: session.sessionType,
+    apiBase,
+    status: "success",
+    tenantStatus: 200,
+    verifyStatus,
+    diff,
+    tenantResponseSummary: sessionChangeSummary(tenantBody),
+    verifiedSession,
+    warning: detailWarning || verifyWarning || null,
+  });
+  const changeRecord = history[0];
+  const loggedTask = await updateTaskStep(taskId, "session_change", "success", {
+    message,
+    result: {
+      sessionId,
+      sessionType: session.sessionType,
+      apiBase,
+      changedFields: diff.map((item) => item.field),
+      diff,
+      tenantResponseSummary: sessionChangeSummary(tenantBody),
+      tenantStatus: 200,
+      verifyStatus,
+      verifiedSession,
+      history,
+    },
+  }) || updatedTask;
+
+  return json(res, 200, {
+    ok: true,
+    task: loggedTask,
+    session: taskSessionForId(loggedTask, sessionId),
+    apiBase,
+    diff,
+    tenantStatus: 200,
+    verifyStatus,
+    verifiedSession,
+    tenantResponseSummary: sessionChangeSummary(tenantBody),
+    detailWarning,
+    verifyWarning,
+    changeRecord,
+    logs: [message],
+  });
+}
+
+async function enrichTaskPaperUnitInfoForDetail(req, task) {
+  const paperState = task?.config?.paperFormBind || {};
+  const bindResult = paperState.result?.bindResult || {};
+  const results = Array.isArray(bindResult.results) ? bindResult.results : [];
+  if (paperState.status !== "success" || !results.length) return task;
+
+  const login = getYikaoLoginForRequest(req);
+  const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
+  const formCodes = [...new Set(results.flatMap((item) => (
+    Array.isArray(item.form_codes) ? item.form_codes : []
+  )).map((item) => String(item || "").trim()).filter(Boolean))];
+  const unitInfoEntries = await Promise.all(formCodes.map(async (formCode) => {
+    try {
+      const unitInfo = await fetchPaperUnitInfo({
+        login,
+        apiBase,
+        formCode,
+        requestJson: readTenantJsonWithLogin,
+      });
+      return [formCode, unitInfo];
+    } catch (error) {
+      return [formCode, null];
+    }
+  }));
+  const unitInfoByCode = new Map(unitInfoEntries);
+  const withUnitInfo = results.map((item) => {
+    const unitInfos = (Array.isArray(item.form_codes) ? item.form_codes : [])
+      .map((formCode) => unitInfoByCode.get(String(formCode || "").trim()))
+      .filter(Boolean);
+    return {
+      ...item,
+      ...(unitInfos.length === 1 ? { unit_info: unitInfos[0] } : {}),
+      ...(unitInfos.length > 1 ? { unit_infos: unitInfos } : {}),
+    };
+  });
+
+  return {
+    ...task,
+    config: {
+      ...(task.config || {}),
+      paperFormBind: {
+        ...paperState,
+        result: {
+          ...(paperState.result || {}),
+          bindResult: {
+            ...bindResult,
+            results: withUnitInfo,
+          },
+        },
+      },
+    },
+  };
+}
+
+function sharedSheetSessionFieldsFromDetail(detail = {}) {
+  const clientLoginLimit = positiveNumber(detail?.login_times ?? detail?.loginTimes);
+  const leaveLimit = positiveNumber(detail?.lock_screen_time ?? detail?.lockScreenTime);
+  return {
+    ...(clientLoginLimit !== undefined ? { clientLoginLimit, login_times: clientLoginLimit } : {}),
+    ...(leaveLimit !== undefined ? { leaveLimit, lock_screen_time: leaveLimit } : {}),
+    ...(detail?.client_required !== undefined ? { client_required: Boolean(detail.client_required) } : {}),
+  };
+}
+
+async function enrichSharedSheetSessions(login, sessions = [], logs = []) {
+  const enriched = [];
+  for (const session of sessions) {
+    const sessionId = String(session?.session_id || session?.id || "").trim();
+    if (!sessionId) {
+      enriched.push(session);
+      continue;
+    }
+    try {
+      const { detail } = await getTenantSessionDetail(login, sessionId);
+      const fields = sharedSheetSessionFieldsFromDetail(detail);
+      enriched.push({ ...session, ...fields });
+      const loginTimesText = fields.clientLoginLimit !== undefined ? `，login_times=${fields.clientLoginLimit}` : "";
+      logs.push(`[项目共享大表] 已同步场次详情，session_id=${sessionId}${loginTimesText}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logs.push(`[项目共享大表] 场次详情同步失败，已停止写表，session_id=${sessionId}：${message}`);
+      throw new Error(`场次详情同步失败，无法保证 L 列与考试配置一致，session_id=${sessionId}：${message}`);
+    }
+  }
+  return enriched;
 }
 
 async function handleProjectSharedSheetFill(taskId, req, res) {
@@ -3035,12 +3840,14 @@ async function handleProjectSharedSheetFill(taskId, req, res) {
     } else {
       logs.push("[项目共享大表] 当前任务无试考场次，跳过试考填写");
     }
+    const login = getYikaoLoginForRequest(req);
+    const syncedSessions = await enrichSharedSheetSessions(login, sessions, logs);
 
     const settings = tencentDocsSettingsFromEnv(process.env);
     if (!settings.enabled) throw new Error("腾讯文档授权未配置，无法填写项目共享大表");
     const syncResult = await syncExamConfigToTencentDocs({
       config: task.config || {},
-      created: sessions,
+      created: syncedSessions,
       settings,
     });
     logs.push(`[项目共享大表] 已填写 ${syncResult.updatedRows} 个考试场次`);
@@ -3238,6 +4045,7 @@ function parseTaskStartTime(task = {}) {
 function shouldAttemptScheduledPaperBind(task = {}, now = new Date()) {
   const current = task.config?.paperFormBind || {};
   if (current.status === "success" || current.status === "running") return false;
+  if (shouldSkipRecentFailedPaperBindCheck(current, now, PAPER_BIND_FAILURE_COOLDOWN_MS)) return false;
   const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
   if (!formalSession?.session_id) return false;
   const courses = normalizeCourseRecords(task.config || {});
@@ -3549,6 +4357,9 @@ async function requestHandler(req, res) {
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       return await handleAuthLogout(auth, req, res);
     }
+    if ((req.method === "POST" || req.method === "OPTIONS") && url.pathname === "/api/fanwei/bridge/submit") {
+      return await handleFanweiBridgeSubmit(req, res);
+    }
     if (url.pathname === "/api/auth/users" || url.pathname.startsWith("/api/auth/users/")) {
       return await handleAuthUsers(auth, req, res, url);
     }
@@ -3579,6 +4390,30 @@ async function requestHandler(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/import") {
       return await handleImport(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/fanwei/requirement-preview") {
+      return await handleFanweiRequirementPreview(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/fanwei/requirement-import") {
+      return await handleFanweiRequirementImport(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/api/fanwei/auto-read/status") {
+      return await handleFanweiAutoReadStatus(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/fanwei/local-read") {
+      return await handleFanweiLocalRead(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/fanwei/auto-read") {
+      return await handleFanweiAutoRead(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/fanwei/bridge-token") {
+      return await handleFanweiBridgeToken(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/fanwei/bridge-result") {
+      return await handleFanweiBridgeResult(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/api/fanwei/helper-installer") {
+      return await handleFanweiHelperInstaller(url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/templates/exam-request") {
       return await handleExamRequestTemplate(req, res);
@@ -3613,6 +4448,24 @@ async function requestHandler(req, res) {
     const scoreDownloadMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/scores\/download$/);
     if (req.method === "GET" && scoreDownloadMatch) {
       return await handleScoreDownload(decodeURIComponent(scoreDownloadMatch[1]), req, res);
+    }
+    const sessionChangePreviewMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/sessions\/([^/]+)\/change-preview$/);
+    if (req.method === "GET" && sessionChangePreviewMatch) {
+      return await handleSessionChangePreview(
+        decodeURIComponent(sessionChangePreviewMatch[1]),
+        decodeURIComponent(sessionChangePreviewMatch[2]),
+        req,
+        res,
+      );
+    }
+    const sessionChangeMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/sessions\/([^/]+)\/change$/);
+    if (req.method === "POST" && sessionChangeMatch) {
+      return await handleSessionChange(
+        decodeURIComponent(sessionChangeMatch[1]),
+        decodeURIComponent(sessionChangeMatch[2]),
+        req,
+        res,
+      );
     }
     const taskDetailMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
     if (req.method === "DELETE" && taskDetailMatch) {

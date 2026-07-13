@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ata.yikao-fanwei-helper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HELPER_DIR__/node</string>
+    <string>__HELPER_DIR__/server/fanwei_local_helper_cli.mjs</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__HELPER_DIR__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>YIKAO_HELPER_HOST</key>
+    <string>127.0.0.1</string>
+    <key>YIKAO_HELPER_PORT</key>
+    <string>18765</string>
+    <key>YIKAO_HELPER_CHROME_PORT</key>
+    <string>19222</string>
+    <key>YIKAO_CONSOLE_ORIGINS</key>
+    <string>http://172.16.13.214:8765</string>
+    <key>YIKAO_HELPER_RUNTIME_DIR</key>
+    <string>__HELPER_DIR__</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__HELPER_DIR__/helper.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HELPER_DIR__/helper-error.log</string>
+</dict>
+</plist>

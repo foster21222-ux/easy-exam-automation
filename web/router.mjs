@@ -2,6 +2,7 @@ export const ROUTES = [
   { name: "login", pattern: /^\/login\/?$/, menuKey: "" },
   { name: "projects", pattern: /^\/projects\/?$/, menuKey: "projects" },
   { name: "project-detail", pattern: /^\/projects\/([^/]+)\/?$/, param: "projectId", menuKey: "projects" },
+  { name: "fanwei-test", pattern: /^\/fanwei-test\/?$/, menuKey: "projects" },
   { name: "auto-config", pattern: /^\/auto-config\/?$/, menuKey: "auto-config" },
   { name: "exams", pattern: /^\/exams\/?$/, menuKey: "exams" },
   { name: "exam-detail", pattern: /^\/exams\/([^/]+)\/?$/, param: "examId", menuKey: "exams" },

@@ -7,6 +7,7 @@ import { isFrontendRoute } from "./frontend_routes.mjs";
 const routeCases = [
   ["/projects", "projects", {}],
   ["/projects/project-123", "project-detail", { projectId: "project-123" }],
+  ["/fanwei-test", "fanwei-test", {}],
   ["/login", "login", {}],
   ["/auto-config", "auto-config", {}],
   ["/exams", "exams", {}],
@@ -32,6 +33,7 @@ test("matches every application route and dynamic parameter", () => {
 
 test("maps detail routes to exactly one navigation item", () => {
   assert.equal(menuKeyForRoute(matchRoute("/projects/p1")), "projects");
+  assert.equal(menuKeyForRoute(matchRoute("/fanwei-test")), "projects");
   assert.equal(menuKeyForRoute(matchRoute("/exams/e1")), "exams");
   assert.equal(menuKeyForRoute(matchRoute("/requirements/r1")), "requirements");
   assert.equal(menuKeyForRoute(matchRoute("/wechat-collector")), "wechat-collector");
