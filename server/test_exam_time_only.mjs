@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import test from "node:test";
 import { chromium } from "playwright";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -155,44 +156,52 @@ async function readTime(page, placeholder) {
   }, placeholder);
 }
 
-const settings = JSON.parse(await fs.readFile(settingsPath, "utf8"));
-await fs.mkdir(profileDir, { recursive: true });
+test("manual EasyExam time picker smoke test", {
+  skip: process.env.RUN_EXAM_TIME_ONLY !== "1",
+}, async () => {
+  const settings = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+  await fs.mkdir(profileDir, { recursive: true });
 
-const context = await chromium.launchPersistentContext(profileDir, {
-  channel: "chrome",
-  headless: false,
-  viewport: { width: 1440, height: 1100 },
-  locale: "zh-CN",
-  timezoneId: "Asia/Shanghai",
-  args: ["--window-size=1440,1100"],
+  const context = await chromium.launchPersistentContext(profileDir, {
+    channel: "chrome",
+    headless: false,
+    viewport: { width: 1440, height: 1100 },
+    locale: "zh-CN",
+    timezoneId: "Asia/Shanghai",
+    args: ["--window-size=1440,1100"],
+  });
+
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    await page.goto(addUrl, { waitUntil: "domcontentloaded" });
+    await fillLogin(page, settings.login);
+    if (!page.url().includes("/wizard/add")) {
+      await page.goto(addUrl, { waitUntil: "domcontentloaded" });
+    }
+    await page.waitForTimeout(2000);
+    console.log(`当前 URL: ${page.url()}`);
+    console.log(`页面标题: ${await page.title().catch(() => "")}`);
+    await page.screenshot({ path: path.join(runtimeDir, "time-test-before-wait.png"), fullPage: true });
+    await page.getByPlaceholder("开始时间").first().waitFor({ state: "visible", timeout: 30000 });
+
+    await setTimeRange(page, START, END);
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(500);
+
+    const start = await readTime(page, "开始时间");
+    const end = await readTime(page, "结束时间");
+    await page.screenshot({ path: shotPath, fullPage: true });
+
+    console.log(`开始时间回显: ${start}`);
+    console.log(`结束时间回显: ${end}`);
+    console.log(`截图: ${shotPath}`);
+
+    if (parseDt(start) !== parseDt(START) || parseDt(end) !== parseDt(END)) {
+      throw new Error(`时间回显不一致，期望 ${START} - ${END}，实际 ${start} - ${end}`);
+    }
+
+    console.log("时间单项测试通过");
+  } finally {
+    await context.close();
+  }
 });
-
-const page = context.pages()[0] || (await context.newPage());
-await page.goto(addUrl, { waitUntil: "domcontentloaded" });
-await fillLogin(page, settings.login);
-if (!page.url().includes("/wizard/add")) {
-  await page.goto(addUrl, { waitUntil: "domcontentloaded" });
-}
-await page.waitForTimeout(2000);
-console.log(`当前 URL: ${page.url()}`);
-console.log(`页面标题: ${await page.title().catch(() => "")}`);
-await page.screenshot({ path: path.join(runtimeDir, "time-test-before-wait.png"), fullPage: true });
-await page.getByPlaceholder("开始时间").first().waitFor({ state: "visible", timeout: 30000 });
-
-await setTimeRange(page, START, END);
-await page.keyboard.press("Escape").catch(() => {});
-await page.waitForTimeout(500);
-
-const start = await readTime(page, "开始时间");
-const end = await readTime(page, "结束时间");
-await page.screenshot({ path: shotPath, fullPage: true });
-
-console.log(`开始时间回显: ${start}`);
-console.log(`结束时间回显: ${end}`);
-console.log(`截图: ${shotPath}`);
-
-if (parseDt(start) !== parseDt(START) || parseDt(end) !== parseDt(END)) {
-  throw new Error(`时间回显不一致，期望 ${START} - ${END}，实际 ${start} - ${end}`);
-}
-
-console.log("时间单项测试通过");
