@@ -4,10 +4,10 @@ Last updated: 2026-07-14
 
 ## Safety State
 
-- Working branch: `codex/pr5-selective-integration`
-- Production `main`: unchanged at `e3250c0`
-- Live service on port 8765: unchanged
-- Current activity: Phase 3 requirement and WeChat hardening
+- Integrated branch: `codex/pr5-selective-integration`
+- Production `main`: `8f86e4d`
+- Live service on port 8765: synchronized and healthy
+- Current activity: complete
 
 ## Phase Status
 
@@ -15,10 +15,10 @@ Last updated: 2026-07-14
 | --- | --- | --- |
 | 1. Protect existing production workflows | Complete | `b3a75c6`, `56dcf27`, `ecc644f`, `d61777d`, `e6ff9b5`, `9d4a38d`; spec and quality approved |
 | 2. Selectively synchronize PR operation/email features | Complete | `57cfe72`; spec and quality approved; six-suite regression 229/229 |
-| 3. Harden requirement and WeChat behavior | In progress | Starting manual-edit semantics with failing tests |
-| 4. Harden operation batch and email behavior | Not started | Depends on Phase 2 |
-| 5. Full automated and browser verification | Not started | Depends on Phases 2-4 |
-| 6. Merge and deploy | Not authorized | Requires explicit user approval |
+| 3. Harden requirement and WeChat behavior | Complete | `c94fa3f`; requirement/UI 99/99, WeChat 176/176, intake/Fanwei 72/72 |
+| 4. Harden operation batch and email behavior | Complete | `1dd959f`; focused regression 145/145 |
+| 5. Full automated verification | Complete | Node 596 passed + 1 manual smoke skipped; Python 44/44; browser screenshots skipped by user request |
+| 6. Merge and deploy | Complete | Fast-forwarded and pushed `main` to `8f86e4d`; 8765 health passed |
 
 ## Phase 1 Review Log
 
@@ -36,12 +36,16 @@ Last updated: 2026-07-14
 ## Current Verification
 
 - Protection suite: 18/18 passed
-- Phase 2 focused regression suite: 229/229 passed
+- Full Node suite: 596 passed, 0 failed, 1 explicitly gated manual smoke skipped
+- Full Python suite: 44/44 passed
 - `git diff --check`: clean
 - Inline page module syntax: passed
 - Phase 2 specification review: approved
 - Phase 2 code-quality review: approved
-- Production `main` and port 8765: unchanged
+- Source and managed runtime files: matched after sync
+- Runtime database row counts before/after sync: matched
+- Runtime backup: `/Users/chen/Library/Application Support/yikao-auto-config-web-backups/20260714-183428/.easy_exam_runtime`
+- Port 8765 health: `{"ok":true}`
 
 ## Phase 2 Review Log
 
@@ -54,4 +58,4 @@ Last updated: 2026-07-14
 
 ## Next Action
 
-Add failing tests for requirement no-op edits, explicit clears, and UI dirty-field tracking, then make the smallest database/API/UI corrections required by the Phase 3 plan.
+Monitor the synchronized service. The personnel-task action remains a disabled placeholder and requires a separate implementation.
