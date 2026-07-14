@@ -83,6 +83,7 @@ const EXPECTED_SHARED_REGIONS = {
     { name: "auto-config create route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/jobs\") {" },
     { name: "exam list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/exams\") {" },
     { name: "exam detail route", kind: "anchor-range", startAnchor: "const taskDetailMatch = url.pathname.match(", endAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
+    { name: "candidate dispatcher order", kind: "anchor-range", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {", endAnchor: "const roomsPreviewMatch = url.pathname.match(" },
     { name: "candidate parse route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
     { name: "candidate template route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {" },
     { name: "candidate session list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/sessions\") {" },
@@ -315,8 +316,8 @@ function assertPolicyShape({ exactFiles, sentinels, sharedRegions }) {
   assert.equal(Object.keys(sharedRegions).length, 2, "shared-region policy must contain 2 files");
   assert.equal(
     sharedRegions["server/easy_exam_server.mjs"].length,
-    36,
-    "server shared-region policy must contain 36 entries",
+    37,
+    "server shared-region policy must contain 37 entries",
   );
   assert.equal(
     sharedRegions["outputs/web_prototype/easy_exam_automation.html"].length,
@@ -385,7 +386,7 @@ test("PR 5 policy shape rejects a removed shared-region entry", () => {
       sentinels: PROTECTED_SENTINELS,
       sharedRegions,
     }),
-    /server shared-region policy must contain 36 entries/,
+    /server shared-region policy must contain 37 entries/,
   );
 });
 
@@ -481,6 +482,90 @@ for (const mutation of [
     );
   });
 }
+
+test("PR 5 candidate dispatcher guard rejects wrapping a protected route", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const templateRoute = {
+    name: "candidate template route",
+    kind: "js-block",
+    startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {",
+  };
+  const routeSource = extractProtectedRegion(currentSource, relativePath, templateRoute);
+  const mutatedSource = currentSource.replace(
+    routeSource,
+    `if (false) {\n${routeSource}\n    }`,
+  );
+  assert.notEqual(mutatedSource, currentSource, "candidate template route wrapper was not applied");
+
+  assert.doesNotThrow(
+    () => assertFileRegionsMatch(
+      relativePath,
+      [templateRoute],
+      mutatedSource,
+      baselineFile(relativePath).toString("utf8"),
+    ),
+    "the direct route guard should demonstrate the wrapper bypass",
+  );
+  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === "candidate dispatcher order",
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(
+      relativePath,
+      dispatcherRegion,
+      mutatedSource,
+      baselineFile(relativePath).toString("utf8"),
+    ),
+    /protected region "candidate dispatcher order" differs/,
+  );
+});
+
+test("PR 5 candidate dispatcher guard rejects an earlier shadowing route", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const templateAnchor = "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {";
+  const mutatedSource = currentSource.replace(
+    templateAnchor,
+    `if (url.pathname.startsWith("/api/candidates/")) {\n      return notFound(res);\n    }\n    ${templateAnchor}`,
+  );
+  assert.notEqual(mutatedSource, currentSource, "candidate route shadow was not applied");
+
+  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === "candidate dispatcher order",
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(
+      relativePath,
+      dispatcherRegion,
+      mutatedSource,
+      baselineFile(relativePath).toString("utf8"),
+    ),
+    /protected region "candidate dispatcher order" differs/,
+  );
+});
+
+test("PR 5 candidate dispatcher guard leaves the approved task route insertion point open", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const taskDetailAnchor = "const taskDetailMatch = url.pathname.match(";
+  const mutatedSource = currentSource.replace(
+    taskDetailAnchor,
+    `const operationBatchMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);\n    if (req.method === "POST" && operationBatchMatch) {\n      return await handleOperationBatchCreate(operationBatchMatch[1], req, res);\n    }\n    ${taskDetailAnchor}`,
+  );
+  assert.notEqual(mutatedSource, currentSource, "approved task route insertion was not applied");
+
+  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === "candidate dispatcher order",
+  );
+  assert.equal(dispatcherRegion.length, 1, "candidate dispatcher order policy is missing");
+  assert.doesNotThrow(() => assertFileRegionsMatch(
+    relativePath,
+    dispatcherRegion,
+    mutatedSource,
+    baselineFile(relativePath).toString("utf8"),
+  ));
+});
 
 test("PR 5 shared files retain every protected workflow sentinel", () => {
   for (const [relativePath, sentinels] of Object.entries(PROTECTED_SENTINELS)) {

@@ -71,6 +71,7 @@ export const PROTECTED_SHARED_REGIONS = {
     { name: "auto-config create route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/jobs\") {" },
     { name: "exam list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/exams\") {" },
     { name: "exam detail route", kind: "anchor-range", startAnchor: "const taskDetailMatch = url.pathname.match(", endAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
+    { name: "candidate dispatcher order", kind: "anchor-range", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {", endAnchor: "const roomsPreviewMatch = url.pathname.match(" },
     { name: "candidate parse route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
     { name: "candidate template route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {" },
     { name: "candidate session list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/sessions\") {" },
