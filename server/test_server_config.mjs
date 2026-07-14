@@ -6,6 +6,26 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const serverSource = fs.readFileSync(path.join(rootDir, "server", "easy_exam_server.mjs"), "utf8");
+const requirementApiSource = fs.readFileSync(path.join(rootDir, "server", "requirement_request_api.mjs"), "utf8");
+
+test("content email reads the same configured requirement database as the requirement API", () => {
+  assert.match(requirementApiSource, /process\.env\.REQUIREMENT_DB_PATH \|\| defaultDbPath/);
+  assert.match(
+    serverSource,
+    /const requirementDbPath = path\.resolve\(\s*rootDir,\s*process\.env\.REQUIREMENT_DB_PATH \|\| path\.join\(rootDir, "\.easy_exam_runtime", "requirement_requests\.sqlite3"\),?\s*\);/,
+  );
+});
+
+test("server wires operation collaboration and content email endpoints", () => {
+  assert.match(serverSource, /from "\.\/operation_batch\.mjs"/);
+  assert.match(serverSource, /from "\.\/operation_batch_runner\.mjs"/);
+  assert.match(serverSource, /from "\.\/operation_console_env\.mjs"/);
+  assert.match(serverSource, /from "\.\/content_requirement_email\.mjs"/);
+  assert.match(serverSource, /\/api\/email\/settings/);
+  assert.match(serverSource, /\/api\/operation-console\/environment/);
+  assert.match(serverSource, /operation-batch\\\/create/);
+  assert.match(serverSource, /content-requirement-email/);
+});
 
 test("server listen host can be configured for LAN deployment", () => {
   assert.ok(serverSource.includes("process.env.HOST"));

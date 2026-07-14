@@ -15,6 +15,13 @@ function sourceBetween(start, end) {
   return html.slice(startIndex, endIndex);
 }
 
+function compileInlineFunction(start, end, dependencies = {}) {
+  const source = sourceBetween(start, end).trim();
+  const names = Object.keys(dependencies);
+  const values = Object.values(dependencies);
+  return Function(...names, `return (${source});`)(...values);
+}
+
 test("hidden views cannot be overridden by component display styles", () => {
   assert.match(html, /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/);
 });
@@ -300,6 +307,7 @@ test("WeChat collector page renders config and scheduler status surfaces", () =>
   assert.ok(html.includes("配置备份与恢复"));
   assert.ok(html.includes("附件只在本群最近一次采集中按可见文件名关联"));
   assert.ok(html.includes("staticPage(\"system-config\", systemConfigView, loadWechatCollector"));
+  assert.ok(html.includes('name === "system-config" ? loadSystemConfiguration : enter'));
   assert.ok(html.includes("renderWechatPipelineSmoke(statusData.pipelineSmoke || {})"));
   assert.ok(html.includes("const freshnessText = result.ok ? (result.fresh ? \"有效\" : (result.stale ? \"已过期\" : \"待确认\")) : \"未通过\";"));
   assert.ok(html.includes("完成：${formatTaskTime(result.finishedAt)}"));
@@ -441,6 +449,302 @@ test("requirement center remains present while exam views change", () => {
   assert.ok(html.includes('id="requirementDetailView"'));
   assert.ok(html.includes("RequirementListPage({ root: requirementsView"));
   assert.ok(html.includes("RequirementDetailPage({ root: requirementDetailView"));
+});
+
+test("project and system views expose the selective PR 5 collaboration controls", () => {
+  assert.ok(html.includes('id="projectOperationBatchState"'));
+  assert.ok(html.includes('id="operationBatchCreateBtn"'));
+  assert.ok(html.includes('id="operationBatchRecordBtn"'));
+  assert.ok(html.includes('id="contentRequirementEmailRecipients"'));
+  assert.ok(html.includes('id="contentRequirementEmailSendBtn"'));
+  assert.ok(html.includes('id="emailSettingsPanel"'));
+  assert.ok(html.includes('id="saveEmailSettingsBtn"'));
+  assert.ok(html.includes('id="sendEmailTestBtn"'));
+  assert.ok(html.includes("data-requirement-edit-field"));
+  assert.ok(html.includes("/staff-edit"));
+
+  assert.ok(html.includes('id="autoConfigStack"'));
+  assert.ok(html.includes('id="examListView"'));
+  assert.ok(html.includes('id="candidateImportPanel"'));
+  assert.ok(html.includes('id="fanweiRequirementTable"'));
+});
+
+test("rendering a project clears non-persisted content email recipients", () => {
+  const renderProjectDetail = sourceBetween(
+    "      function renderProjectDetail(task) {",
+    "\n      async function loadProjectDetail(projectId) {",
+  );
+
+  assert.ok(renderProjectDetail.includes('contentRequirementEmailRecipients.value = "";'));
+});
+
+test("project detail loads ignore stale project responses", async () => {
+  const taskViewState = { currentProjectId: "", currentProject: null };
+  const deferredA = Promise.withResolvers();
+  const rendered = [];
+  const loadedPanels = [];
+  const panelState = () => ({ textContent: "" });
+  const dependencies = {
+    taskViewState,
+    fetchJson: async (url) => url.includes("project-a") ? deferredA.promise : { taskId: "project-b" },
+    renderProjectDetail: (task) => {
+      taskViewState.currentProjectId = task.taskId;
+      taskViewState.currentProject = task;
+      rendered.push(task.taskId);
+    },
+    loadProjectOperationBatchDraft: async (task) => {
+      loadedPanels.push(`draft:${task.taskId}`);
+    },
+    loadProjectRequirementForDetail: async (task) => loadedPanels.push(`requirement:${task.taskId}`),
+    loadProjectWechatBinding: async (task = taskViewState.currentProject) => loadedPanels.push(`wechat:${task.taskId}`),
+    isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+    setProjectActionControlsDisabled: () => {},
+    projectOperationBatchState: panelState(),
+    projectRequirementInlineState: panelState(),
+    projectWechatBindingState: panelState(),
+  };
+  const loadProjectDetail = compileInlineFunction(
+    "      async function loadProjectDetail(projectId) {",
+    "\n      function requirementNextAction(item = {}) {",
+    dependencies,
+  );
+
+  const loadA = loadProjectDetail("project-a");
+  await loadProjectDetail("project-b");
+  deferredA.resolve({ taskId: "project-a" });
+  await loadA;
+
+  assert.deepEqual(rendered, ["project-b"]);
+  assert.deepEqual(loadedPanels.sort(), ["draft:project-b", "requirement:project-b", "wechat:project-b"]);
+});
+
+test("project detail follow-up panel failures are isolated", async () => {
+  const taskViewState = { currentProjectId: "", currentProject: null };
+  const loadedPanels = [];
+  const panelState = () => ({ textContent: "" });
+  const dependencies = {
+    taskViewState,
+    fetchJson: async () => ({ taskId: "project-b" }),
+    renderProjectDetail: (task) => {
+      taskViewState.currentProjectId = task.taskId;
+      taskViewState.currentProject = task;
+    },
+    loadProjectOperationBatchDraft: async (task) => {
+      loadedPanels.push(`draft:${task.taskId}`);
+      throw new Error("draft unavailable");
+    },
+    loadProjectRequirementForDetail: async (task) => loadedPanels.push(`requirement:${task.taskId}`),
+    loadProjectWechatBinding: async (task = taskViewState.currentProject) => loadedPanels.push(`wechat:${task.taskId}`),
+    isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+    setProjectActionControlsDisabled: () => {},
+    projectOperationBatchState: panelState(),
+    projectRequirementInlineState: panelState(),
+    projectWechatBindingState: panelState(),
+  };
+  const loadProjectDetail = compileInlineFunction(
+    "      async function loadProjectDetail(projectId) {",
+    "\n      function requirementNextAction(item = {}) {",
+    dependencies,
+  );
+
+  await assert.doesNotReject(loadProjectDetail("project-b"));
+
+  assert.deepEqual(loadedPanels.sort(), ["draft:project-b", "requirement:project-b", "wechat:project-b"]);
+  assert.equal(dependencies.projectOperationBatchState.textContent, "无法加载运营批次参数：draft unavailable");
+});
+
+test("stale project mutation responses do not overwrite the active project or DOM", async () => {
+  const deferred = Promise.withResolvers();
+  const taskViewState = { currentProjectId: "project-a", currentProject: { taskId: "project-a" } };
+  const contentRequirementEmailState = { textContent: "" };
+  const dependencies = {
+    taskViewState,
+    contentRequirementEmailRecipients: { value: "a@example.com" },
+    contentRequirementEmailState,
+    fetchJson: async () => deferred.promise,
+    isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+  };
+  const sendContentRequirementEmailFromProject = compileInlineFunction(
+    "      async function sendContentRequirementEmailFromProject() {",
+    "\n      async function checkOperationConsoleEnvironment() {",
+    dependencies,
+  );
+
+  const sendFromA = sendContentRequirementEmailFromProject();
+  taskViewState.currentProjectId = "project-b";
+  taskViewState.currentProject = { taskId: "project-b" };
+  contentRequirementEmailState.textContent = "project-b-state";
+  deferred.resolve({ task: { taskId: "project-a" }, result: { recipients: ["a@example.com"] } });
+  await sendFromA;
+
+  assert.equal(taskViewState.currentProject.taskId, "project-b");
+  assert.equal(contentRequirementEmailState.textContent, "project-b-state");
+});
+
+test("every project mutation guards each response before updating shared state", () => {
+  const handlers = [
+    ["createProjectOperationBatch", "      async function createProjectOperationBatch() {", "\n      async function recordProjectOperationBatchCode() {"],
+    ["recordProjectOperationBatchCode", "      async function recordProjectOperationBatchCode() {", "\n      const projectRequirementConfigFields = ["],
+    ["handleProjectRequirementStaffEdit", "      async function handleProjectRequirementStaffEdit() {", "\n      async function handleProjectRequirementChangeAction(button) {"],
+    ["handleProjectRequirementChangeAction", "      async function handleProjectRequirementChangeAction(button) {", "\n      async function handleProjectRequirementSubmitAction(button) {"],
+    ["handleProjectRequirementSubmitAction", "      async function handleProjectRequirementSubmitAction(button) {", "\n      function projectWechatIdentity(task = {}) {"],
+    ["saveProjectWechatBinding", "      async function saveProjectWechatBinding() {", "\n      function renderProjectDetail(task) {"],
+    ["sendContentRequirementEmailFromProject", "      async function sendContentRequirementEmailFromProject() {", "\n      async function checkOperationConsoleEnvironment() {"],
+  ];
+
+  for (const [name, start, end] of handlers) {
+    const source = sourceBetween(start, end);
+    assert.ok(source.includes("const taskId = task?.taskId;"), `${name} must capture taskId`);
+    const awaitIndexes = Array.from(source.matchAll(/const result = await fetchJson/g), (match) => match.index);
+    assert.ok(awaitIndexes.length > 0, `${name} must contain a mutation request`);
+    for (const [index, awaitIndex] of awaitIndexes.entries()) {
+      const nextAwaitIndex = awaitIndexes[index + 1] ?? source.length;
+      const guardIndex = source.indexOf("if (!isCurrentProject(taskId)) return;", awaitIndex);
+      assert.ok(guardIndex > awaitIndex && guardIndex < nextAwaitIndex, `${name} must guard mutation response ${index + 1}`);
+    }
+  }
+});
+
+test("project navigation clears stale state and disables actions until current render", async () => {
+  const deferred = Promise.withResolvers();
+  const disabledStates = [];
+  const taskViewState = { currentProjectId: "project-a", currentProject: { taskId: "project-a" } };
+  const dependencies = {
+    taskViewState,
+    fetchJson: async () => deferred.promise,
+    isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+    setProjectActionControlsDisabled: (disabled) => disabledStates.push(disabled),
+    renderProjectDetail: (task) => {
+      taskViewState.currentProject = task;
+      dependencies.setProjectActionControlsDisabled(false);
+    },
+    loadProjectOperationBatchDraft: async () => {},
+    loadProjectRequirementForDetail: async () => {},
+    loadProjectWechatBinding: async () => {},
+    projectOperationBatchState: { textContent: "" },
+    projectRequirementInlineState: { textContent: "" },
+    projectWechatBindingState: { textContent: "" },
+  };
+  const loadProjectDetail = compileInlineFunction(
+    "      async function loadProjectDetail(projectId) {",
+    "\n      function requirementNextAction(item = {}) {",
+    dependencies,
+  );
+
+  const loadB = loadProjectDetail("project-b");
+  assert.equal(taskViewState.currentProject, null);
+  assert.deepEqual(disabledStates, [true]);
+  deferred.resolve({ taskId: "project-b" });
+  await loadB;
+  assert.deepEqual(disabledStates, [true, false]);
+
+  const renderProjectDetail = sourceBetween(
+    "      function renderProjectDetail(task) {",
+    "\n      async function loadProjectDetail(projectId) {",
+  );
+  assert.ok(renderProjectDetail.includes("setProjectActionControlsDisabled(false);"));
+  const actionHelperStart = html.indexOf("      function setProjectActionControlsDisabled(disabled) {");
+  const actionHelperEnd = html.indexOf("\n      async function loadProjectOperationBatchDraft", actionHelperStart);
+  assert.ok(actionHelperStart >= 0 && actionHelperEnd > actionHelperStart);
+  const actionHelper = html.slice(actionHelperStart, actionHelperEnd);
+  for (const control of [
+    "projectAutoConfigBtn",
+    "operationBatchRefreshBtn",
+    "operationBatchCreateBtn",
+    "operationBatchRecordBtn",
+    "contentRequirementEmailSendBtn",
+    "projectWechatBindingRefreshBtn",
+    "projectWechatBindingSaveBtn",
+  ]) {
+    assert.ok(actionHelper.includes(control), `missing project action control: ${control}`);
+  }
+});
+
+test("each asynchronous project panel loader guards shared state by task id", () => {
+  const draftLoader = sourceBetween(
+    "      async function loadProjectOperationBatchDraft(task = taskViewState.currentProject) {",
+    "\n      async function createProjectOperationBatch() {",
+  );
+  const requirementLoader = sourceBetween(
+    "      async function loadProjectRequirementForDetail(task) {",
+    "\n      function collectProjectRequirementStaffEditPayload() {",
+  );
+  const wechatLoader = sourceBetween(
+    "      async function loadProjectWechatBinding",
+    "\n      async function saveProjectWechatBinding() {",
+  );
+
+  for (const loader of [draftLoader, requirementLoader, wechatLoader]) {
+    assert.ok(loader.includes("const taskId = task?.taskId;"));
+    assert.ok(loader.includes("if (!isCurrentProject(taskId)) return;"));
+    const awaitIndex = loader.indexOf("await ");
+    assert.ok(awaitIndex >= 0);
+    assert.ok(loader.indexOf("if (!isCurrentProject(taskId)) return;", awaitIndex) > awaitIndex);
+  }
+});
+
+test("collector route avoids system probes while system configuration isolates panel failures", async () => {
+  const collectorLoader = sourceBetween(
+    "      async function loadWechatCollector() {",
+    "\n      function renderWechatCollectorPreflight(preflight) {",
+  );
+  assert.equal(collectorLoader.includes("/api/operation-console/environment"), false);
+  assert.equal(collectorLoader.includes("/api/email/settings"), false);
+
+  const loaded = [];
+  const dependencies = {
+    loadWechatCollector: async () => loaded.push("collector"),
+    checkOperationConsoleEnvironment: async () => {
+      loaded.push("operation");
+      throw new Error("operation unavailable");
+    },
+    loadEmailSettings: async () => {
+      loaded.push("email");
+      throw new Error("email unavailable");
+    },
+    wechatCollectorPreflight: { innerHTML: "collector-state" },
+    operationConsoleEnvironment: { innerHTML: "" },
+    emailSettingsState: { textContent: "" },
+  };
+  const loadSystemConfiguration = compileInlineFunction(
+    "      async function loadSystemConfiguration() {",
+    "\n      async function saveEmailSettings() {",
+    dependencies,
+  );
+
+  await loadSystemConfiguration();
+
+  assert.deepEqual(loaded.sort(), ["collector", "email", "operation"]);
+  assert.equal(dependencies.wechatCollectorPreflight.innerHTML, "collector-state");
+  assert.equal(dependencies.operationConsoleEnvironment.textContent, "operation unavailable");
+  assert.equal(dependencies.emailSettingsState.textContent, "email unavailable");
+  assert.ok(html.includes('staticPage("system-config", systemConfigView, loadWechatCollector'));
+  assert.ok(html.includes('name === "system-config" ? loadSystemConfiguration : enter'));
+});
+
+test("project clarification submits field identifiers separately from customer questions", () => {
+  const handler = sourceBetween(
+    "      async function handleProjectRequirementSubmitAction(button) {",
+    "\n      function projectWechatIdentity(task = {}) {",
+  );
+
+  assert.ok(handler.includes("missingFields: detail.latest?.missingFields || []"));
+  assert.equal(handler.includes("missingFields: questions"), false);
+});
+
+test("recipient status text uses raw text and manual batch recording preserves its draft", () => {
+  const emailFunctions = sourceBetween(
+    "      async function sendEmailTest() {",
+    "\n      async function checkOperationConsoleEnvironment() {",
+  );
+  const recordBatch = sourceBetween(
+    "      async function recordProjectOperationBatchCode() {",
+    "\n      const projectRequirementConfigFields = [",
+  );
+
+  assert.equal(emailFunctions.includes("safeText((result.result?.recipients || []).join"), false);
+  assert.ok(recordBatch.includes("const draftHtml = projectOperationBatchDraft.innerHTML;"));
+  assert.ok(recordBatch.includes("projectOperationBatchDraft.innerHTML = draftHtml;"));
 });
 
 test("candidate page loads and preselects task-scoped sessions", () => {

@@ -822,7 +822,7 @@ test("PR 5 server dispatcher guard rejects a widened allowlisted route", () => {
 
 test("PR 5 server dispatcher guard rejects an allowlisted route nested in its slot opener", () => {
   const relativePath = "server/easy_exam_server.mjs";
-  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const currentSource = baselineFile(relativePath).toString("utf8");
   const settingsRouteOpen = "if (req.method === \"POST\" && url.pathname === \"/api/settings\") {\n";
   const nestedEmailRoute = `    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {\n      return await handleEmailSettings(req, res);\n    }\n`;
   const mutatedSource = currentSource.replace(
@@ -847,7 +847,7 @@ test("PR 5 server dispatcher guard rejects an allowlisted route nested in its sl
 
 test("PR 5 server dispatcher guard rejects a same-line suffix after an allowlisted route", () => {
   const relativePath = "server/easy_exam_server.mjs";
-  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const currentSource = baselineFile(relativePath).toString("utf8");
   const customerServiceAnchor = "if (url.pathname === \"/api/customer-service-scheduler\" || url.pathname.startsWith(\"/api/customer-service-scheduler/\")) {";
   const emailRouteWithShadow = `if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {\n      return await handleEmailSettings(req, res);\n    } if (req.method === "GET" && url.pathname === "/api/exams") { return notFound(res); }\n    `;
   const mutatedSource = currentSource.replace(
@@ -872,7 +872,7 @@ test("PR 5 server dispatcher guard rejects a same-line suffix after an allowlist
 
 test("PR 5 server dispatcher guard allows only the planned operation and email routes", () => {
   const relativePath = "server/easy_exam_server.mjs";
-  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const currentSource = baselineFile(relativePath).toString("utf8");
   const emailRoutes = `if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {\n      return await handleEmailSettings(req, res);\n    }\n    if (req.method === "POST" && url.pathname === "/api/email/test") {\n      return await handleEmailTest(req, res);\n    }\n    `;
   const operationEnvironmentRoutes = `if (req.method === "GET" && url.pathname === "/api/operation-console/environment") {\n      return await handleOperationConsoleEnvironment(req, res);\n    }\n    if (req.method === "POST" && url.pathname === "/api/operation-console/environment/install") {\n      return await handleOperationConsoleEnvironmentInstall(req, res);\n    }\n    if (req.method === "POST" && url.pathname === "/api/operation-console/environment/enable") {\n      return await handleOperationConsoleEnvironmentEnable(req, res);\n    }\n    `;
   const taskRoutes = `const operationBatchDraftMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/draft$/);\n    if ((req.method === "GET" || req.method === "POST") && operationBatchDraftMatch) {\n      return await handleOperationBatchDraft(decodeURIComponent(operationBatchDraftMatch[1]), req, res);\n    }\n    const operationBatchCreateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);\n    if (req.method === "POST" && operationBatchCreateMatch) {\n      return await handleOperationBatchCreate(decodeURIComponent(operationBatchCreateMatch[1]), req, res);\n    }\n    const operationBatchResultMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/result$/);\n    if (req.method === "POST" && operationBatchResultMatch) {\n      return await handleOperationBatchResult(decodeURIComponent(operationBatchResultMatch[1]), req, res);\n    }\n    const contentRequirementEmailMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/content-requirement-email$/);\n    if (req.method === "POST" && contentRequirementEmailMatch) {\n      return await handleContentRequirementEmail(decodeURIComponent(contentRequirementEmailMatch[1]), req, res);\n    }\n    `;
