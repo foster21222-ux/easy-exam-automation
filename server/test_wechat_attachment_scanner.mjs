@@ -78,7 +78,7 @@ function writeMinimalDocx(filePath, paragraphs) {
 }
 
 function writeMinimalPdf(filePath, lines) {
-  const python = "/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
+  const python = process.env.CODEX_PYTHON || process.env.PYTHON || "python3";
   execFileSync(python, ["-c", `
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics

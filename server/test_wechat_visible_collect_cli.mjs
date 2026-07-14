@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-const nodeBin = "/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node";
+const nodeBin = process.execPath;
 const repoRoot = path.resolve(import.meta.dirname, "..");
 
 test("visible WeChat collector defaults attachment cutoff to the group checkpoint update time", async () => {

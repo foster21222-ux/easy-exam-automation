@@ -588,6 +588,101 @@ test("staff can edit latest requirement into a new audited version", async () =>
   assert.equal(event.payload.message, "人工补充配置需求");
 });
 
+test("staff edit rejects an effective no-op without adding a version or audit event", async () => {
+  const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
+  const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });
+
+  const created = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: "req-staff-edit-no-op",
+    requirement: completeRequirementPayload(),
+  });
+  const requestId = created.body.requirement.requestId;
+  const initialVersionCount = created.body.requirement.versions.length;
+  const initialStaffEditEventCount = created.body.requirement.events.filter(
+    (item) => item.eventType === "requirement_staff_edited",
+  ).length;
+
+  const edited = await callHandler(handler, "POST", `/api/requirements/${requestId}/staff-edit`, {
+    reviewer: "ops-a",
+    requirement: {
+      fields: {
+        exam_name: created.body.requirement.latest.requirement.exam_name,
+        subjects: created.body.requirement.latest.requirement.subjects,
+      },
+    },
+  });
+  const afterEdit = await callHandler(handler, "GET", `/api/requirements/${requestId}`);
+
+  assert.equal(edited.statusCode, 400);
+  assert.match(edited.body.error, /No requirement fields to edit/);
+  assert.equal(afterEdit.body.versions.length, initialVersionCount);
+  assert.equal(
+    afterEdit.body.events.filter((item) => item.eventType === "requirement_staff_edited").length,
+    initialStaffEditEventCount,
+  );
+});
+
+test("staff edit preserves explicit empty replacements in its fields map", async () => {
+  const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
+  const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });
+
+  const created = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: "req-staff-edit-clear",
+    requirement: {
+      ...completeRequirementPayload(),
+      project_manager: "张经理",
+    },
+  });
+
+  const edited = await callHandler(handler, "POST", "/api/requirements/req-staff-edit-clear/staff-edit", {
+    reviewer: "ops-a",
+    requirement: {
+      fields: {
+        project_manager: "",
+        subjects: [],
+      },
+    },
+  });
+
+  assert.equal(edited.statusCode, 200);
+  assert.equal(edited.body.requirement.versions.length, created.body.requirement.versions.length + 1);
+  assert.equal(edited.body.requirement.latest.requirement.project_manager, "");
+  assert.deepEqual(edited.body.requirement.latest.requirement.subjects, []);
+  const staffEditEvents = edited.body.requirement.events.filter(
+    (item) => item.eventType === "requirement_staff_edited",
+  );
+  assert.equal(staffEditEvents.length, 1);
+  assert.deepEqual(staffEditEvents[0].payload.fields, ["project_manager", "subjects"]);
+});
+
+test("staff edit records only keys explicitly present in its fields map", async () => {
+  const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
+  const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });
+
+  const created = await callHandler(handler, "POST", "/api/ai/requirements/upsert", {
+    requestId: "req-staff-edit-explicit-keys",
+    requirement: completeRequirementPayload(),
+  });
+  const originalSubjects = created.body.requirement.latest.requirement.subjects;
+
+  const edited = await callHandler(handler, "POST", "/api/requirements/req-staff-edit-explicit-keys/staff-edit", {
+    reviewer: "ops-a",
+    requirement: {
+      fields: {
+        subjects_text: "数学",
+      },
+    },
+  });
+
+  assert.equal(edited.statusCode, 200);
+  const staffEditEvent = edited.body.requirement.events.find(
+    (item) => item.eventType === "requirement_staff_edited",
+  );
+  assert.deepEqual(staffEditEvent.payload.fields, ["subjects_text"]);
+  assert.equal(edited.body.requirement.latest.requirement.subjects_text, "数学");
+  assert.deepEqual(edited.body.requirement.latest.requirement.subjects, originalSubjects);
+});
+
 test("accepting a pending change after staff edited the same field requires override", async () => {
   const dbPath = path.join(os.tmpdir(), `requirements-${Date.now()}-${Math.random()}.sqlite3`);
   const handler = createRequirementRequestHandler({ dbPath, pythonBin: "python3" });

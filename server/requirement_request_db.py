@@ -146,8 +146,10 @@ def merge_staff_requirement_fields(base, updates):
     merged = dict(base or {})
     edited_fields = []
     for key, value in (updates or {}).items():
-        if is_present_value(value):
-            merged[key] = value
+        normalized_value = normalize_requirement({key: value}).get(key)
+        stored_value = normalize_requirement({key: merged.get(key)}).get(key) if key in merged else None
+        if normalized_value != stored_value:
+            merged[key] = normalized_value
             edited_fields.append(key)
     return merged, edited_fields
 
@@ -446,10 +448,10 @@ class RequirementStore:
     def staff_edit_requirement(self, request_id, requirement=None, reviewer="", message=""):
         now = utc_now()
         raw_requirement = dict(requirement or {})
-        incoming = normalize_requirement(raw_requirement)
-        for default_key in ["watermark_enabled", "copy_forbidden"]:
-            if default_key not in raw_requirement:
-                incoming.pop(default_key, None)
+        raw_fields = raw_requirement.get("fields")
+        explicit_fields = dict(raw_fields) if isinstance(raw_fields, dict) else raw_requirement
+        normalized_fields = normalize_requirement(explicit_fields)
+        incoming = {key: normalized_fields.get(key) for key in explicit_fields}
         with self.connect() as db:
             request = self._require_request(db, request_id)
             latest = db.execute(

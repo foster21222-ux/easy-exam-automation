@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
 
-const nodeBin = "/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node";
+const nodeBin = process.execPath;
 
 test("WeChat pipeline smoke CLI verifies draft and change push through a temporary requirement center", () => {
   const output = execFileSync(nodeBin, ["scripts/wechat_pipeline_smoke_test.mjs"], {

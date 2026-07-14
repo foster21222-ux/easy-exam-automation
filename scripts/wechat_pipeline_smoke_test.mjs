@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const nodeBin = process.env.CODEX_NODE || process.execPath;
-const pythonBin = process.env.CODEX_PYTHON || "/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
+const pythonBin = process.env.CODEX_PYTHON || process.env.PYTHON || "python3";
 
 function parseArgs(argv) {
   const args = {};

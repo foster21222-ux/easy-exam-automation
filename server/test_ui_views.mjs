@@ -469,6 +469,43 @@ test("project and system views expose the selective PR 5 collaboration controls"
   assert.ok(html.includes('id="fanweiRequirementTable"'));
 });
 
+test("requirement edit payload includes only dirty fields and preserves intentional clears", () => {
+  assert.ok(html.includes("data-requirement-edit-original="));
+  assert.ok(html.includes('input.dataset.requirementEditDirty = "true"'));
+
+  const collectProjectRequirementStaffEditPayload = compileInlineFunction(
+    "function collectProjectRequirementStaffEditPayload()",
+    "function markProjectRequirementEditFieldDirty(input)",
+    {
+      projectRequirementInline: {
+        querySelectorAll() {
+          return [
+            {
+              dataset: { requirementEditField: "exam_name", requirementEditDirty: "false" },
+              value: "2026招聘考试",
+            },
+            {
+              dataset: { requirementEditField: "mock_exam_time_range", requirementEditDirty: "true" },
+              value: "",
+            },
+            {
+              dataset: { requirementEditField: "subjects", requirementEditDirty: "true" },
+              value: "",
+            },
+          ];
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(collectProjectRequirementStaffEditPayload(), {
+    fields: {
+      mock_exam_time_range: "",
+      subjects: [],
+    },
+  });
+});
+
 test("rendering a project clears non-persisted content email recipients", () => {
   const renderProjectDetail = sourceBetween(
     "      function renderProjectDetail(task) {",

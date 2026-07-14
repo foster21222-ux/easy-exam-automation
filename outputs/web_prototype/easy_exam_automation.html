@@ -5777,19 +5777,23 @@
 
       function renderProjectRequirementEditField(field, label, payload = {}) {
         const value = payload[field];
+        const originalValue = field === "subjects"
+          ? (Array.isArray(value) ? value : [])
+          : (value ?? "");
+        const editData = `data-requirement-edit-field="${safeText(field)}" data-requirement-edit-original="${safeText(JSON.stringify(originalValue))}" data-requirement-edit-dirty="false"`;
         if (["video_monitor_required", "video_record_required", "hawkeye_required"].includes(field)) {
-          return `<label class="field"><span class="field-label">${safeText(label)}</span><select class="field-input" data-requirement-edit-field="${safeText(field)}"><option value="">不修改</option><option value="true"${value === true ? " selected" : ""}>是</option><option value="false"${value === false ? " selected" : ""}>否</option></select></label>`;
+          return `<label class="field"><span class="field-label">${safeText(label)}</span><select class="field-input" ${editData}><option value="">清空</option><option value="true"${value === true ? " selected" : ""}>是</option><option value="false"${value === false ? " selected" : ""}>否</option></select></label>`;
         }
         if (field === "exam_client_type") {
-          return `<label class="field"><span class="field-label">${safeText(label)}</span><select class="field-input" data-requirement-edit-field="${safeText(field)}"><option value="">不修改</option><option value="web"${value === "web" ? " selected" : ""}>网页考试</option><option value="client"${value === "client" ? " selected" : ""}>客户端考试</option></select></label>`;
+          return `<label class="field"><span class="field-label">${safeText(label)}</span><select class="field-input" ${editData}><option value="">清空</option><option value="web"${value === "web" ? " selected" : ""}>网页考试</option><option value="client"${value === "client" ? " selected" : ""}>客户端考试</option></select></label>`;
         }
         if (field === "subjects") {
-          return `<label class="field"><span class="field-label">${safeText(label)}</span><textarea class="field-input" data-requirement-edit-field="${safeText(field)}" rows="3" placeholder="多个科目用顿号、逗号或换行分隔">${safeText(Array.isArray(value) ? value.join("、") : (value || ""))}</textarea><span class="task-meta">人工编辑科目会按完整列表替换，不会追加合并。</span></label>`;
+          return `<label class="field"><span class="field-label">${safeText(label)}</span><textarea class="field-input" ${editData} rows="3" placeholder="多个科目用顿号、逗号或换行分隔">${safeText(Array.isArray(value) ? value.join("、") : (value || ""))}</textarea><span class="task-meta">人工编辑科目会按完整列表替换，不会追加合并。</span></label>`;
         }
         if (["early_login_minutes", "late_limit_minutes", "leave_limit_count"].includes(field)) {
-          return `<label class="field"><span class="field-label">${safeText(label)}</span><input class="field-input" data-requirement-edit-field="${safeText(field)}" type="number" min="0" step="1" value="${safeText(value ?? "")}" placeholder="留空表示不修改" /></label>`;
+          return `<label class="field"><span class="field-label">${safeText(label)}</span><input class="field-input" ${editData} type="number" min="0" step="1" value="${safeText(value ?? "")}" placeholder="可留空" /></label>`;
         }
-        return `<label class="field"><span class="field-label">${safeText(label)}</span><input class="field-input" data-requirement-edit-field="${safeText(field)}" value="${safeText(value || "")}" placeholder="留空表示不修改" /></label>`;
+        return `<label class="field"><span class="field-label">${safeText(label)}</span><input class="field-input" ${editData} value="${safeText(value || "")}" placeholder="可留空" /></label>`;
       }
 
       function renderProjectRequirementEditPanel(detail = {}) {
@@ -5883,17 +5887,22 @@
       }
 
       function collectProjectRequirementStaffEditPayload() {
-        const requirement = {};
+        const fields = {};
         projectRequirementInline.querySelectorAll("[data-requirement-edit-field]").forEach((input) => {
+          if (input.dataset.requirementEditDirty !== "true") return;
           const field = input.dataset.requirementEditField;
           const value = input.value.trim();
-          if (!field || value === "") return;
-          if (["video_monitor_required", "video_record_required", "hawkeye_required"].includes(field)) requirement[field] = value === "true";
-          else if (["early_login_minutes", "late_limit_minutes", "leave_limit_count"].includes(field)) requirement[field] = Number(value);
-          else if (field === "subjects") requirement[field] = value.split(/[、,，;\n\r]+/).map((item) => item.trim()).filter(Boolean);
-          else requirement[field] = value;
+          if (!field) return;
+          if (["video_monitor_required", "video_record_required", "hawkeye_required"].includes(field)) fields[field] = value === "" ? "" : value === "true";
+          else if (["early_login_minutes", "late_limit_minutes", "leave_limit_count"].includes(field)) fields[field] = value === "" ? "" : Number(value);
+          else if (field === "subjects") fields[field] = value.split(/[、,，;\n\r]+/).map((item) => item.trim()).filter(Boolean);
+          else fields[field] = value;
         });
-        return requirement;
+        return { fields };
+      }
+
+      function markProjectRequirementEditFieldDirty(input) {
+        input.dataset.requirementEditDirty = "true";
       }
 
       async function handleProjectRequirementStaffEdit() {
@@ -5905,8 +5914,8 @@
         const reviewer = projectRequirementInline.querySelector("[data-requirement-edit-reviewer]")?.value?.trim() || "admin-op";
         const message = projectRequirementInline.querySelector("[data-requirement-edit-message]")?.value?.trim() || "人工修订配置需求";
         const requirement = collectProjectRequirementStaffEditPayload();
-        if (!Object.keys(requirement).length) {
-          if (state) state.textContent = "请至少填写一个需要修改或补充的字段。";
+        if (!Object.keys(requirement.fields).length) {
+          if (state) state.textContent = "请至少修改、补充或清空一个字段。";
           return;
         }
         if (!confirm("保存后会生成新的需求版本，并记录人工修订。确认保存？")) return;
@@ -9626,6 +9635,14 @@
         }
         const changeButton = event.target.closest("[data-change-action]");
         if (changeButton) handleProjectRequirementChangeAction(changeButton).catch((error) => { projectRequirementInlineState.textContent = error.message || String(error); });
+      });
+      projectRequirementInline.addEventListener("input", (event) => {
+        const input = event.target.closest("[data-requirement-edit-field]");
+        if (input) markProjectRequirementEditFieldDirty(input);
+      });
+      projectRequirementInline.addEventListener("change", (event) => {
+        const input = event.target.closest("[data-requirement-edit-field]");
+        if (input) markProjectRequirementEditFieldDirty(input);
       });
       projectSearchInput.addEventListener("input", renderProjectList);
       projectStatusFilter.addEventListener("change", renderProjectList);
