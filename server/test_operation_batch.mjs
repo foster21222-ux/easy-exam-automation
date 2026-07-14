@@ -143,6 +143,21 @@ test("operationBatchDisplayId prefers batch code over internal requirement id", 
   }), "internal-request-uuid");
 });
 
+test("operation batch creation guard rejects overlap and allows retry after release", async () => {
+  const module = await import("./operation_batch.mjs");
+  assert.equal(typeof module.acquireOperationBatchCreation, "function");
+  assert.equal(typeof module.releaseOperationBatchCreation, "function");
+  const inFlight = new Set();
+
+  module.acquireOperationBatchCreation(inFlight, "task-1");
+  assert.throws(
+    () => module.acquireOperationBatchCreation(inFlight, "task-1"),
+    (error) => error?.status === 409 && /正在创建/.test(error.message),
+  );
+  module.releaseOperationBatchCreation(inFlight, "task-1");
+  assert.doesNotThrow(() => module.acquireOperationBatchCreation(inFlight, "task-1"));
+});
+
 test("operation batch runner identifies operation console login redirect", () => {
   assert.equal(operationConsoleNeedsLogin("http://172.16.21.201:9004/loginWaiting?response_type=code"), true);
   assert.equal(operationConsoleNeedsLogin("http://172.16.21.201:9003/OAuth2/authorize?redirect_uri=http%3A%2F%2F172.16.18.198%3A8020%2Fuser%2Flogin"), true);

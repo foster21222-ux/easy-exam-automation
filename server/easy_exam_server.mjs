@@ -51,8 +51,10 @@ import {
 } from "./local_auth.mjs";
 import { handleRequirementRequest } from "./requirement_request_api.mjs";
 import {
+  acquireOperationBatchCreation,
   applyOperationBatchResult,
   buildOperationBatchDraft,
+  releaseOperationBatchCreation,
 } from "./operation_batch.mjs";
 import {
   checkOperationConsoleAutomationEnvironment,
@@ -112,6 +114,7 @@ import {
   normalizeEmailSettings,
   redactEmailSettings,
   sendContentRequirementEmail,
+  writeEmailSettingsFile,
 } from "./content_requirement_email.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -3405,13 +3408,14 @@ function deleteLocalApiKeyProfile(profileId) {
 }
 
 function requireAdmin(auth, req, res) {
+  if (!auth.enabled) return { email: "", role: "admin" };
   const user = getAuthUserFromRequest(auth, req);
   if (!user) {
     json(res, 401, { error: "请先登录" });
     return null;
   }
   if (!isAdminUser(user)) {
-    json(res, 403, { error: "只有管理员可以管理用户" });
+    json(res, 403, { error: "只有管理员可以执行此操作" });
     return null;
   }
   return user;
@@ -4054,6 +4058,8 @@ function operationBatchDraftOverridesFromTask(task = {}) {
   };
 }
 
+const operationBatchCreationInFlight = new Set();
+
 async function handleOperationBatchDraft(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
@@ -4097,19 +4103,20 @@ async function handleOperationBatchCreate(taskId, req, res) {
   if (missing.length) {
     return badRequest(res, `批次草稿仍有缺失字段：${missing.join("；")}`);
   }
-  const current = task.config?.operationBatch || {};
-  await runTaskState("update_config", {
-    taskId,
-    config: {
-      operationBatch: {
-        ...current,
-        status: "creating",
-        draft,
-        updatedAt: new Date().toISOString(),
-      },
-    },
-  });
+  acquireOperationBatchCreation(operationBatchCreationInFlight, taskId);
   try {
+    const current = task.config?.operationBatch || {};
+    await runTaskState("update_config", {
+      taskId,
+      config: {
+        operationBatch: {
+          ...current,
+          status: "creating",
+          draft,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
     const created = await runOperationBatchCreation(draft, {
       baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
       userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
@@ -4133,7 +4140,9 @@ async function handleOperationBatchCreate(taskId, req, res) {
         },
       },
     });
-    return json(res, 500, { error: error instanceof Error ? error.message : String(error), task: updated });
+    return json(res, error?.status || 500, { error: error instanceof Error ? error.message : String(error), task: updated });
+  } finally {
+    releaseOperationBatchCreation(operationBatchCreationInFlight, taskId);
   }
 }
 
@@ -4161,8 +4170,7 @@ async function readEmailSettings() {
 }
 
 async function writeEmailSettings(settings) {
-  await fs.mkdir(runtimeDir, { recursive: true });
-  await fs.writeFile(emailSettingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await writeEmailSettingsFile(emailSettingsPath, settings);
 }
 
 async function handleEmailSettings(req, res) {
@@ -4647,9 +4655,11 @@ async function requestHandler(req, res) {
       return await handleSaveSettings(req, res);
     }
     if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {
+      if (!requireAdmin(auth, req, res)) return;
       return await handleEmailSettings(req, res);
     }
     if (req.method === "POST" && url.pathname === "/api/email/test") {
+      if (!requireAdmin(auth, req, res)) return;
       return await handleEmailTest(req, res);
     }
     if (url.pathname === "/api/customer-service-scheduler" || url.pathname.startsWith("/api/customer-service-scheduler/")) {
@@ -4699,9 +4709,11 @@ async function requestHandler(req, res) {
       return await handleOperationConsoleEnvironment(req, res);
     }
     if (req.method === "POST" && url.pathname === "/api/operation-console/environment/install") {
+      if (!requireAdmin(auth, req, res)) return;
       return await handleOperationConsoleEnvironmentInstall(req, res);
     }
     if (req.method === "POST" && url.pathname === "/api/operation-console/environment/enable") {
+      if (!requireAdmin(auth, req, res)) return;
       return await handleOperationConsoleEnvironmentEnable(req, res);
     }
     if (req.method === "GET" && url.pathname === "/api/tasks") {

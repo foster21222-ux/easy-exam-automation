@@ -27,6 +27,42 @@ test("server wires operation collaboration and content email endpoints", () => {
   assert.match(serverSource, /content-requirement-email/);
 });
 
+test("global email and operation environment mutations require administrators", () => {
+  const requestHandler = serverSource.slice(
+    serverSource.indexOf("async function requestHandler"),
+    serverSource.indexOf("await loadEnvFile()"),
+  );
+  for (const route of [
+    'url.pathname === "/api/email/settings"',
+    'url.pathname === "/api/email/test"',
+    'url.pathname === "/api/operation-console/environment/install"',
+    'url.pathname === "/api/operation-console/environment/enable"',
+  ]) {
+    const routeIndex = requestHandler.indexOf(route);
+    assert.ok(routeIndex >= 0, `missing route: ${route}`);
+    const routeBlock = requestHandler.slice(routeIndex, requestHandler.indexOf("\n    }", routeIndex) + 6);
+    assert.ok(routeBlock.includes("requireAdmin(auth, req, res)"), `route is not admin-only: ${route}`);
+  }
+
+  const requireAdminBlock = serverSource.slice(
+    serverSource.indexOf("function requireAdmin"),
+    serverSource.indexOf("async function saveAuthUsers"),
+  );
+  assert.ok(requireAdminBlock.includes("if (!auth.enabled)"));
+  assert.ok(requireAdminBlock.includes('role: "admin"'));
+});
+
+test("operation batch creation uses a per-task guard released in finally", () => {
+  const handler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchCreate"),
+    serverSource.indexOf("async function handleOperationBatchResult"),
+  );
+  assert.ok(serverSource.includes("const operationBatchCreationInFlight = new Set()"));
+  assert.ok(handler.includes("acquireOperationBatchCreation(operationBatchCreationInFlight, taskId)"));
+  assert.ok(handler.includes("finally"));
+  assert.ok(handler.includes("releaseOperationBatchCreation(operationBatchCreationInFlight, taskId)"));
+});
+
 test("server listen host can be configured for LAN deployment", () => {
   assert.ok(serverSource.includes("process.env.HOST"));
   assert.ok(serverSource.includes("server.listen(port, host"));

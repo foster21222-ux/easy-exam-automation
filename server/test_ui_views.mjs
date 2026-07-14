@@ -784,6 +784,17 @@ test("recipient status text uses raw text and manual batch recording preserves i
   assert.ok(recordBatch.includes("projectOperationBatchDraft.innerHTML = draftHtml;"));
 });
 
+test("operation batch create locks its action while the request is in flight", () => {
+  const handler = sourceBetween(
+    "      async function createProjectOperationBatch() {",
+    "\n      async function recordProjectOperationBatchCode() {",
+  );
+  assert.ok(handler.includes("operationBatchCreateBtn.disabled = true"));
+  assert.ok(handler.includes("try {"));
+  assert.ok(handler.includes("finally"));
+  assert.ok(handler.includes("updateOperationBatchActions(taskViewState.currentProject)"));
+});
+
 test("candidate page loads and preselects task-scoped sessions", () => {
   assert.ok(html.includes("async function loadCandidateTaskContext()"));
   assert.ok(html.includes("resolveCandidateTaskContext(task, sessionId)"));

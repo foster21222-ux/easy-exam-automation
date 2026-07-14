@@ -5716,15 +5716,20 @@
           return;
         }
         projectOperationBatchState.textContent = "正在打开运营控制台创建未发布批次...";
-        const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/create`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        if (!isCurrentProject(taskId)) return;
-        taskViewState.currentProject = result.task || task;
-        renderOperationBatchFromTask(taskViewState.currentProject);
-        projectOperationBatchState.textContent = `运营批次已创建：${result.operationBatchCode || taskViewState.currentProject.config?.operationBatchCode || "--"}`;
+        operationBatchCreateBtn.disabled = true;
+        try {
+          const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/create`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          if (!isCurrentProject(taskId)) return;
+          taskViewState.currentProject = result.task || task;
+          renderOperationBatchFromTask(taskViewState.currentProject);
+          projectOperationBatchState.textContent = `运营批次已创建：${result.operationBatchCode || taskViewState.currentProject.config?.operationBatchCode || "--"}`;
+        } finally {
+          if (isCurrentProject(taskId)) updateOperationBatchActions(taskViewState.currentProject);
+        }
       }
 
       async function recordProjectOperationBatchCode() {

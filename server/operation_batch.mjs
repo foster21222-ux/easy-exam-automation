@@ -167,3 +167,16 @@ export function applyOperationBatchResult(task = {}, result = {}) {
 export function operationBatchDisplayId(task = {}) {
   return firstNonEmpty(task.config?.operationBatchCode, task.config?.operationBatch?.code, task.config?.requirementRequestId, task.config?.initialRequirementRequestId);
 }
+
+export function acquireOperationBatchCreation(inFlight, taskId) {
+  if (inFlight.has(taskId)) {
+    const error = new Error("运营批次正在创建，请勿重复提交");
+    error.status = 409;
+    throw error;
+  }
+  inFlight.add(taskId);
+}
+
+export function releaseOperationBatchCreation(inFlight, taskId) {
+  inFlight.delete(taskId);
+}

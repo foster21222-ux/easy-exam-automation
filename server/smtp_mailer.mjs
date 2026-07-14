@@ -13,9 +13,23 @@ function dotStuff(value) {
   return String(value).replace(/^\./gm, "..");
 }
 
+function headerText(value) {
+  const normalized = text(value);
+  if (/\r|\n/.test(normalized)) throw new Error("邮件头包含非法换行");
+  return normalized;
+}
+
+function emailAddress(value) {
+  const email = headerText(value);
+  if (!/^[^\s@<>(),;:\\"\[\]]+@[^\s@<>(),;:\\"\[\]]+\.[^\s@<>(),;:\\"\[\]]+$/.test(email)) {
+    throw new Error(`邮箱地址格式不正确：${email || "空地址"}`);
+  }
+  return email;
+}
+
 function formatAddress(address) {
-  const email = text(address?.email || address);
-  const name = text(address?.name);
+  const email = emailAddress(address?.email || address);
+  const name = headerText(address?.name);
   if (!name) return `<${email}>`;
   return `${JSON.stringify(name)} <${email}>`;
 }
@@ -24,10 +38,11 @@ export function createSmtpMessage({ from, to = [], subject, text: body, html }) 
   const messageId = `<${Date.now()}.${Math.random().toString(16).slice(2)}@easy-exam-automation.local>`;
   const boundary = `easy-exam-${Math.random().toString(16).slice(2)}`;
   const hasHtml = Boolean(text(html));
+  const recipients = to.map(emailAddress);
   const headers = [
     `From: ${formatAddress(from)}`,
-    `To: ${to.join(", ")}`,
-    `Subject: ${text(subject)}`,
+    `To: ${recipients.join(", ")}`,
+    `Subject: ${headerText(subject)}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: ${messageId}`,
     "MIME-Version: 1.0",
@@ -110,6 +125,11 @@ function smtpSession(socket) {
 }
 
 export async function sendSmtpMail({ settings = {}, from, to = [], subject, text: body, html } = {}) {
+  const sender = {
+    email: emailAddress(from?.email || from),
+    name: headerText(from?.name),
+  };
+  const recipients = to.map(emailAddress);
   const socket = connectSocket(settings);
   const session = smtpSession(socket);
   try {
@@ -126,12 +146,12 @@ export async function sendSmtpMail({ settings = {}, from, to = [], subject, text
     await activeSession.command("AUTH LOGIN", /^334/);
     await activeSession.command(b64(settings.username), /^334/);
     await activeSession.command(b64(settings.password), /^235/);
-    await activeSession.command(`MAIL FROM:<${text(from?.email || from)}>`);
-    for (const recipient of to) {
+    await activeSession.command(`MAIL FROM:<${sender.email}>`);
+    for (const recipient of recipients) {
       await activeSession.command(`RCPT TO:<${recipient}>`);
     }
     await activeSession.command("DATA", /^354/);
-    const message = createSmtpMessage({ from, to, subject, text: body, html });
+    const message = createSmtpMessage({ from: sender, to: recipients, subject, text: body, html });
     await activeSession.command(message.raw);
     await activeSession.command("QUIT", /^221|^2/);
     activeSocket.end();

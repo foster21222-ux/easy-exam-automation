@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import { sendSmtpMail } from "./smtp_mailer.mjs";
 
 function text(value) {
@@ -15,6 +18,14 @@ function firstValue(...values) {
 
 function display(value) {
   return text(value) || "—";
+}
+
+function emailAddress(value) {
+  const email = text(value);
+  if (!/^[^\s@<>(),;:\\"\[\]]+@[^\s@<>(),;:\\"\[\]]+\.[^\s@<>(),;:\\"\[\]]+$/.test(email)) {
+    throw new Error(`邮箱地址格式不正确：${email || "空地址"}`);
+  }
+  return email;
 }
 
 function draftField(task = {}, key) {
@@ -105,7 +116,27 @@ export function parseEmailRecipients(value) {
   return String(value || "")
     .split(/[;,\n，；]/)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(emailAddress);
+}
+
+export async function writeEmailSettingsFile(filePath, settings) {
+  const directory = path.dirname(filePath);
+  const tempPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  try {
+    await fs.writeFile(tempPath, `${JSON.stringify(settings, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await fs.rename(tempPath, filePath);
+    await fs.chmod(filePath, 0o600);
+  } finally {
+    await fs.rm(tempPath, { force: true });
+  }
 }
 
 export function buildContentRequirementEmail({ task = {}, requirement = {} } = {}) {
@@ -142,6 +173,7 @@ export function buildContentRequirementEmail({ task = {}, requirement = {} } = {
   const systemLanguage = firstValue(latest.systemLanguage, latest.system_language, task.config?.systemLanguage);
   const tenantName = firstValue(latest.tenantName, latest.tenant_name, task.config?.tenantName);
   const tenantId = firstValue(latest.tenantId, latest.tenant_id, task.config?.tenantId);
+  const requirementVersion = firstValue(requirement.latest?.version);
   const subjects = subjectRows(firstValue(latest.subjects, latest.examSubjects, business.subjects));
   const sendCount = Array.isArray(task.config?.contentRequirementEmail?.history)
     ? task.config.contentRequirementEmail.history.length
@@ -150,6 +182,7 @@ export function buildContentRequirementEmail({ task = {}, requirement = {} } = {
   const basicInfo = [
     ["项目编码", projectCode],
     ["项目名称", projectName],
+    ["需求版本", requirementVersion],
     ["批次代码", batchCode],
     ["批次名称", batchName],
     ["系统类型", systemType],

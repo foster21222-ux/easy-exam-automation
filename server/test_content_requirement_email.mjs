@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
   buildContentRequirementEmail,
   normalizeEmailSettings,
+  parseEmailRecipients,
   redactEmailSettings,
   sendContentRequirementEmail,
+  writeEmailSettingsFile,
 } from "./content_requirement_email.mjs";
 import { createSmtpMessage, friendlySmtpErrorMessage } from "./smtp_mailer.mjs";
 
@@ -113,7 +118,39 @@ test("content task email prioritizes the stored snake_case requirement over stal
   assert.match(message.text, /考试名称：最新招聘考试/);
   assert.match(message.text, /考试开始日期：2026-08-20/);
   assert.match(message.text, /考试结束日期：2026-08-21/);
+  assert.match(message.text, /需求版本：3/);
   assert.doesNotMatch(message.text, /旧任务考试名称|旧业务考试名称|2025-01-10/);
+});
+
+test("email settings are atomically stored with owner-only permissions", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "email-settings-"));
+  const filePath = path.join(dir, "email_settings.json");
+  await writeEmailSettingsFile(filePath, normalizeEmailSettings({
+    fromEmail: "ops@example.com",
+    username: "ops@example.com",
+    password: "secret",
+  }));
+
+  const fileStat = await stat(filePath);
+  assert.equal(fileStat.mode & 0o777, 0o600);
+  const stored = JSON.parse(await readFile(filePath, "utf8"));
+  assert.equal(stored.password, "secret");
+});
+
+test("email recipients and headers reject malformed or injected values", () => {
+  assert.throws(
+    () => parseEmailRecipients("good@example.com; bad-address"),
+    /邮箱地址格式不正确/,
+  );
+  assert.throws(
+    () => createSmtpMessage({
+      from: { email: "ops@example.com", name: "运营自动化" },
+      to: ["customer@example.com"],
+      subject: "内容任务单\r\nBcc: attacker@example.com",
+      text: "test",
+    }),
+    /邮件头/,
+  );
 });
 
 test("content task email requires explicit recipients and sends text plus HTML", async () => {
