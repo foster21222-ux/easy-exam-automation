@@ -117,7 +117,7 @@ export const PROTECTED_SHARED_REGIONS = {
           kind: "js-route-pair",
           startAnchor: "const operationBatchDraftMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/draft$/);",
           routeAnchor: "if ((req.method === \"GET\" || req.method === \"POST\") && operationBatchDraftMatch) {",
-          afterAnchor: "const taskRetryMatch = url.pathname.match(",
+          afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
           beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
         },
         {
@@ -125,7 +125,7 @@ export const PROTECTED_SHARED_REGIONS = {
           kind: "js-route-pair",
           startAnchor: "const operationBatchCreateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);",
           routeAnchor: "if (req.method === \"POST\" && operationBatchCreateMatch) {",
-          afterAnchor: "const taskRetryMatch = url.pathname.match(",
+          afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
           beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
         },
         {
@@ -133,7 +133,7 @@ export const PROTECTED_SHARED_REGIONS = {
           kind: "js-route-pair",
           startAnchor: "const operationBatchResultMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/result$/);",
           routeAnchor: "if (req.method === \"POST\" && operationBatchResultMatch) {",
-          afterAnchor: "const taskRetryMatch = url.pathname.match(",
+          afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
           beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
         },
         {
@@ -141,7 +141,7 @@ export const PROTECTED_SHARED_REGIONS = {
           kind: "js-route-pair",
           startAnchor: "const contentRequirementEmailMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/content-requirement-email$/);",
           routeAnchor: "if (req.method === \"POST\" && contentRequirementEmailMatch) {",
-          afterAnchor: "const taskRetryMatch = url.pathname.match(",
+          afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
           beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
         },
       ],

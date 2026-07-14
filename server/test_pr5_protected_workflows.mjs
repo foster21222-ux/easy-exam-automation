@@ -99,7 +99,7 @@ const EXPECTED_SERVER_DISPATCHER_REGION = {
       kind: "js-route-pair",
       startAnchor: "const operationBatchDraftMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/draft$/);",
       routeAnchor: "if ((req.method === \"GET\" || req.method === \"POST\") && operationBatchDraftMatch) {",
-      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
       beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
     },
     {
@@ -107,7 +107,7 @@ const EXPECTED_SERVER_DISPATCHER_REGION = {
       kind: "js-route-pair",
       startAnchor: "const operationBatchCreateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);",
       routeAnchor: "if (req.method === \"POST\" && operationBatchCreateMatch) {",
-      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
       beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
     },
     {
@@ -115,7 +115,7 @@ const EXPECTED_SERVER_DISPATCHER_REGION = {
       kind: "js-route-pair",
       startAnchor: "const operationBatchResultMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/result$/);",
       routeAnchor: "if (req.method === \"POST\" && operationBatchResultMatch) {",
-      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
       beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
     },
     {
@@ -123,7 +123,7 @@ const EXPECTED_SERVER_DISPATCHER_REGION = {
       kind: "js-route-pair",
       startAnchor: "const contentRequirementEmailMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/content-requirement-email$/);",
       routeAnchor: "if (req.method === \"POST\" && contentRequirementEmailMatch) {",
-      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
       beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
     },
   ],
@@ -308,6 +308,51 @@ function extractHtmlSection(source, startIndex, relativePath, regionName) {
   assert.fail(`${relativePath} protected region "${regionName}" has an unbalanced <${tagName}> element`);
 }
 
+function jsBraceDepthAt(source, targetIndex) {
+  let depth = 0;
+  let state = "code";
+  let escaped = false;
+
+  for (let index = 0; index < targetIndex; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (state === "line-comment") {
+      if (char === "\n") state = "code";
+      continue;
+    }
+    if (state === "block-comment") {
+      if (char === "*" && next === "/") {
+        state = "code";
+        index += 1;
+      }
+      continue;
+    }
+    if (state !== "code") {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === state) state = "code";
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      state = "line-comment";
+      index += 1;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      state = "block-comment";
+      index += 1;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      state = char;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+  }
+  return depth;
+}
+
 function allowedInsertionBounds(source, relativePath, regionName, insertion) {
   const startIndex = findUniqueAnchor(
     source,
@@ -327,9 +372,32 @@ function allowedInsertionBounds(source, relativePath, regionName, insertion) {
     relativePath,
     `${regionName}: ${insertion.name} slot end`,
   );
+  const afterOpen = source.indexOf("{", afterIndex);
+  assert.notEqual(
+    afterOpen,
+    -1,
+    `${relativePath} protected region "${regionName}" has no slot opener for ${insertion.name}`,
+  );
+  const afterEnd = findBalancedEnd(
+    source,
+    afterOpen,
+    "{",
+    "}",
+    relativePath,
+    `${regionName}: ${insertion.name} slot start`,
+  );
   assert.ok(
-    afterIndex < startIndex && startIndex < beforeIndex,
-    `${relativePath} protected region "${regionName}" has ${insertion.name} outside its approved slot`,
+    afterEnd < startIndex,
+    `${relativePath} protected region "${regionName}" has ${insertion.name} before its approved slot boundary`,
+  );
+  assert.ok(
+    startIndex < beforeIndex,
+    `${relativePath} protected region "${regionName}" has ${insertion.name} after its approved slot boundary`,
+  );
+  assert.equal(
+    jsBraceDepthAt(source, startIndex),
+    jsBraceDepthAt(source, beforeIndex),
+    `${relativePath} protected region "${regionName}" has ${insertion.name} nested below dispatcher top level`,
   );
 
   const lineStart = source.lastIndexOf("\n", startIndex - 1) + 1;
@@ -383,15 +451,18 @@ function allowedInsertionBounds(source, relativePath, regionName, insertion) {
 }
 
 function normalizeAllowedInsertions(source, relativePath, region) {
-  let normalized = source;
+  const bounds = [];
   for (const insertion of region.allowedInsertions || []) {
-    if (!normalized.includes(insertion.startAnchor)) continue;
-    const [startIndex, endIndex] = allowedInsertionBounds(
-      normalized,
+    if (!source.includes(insertion.startAnchor)) continue;
+    bounds.push(allowedInsertionBounds(
+      source,
       relativePath,
       region.name,
       insertion,
-    );
+    ));
+  }
+  let normalized = source;
+  for (const [startIndex, endIndex] of bounds.sort((left, right) => right[0] - left[0])) {
     normalized = normalized.slice(0, startIndex) + normalized.slice(endIndex);
   }
   return normalized;
@@ -740,6 +811,31 @@ test("PR 5 server dispatcher guard rejects a widened allowlisted route", () => {
       baselineFile(relativePath).toString("utf8"),
     ),
     /protected region "server dispatcher with approved PR 5 route slots" differs/,
+  );
+});
+
+test("PR 5 server dispatcher guard rejects an allowlisted route nested in its slot opener", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const settingsRouteOpen = "if (req.method === \"POST\" && url.pathname === \"/api/settings\") {\n";
+  const nestedEmailRoute = `    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {\n      return await handleEmailSettings(req, res);\n    }\n`;
+  const mutatedSource = currentSource.replace(
+    settingsRouteOpen,
+    `${settingsRouteOpen}${nestedEmailRoute}`,
+  );
+  assert.notEqual(mutatedSource, currentSource, "nested email settings route was not applied");
+
+  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === EXPECTED_SERVER_DISPATCHER_REGION.name,
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(
+      relativePath,
+      dispatcherRegion,
+      mutatedSource,
+      baselineFile(relativePath).toString("utf8"),
+    ),
+    /email settings route (?:is nested|before its approved slot boundary)/,
   );
 });
 
