@@ -447,7 +447,13 @@ function allowedInsertionBounds(source, relativePath, regionName, insertion) {
   }
 
   const trailingNewline = source.indexOf("\n", endIndex);
-  return [lineStart, trailingNewline === -1 ? endIndex : trailingNewline + 1];
+  const lineEnd = trailingNewline === -1 ? source.length : trailingNewline;
+  assert.equal(
+    source.slice(endIndex, lineEnd).trim(),
+    "",
+    `${relativePath} protected region "${regionName}" insertion ${insertion.name} has a non-whitespace same-line suffix`,
+  );
+  return [lineStart, trailingNewline === -1 ? lineEnd : trailingNewline + 1];
 }
 
 function normalizeAllowedInsertions(source, relativePath, region) {
@@ -836,6 +842,31 @@ test("PR 5 server dispatcher guard rejects an allowlisted route nested in its sl
       baselineFile(relativePath).toString("utf8"),
     ),
     /email settings route (?:is nested|before its approved slot boundary)/,
+  );
+});
+
+test("PR 5 server dispatcher guard rejects a same-line suffix after an allowlisted route", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const customerServiceAnchor = "if (url.pathname === \"/api/customer-service-scheduler\" || url.pathname.startsWith(\"/api/customer-service-scheduler/\")) {";
+  const emailRouteWithShadow = `if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {\n      return await handleEmailSettings(req, res);\n    } if (req.method === "GET" && url.pathname === "/api/exams") { return notFound(res); }\n    `;
+  const mutatedSource = currentSource.replace(
+    customerServiceAnchor,
+    `${emailRouteWithShadow}${customerServiceAnchor}`,
+  );
+  assert.notEqual(mutatedSource, currentSource, "same-line protected-route shadow was not applied");
+
+  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === EXPECTED_SERVER_DISPATCHER_REGION.name,
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(
+      relativePath,
+      dispatcherRegion,
+      mutatedSource,
+      baselineFile(relativePath).toString("utf8"),
+    ),
+    /email settings route has a non-whitespace same-line suffix/,
   );
 });
 
