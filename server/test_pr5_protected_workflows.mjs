@@ -65,6 +65,7 @@ const EXPECTED_SHARED_REGIONS = {
     { name: "Fanwei local-read handler", kind: "js-block", startAnchor: "async function handleFanweiLocalRead(req, res) {" },
     { name: "Fanwei auto-read handler", kind: "js-block", startAnchor: "async function handleFanweiAutoRead(req, res) {" },
     { name: "candidate parse handler", kind: "js-block", startAnchor: "async function handleCandidateParse(req, res) {" },
+    { name: "candidate template handler", kind: "js-block", startAnchor: "async function handleCandidateTemplate(req, res) {" },
     { name: "candidate session list handler", kind: "js-block", startAnchor: "async function handleSessions(req, res) {" },
     { name: "candidate import handler", kind: "js-block", startAnchor: "async function handleCandidateImport(req, res) {" },
     { name: "candidate room preview handler", kind: "js-block", startAnchor: "async function handleRoomsPreview(sessionId, req, res) {" },
@@ -83,6 +84,8 @@ const EXPECTED_SHARED_REGIONS = {
     { name: "exam list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/exams\") {" },
     { name: "exam detail route", kind: "anchor-range", startAnchor: "const taskDetailMatch = url.pathname.match(", endAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
     { name: "candidate parse route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
+    { name: "candidate template route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {" },
+    { name: "candidate session list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/sessions\") {" },
     { name: "candidate import route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/import\") {" },
     { name: "candidate room preview route", kind: "anchor-range", startAnchor: "const roomsPreviewMatch = url.pathname.match(", endAnchor: "const monitorAccountsMatch = url.pathname.match(" },
     { name: "candidate room auto route", kind: "anchor-range", startAnchor: "const roomsAutoMatch = url.pathname.match(", endAnchor: "if (req.method === \"GET\" && url.pathname.startsWith(\"/api/jobs/\") && url.pathname.endsWith(\"/events\")) {" },
@@ -312,8 +315,8 @@ function assertPolicyShape({ exactFiles, sentinels, sharedRegions }) {
   assert.equal(Object.keys(sharedRegions).length, 2, "shared-region policy must contain 2 files");
   assert.equal(
     sharedRegions["server/easy_exam_server.mjs"].length,
-    33,
-    "server shared-region policy must contain 33 entries",
+    36,
+    "server shared-region policy must contain 36 entries",
   );
   assert.equal(
     sharedRegions["outputs/web_prototype/easy_exam_automation.html"].length,
@@ -382,7 +385,7 @@ test("PR 5 policy shape rejects a removed shared-region entry", () => {
       sentinels: PROTECTED_SENTINELS,
       sharedRegions,
     }),
-    /server shared-region policy must contain 33 entries/,
+    /server shared-region policy must contain 36 entries/,
   );
 });
 
@@ -438,6 +441,46 @@ test("PR 5 shared-region guard rejects an immediate return in handleExamList", (
     /protected region "exam list handler" differs/,
   );
 });
+
+for (const mutation of [
+  {
+    name: "candidate template handler",
+    anchor: "async function handleCandidateTemplate(req, res) {\n",
+    insertion: "  return json(res, 200, { candidates: [] });\n",
+  },
+  {
+    name: "candidate template route",
+    anchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {\n",
+    insertion: "      return json(res, 200, { candidates: [] });\n",
+  },
+  {
+    name: "candidate session list route",
+    anchor: "if (req.method === \"GET\" && url.pathname === \"/api/sessions\") {\n",
+    insertion: "      return json(res, 200, { sessions: [] });\n",
+  },
+]) {
+  test(`PR 5 shared-region guard rejects a mutation in ${mutation.name}`, () => {
+    const relativePath = "server/easy_exam_server.mjs";
+    const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+    const mutatedSource = currentSource.replace(
+      mutation.anchor,
+      `${mutation.anchor}${mutation.insertion}`,
+    );
+    assert.notEqual(mutatedSource, currentSource, `${mutation.name} mutation was not applied`);
+    const protectedRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+      (region) => region.name === mutation.name,
+    );
+    assert.throws(
+      () => assertFileRegionsMatch(
+        relativePath,
+        protectedRegion,
+        mutatedSource,
+        baselineFile(relativePath).toString("utf8"),
+      ),
+      new RegExp(`protected region "${mutation.name}" differs`),
+    );
+  });
+}
 
 test("PR 5 shared files retain every protected workflow sentinel", () => {
   for (const [relativePath, sentinels] of Object.entries(PROTECTED_SENTINELS)) {
