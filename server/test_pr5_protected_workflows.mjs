@@ -53,6 +53,82 @@ const EXPECTED_SENTINELS = {
   ],
 };
 
+const EXPECTED_SERVER_DISPATCHER_REGION = {
+  name: "server dispatcher with approved PR 5 route slots",
+  kind: "allowlisted-anchor-range",
+  startAnchor: "async function requestHandler(req, res) {",
+  endAnchor: "const roomsPreviewMatch = url.pathname.match(",
+  allowedInsertions: [
+    {
+      name: "email settings route",
+      kind: "js-block",
+      startAnchor: "if ((req.method === \"GET\" || req.method === \"POST\") && url.pathname === \"/api/email/settings\") {",
+      afterAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/settings\") {",
+      beforeAnchor: "if (url.pathname === \"/api/customer-service-scheduler\" || url.pathname.startsWith(\"/api/customer-service-scheduler/\")) {",
+    },
+    {
+      name: "email test route",
+      kind: "js-block",
+      startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/email/test\") {",
+      afterAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/settings\") {",
+      beforeAnchor: "if (url.pathname === \"/api/customer-service-scheduler\" || url.pathname.startsWith(\"/api/customer-service-scheduler/\")) {",
+    },
+    {
+      name: "operation environment route",
+      kind: "js-block",
+      startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/operation-console/environment\") {",
+      afterAnchor: "if (await handleWechatCollector(req, res, url)) {",
+      beforeAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/tasks\") {",
+    },
+    {
+      name: "operation environment install route",
+      kind: "js-block",
+      startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/operation-console/environment/install\") {",
+      afterAnchor: "if (await handleWechatCollector(req, res, url)) {",
+      beforeAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/tasks\") {",
+    },
+    {
+      name: "operation environment enable route",
+      kind: "js-block",
+      startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/operation-console/environment/enable\") {",
+      afterAnchor: "if (await handleWechatCollector(req, res, url)) {",
+      beforeAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/tasks\") {",
+    },
+    {
+      name: "operation batch draft route",
+      kind: "js-route-pair",
+      startAnchor: "const operationBatchDraftMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/draft$/);",
+      routeAnchor: "if ((req.method === \"GET\" || req.method === \"POST\") && operationBatchDraftMatch) {",
+      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
+    {
+      name: "operation batch create route",
+      kind: "js-route-pair",
+      startAnchor: "const operationBatchCreateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);",
+      routeAnchor: "if (req.method === \"POST\" && operationBatchCreateMatch) {",
+      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
+    {
+      name: "operation batch result route",
+      kind: "js-route-pair",
+      startAnchor: "const operationBatchResultMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/result$/);",
+      routeAnchor: "if (req.method === \"POST\" && operationBatchResultMatch) {",
+      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
+    {
+      name: "content requirement email route",
+      kind: "js-route-pair",
+      startAnchor: "const contentRequirementEmailMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/content-requirement-email$/);",
+      routeAnchor: "if (req.method === \"POST\" && contentRequirementEmailMatch) {",
+      afterAnchor: "const taskRetryMatch = url.pathname.match(",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
+  ],
+};
+
 const EXPECTED_SHARED_REGIONS = {
   "server/easy_exam_server.mjs": [
     { name: "import workbook task creation", kind: "js-block", startAnchor: "async function createImportFromWorkbook({" },
@@ -83,7 +159,7 @@ const EXPECTED_SHARED_REGIONS = {
     { name: "auto-config create route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/jobs\") {" },
     { name: "exam list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/exams\") {" },
     { name: "exam detail route", kind: "anchor-range", startAnchor: "const taskDetailMatch = url.pathname.match(", endAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
-    { name: "candidate dispatcher order", kind: "anchor-range", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {", endAnchor: "const roomsPreviewMatch = url.pathname.match(" },
+    EXPECTED_SERVER_DISPATCHER_REGION,
     { name: "candidate parse route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/parse\") {" },
     { name: "candidate template route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {" },
     { name: "candidate session list route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/sessions\") {" },
@@ -232,8 +308,106 @@ function extractHtmlSection(source, startIndex, relativePath, regionName) {
   assert.fail(`${relativePath} protected region "${regionName}" has an unbalanced <${tagName}> element`);
 }
 
+function allowedInsertionBounds(source, relativePath, regionName, insertion) {
+  const startIndex = findUniqueAnchor(
+    source,
+    insertion.startAnchor,
+    relativePath,
+    `${regionName}: ${insertion.name}`,
+  );
+  const afterIndex = findUniqueAnchor(
+    source,
+    insertion.afterAnchor,
+    relativePath,
+    `${regionName}: ${insertion.name} slot start`,
+  );
+  const beforeIndex = findUniqueAnchor(
+    source,
+    insertion.beforeAnchor,
+    relativePath,
+    `${regionName}: ${insertion.name} slot end`,
+  );
+  assert.ok(
+    afterIndex < startIndex && startIndex < beforeIndex,
+    `${relativePath} protected region "${regionName}" has ${insertion.name} outside its approved slot`,
+  );
+
+  const lineStart = source.lastIndexOf("\n", startIndex - 1) + 1;
+  assert.equal(
+    source.slice(lineStart, startIndex),
+    "    ",
+    `${relativePath} protected region "${regionName}" requires ${insertion.name} at dispatcher top level`,
+  );
+
+  let endIndex;
+  if (insertion.kind === "js-route-pair") {
+    const declarationEnd = source.indexOf(";", startIndex) + 1;
+    assert.ok(
+      declarationEnd > startIndex,
+      `${relativePath} protected region "${regionName}" has no declaration end for ${insertion.name}`,
+    );
+    const routeIfStart = source.indexOf(insertion.routeAnchor, declarationEnd);
+    assert.notEqual(
+      routeIfStart,
+      -1,
+      `${relativePath} protected region "${regionName}" has no approved route condition for ${insertion.name}`,
+    );
+    assert.equal(
+      source.slice(declarationEnd, routeIfStart).trim(),
+      "",
+      `${relativePath} protected region "${regionName}" has unexpected source before ${insertion.name} route block`,
+    );
+    const routeOpen = source.indexOf("{", routeIfStart);
+    endIndex = findBalancedEnd(
+      source,
+      routeOpen,
+      "{",
+      "}",
+      relativePath,
+      `${regionName}: ${insertion.name}`,
+    );
+  } else {
+    const routeOpen = source.indexOf("{", startIndex);
+    endIndex = findBalancedEnd(
+      source,
+      routeOpen,
+      "{",
+      "}",
+      relativePath,
+      `${regionName}: ${insertion.name}`,
+    );
+  }
+
+  const trailingNewline = source.indexOf("\n", endIndex);
+  return [lineStart, trailingNewline === -1 ? endIndex : trailingNewline + 1];
+}
+
+function normalizeAllowedInsertions(source, relativePath, region) {
+  let normalized = source;
+  for (const insertion of region.allowedInsertions || []) {
+    if (!normalized.includes(insertion.startAnchor)) continue;
+    const [startIndex, endIndex] = allowedInsertionBounds(
+      normalized,
+      relativePath,
+      region.name,
+      insertion,
+    );
+    normalized = normalized.slice(0, startIndex) + normalized.slice(endIndex);
+  }
+  return normalized;
+}
+
 function extractProtectedRegion(source, relativePath, region) {
   const startIndex = findUniqueAnchor(source, region.startAnchor, relativePath, region.name);
+  if (region.kind === "allowlisted-anchor-range") {
+    const endIndex = findUniqueAnchor(source, region.endAnchor, relativePath, region.name);
+    assert.ok(endIndex > startIndex, `${relativePath} protected region "${region.name}" anchors are reversed`);
+    return normalizeAllowedInsertions(
+      source.slice(startIndex, endIndex),
+      relativePath,
+      region,
+    );
+  }
   if (region.kind === "anchor-range") {
     const endIndex = findUniqueAnchor(source, region.endAnchor, relativePath, region.name);
     assert.ok(endIndex > startIndex, `${relativePath} protected region "${region.name}" anchors are reversed`);
@@ -483,7 +657,7 @@ for (const mutation of [
   });
 }
 
-test("PR 5 candidate dispatcher guard rejects wrapping a protected route", () => {
+test("PR 5 server dispatcher guard rejects wrapping a protected route", () => {
   const relativePath = "server/easy_exam_server.mjs";
   const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
   const templateRoute = {
@@ -508,7 +682,7 @@ test("PR 5 candidate dispatcher guard rejects wrapping a protected route", () =>
     "the direct route guard should demonstrate the wrapper bypass",
   );
   const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
-    (region) => region.name === "candidate dispatcher order",
+    (region) => region.name === EXPECTED_SERVER_DISPATCHER_REGION.name,
   );
   assert.throws(
     () => assertFileRegionsMatch(
@@ -517,48 +691,87 @@ test("PR 5 candidate dispatcher guard rejects wrapping a protected route", () =>
       mutatedSource,
       baselineFile(relativePath).toString("utf8"),
     ),
-    /protected region "candidate dispatcher order" differs/,
+    /protected region "server dispatcher with approved PR 5 route slots" differs/,
   );
 });
 
-test("PR 5 candidate dispatcher guard rejects an earlier shadowing route", () => {
-  const relativePath = "server/easy_exam_server.mjs";
-  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
-  const templateAnchor = "if (req.method === \"POST\" && url.pathname === \"/api/candidates/generate-template\") {";
-  const mutatedSource = currentSource.replace(
-    templateAnchor,
-    `if (url.pathname.startsWith("/api/candidates/")) {\n      return notFound(res);\n    }\n    ${templateAnchor}`,
-  );
-  assert.notEqual(mutatedSource, currentSource, "candidate route shadow was not applied");
-
-  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
-    (region) => region.name === "candidate dispatcher order",
-  );
-  assert.throws(
-    () => assertFileRegionsMatch(
-      relativePath,
-      dispatcherRegion,
-      mutatedSource,
-      baselineFile(relativePath).toString("utf8"),
-    ),
-    /protected region "candidate dispatcher order" differs/,
-  );
-});
-
-test("PR 5 candidate dispatcher guard leaves the approved task route insertion point open", () => {
+test("PR 5 server dispatcher guard rejects a shadow before task detail dispatch", () => {
   const relativePath = "server/easy_exam_server.mjs";
   const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
   const taskDetailAnchor = "const taskDetailMatch = url.pathname.match(";
   const mutatedSource = currentSource.replace(
     taskDetailAnchor,
-    `const operationBatchMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);\n    if (req.method === "POST" && operationBatchMatch) {\n      return await handleOperationBatchCreate(operationBatchMatch[1], req, res);\n    }\n    ${taskDetailAnchor}`,
+    `if (url.pathname.startsWith("/api/candidates/") || url.pathname === "/api/sessions") {\n      return notFound(res);\n    }\n    ${taskDetailAnchor}`,
   );
-  assert.notEqual(mutatedSource, currentSource, "approved task route insertion was not applied");
+  assert.notEqual(mutatedSource, currentSource, "pre-dispatch candidate route shadow was not applied");
 
   const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
-    (region) => region.name === "candidate dispatcher order",
+    (region) => region.name === EXPECTED_SERVER_DISPATCHER_REGION.name,
   );
-  assert.equal(dispatcherRegion.length, 1, "candidate dispatcher order policy is missing");
+  assert.throws(
+    () => assertFileRegionsMatch(
+      relativePath,
+      dispatcherRegion,
+      mutatedSource,
+      baselineFile(relativePath).toString("utf8"),
+    ),
+    /protected region "server dispatcher with approved PR 5 route slots" differs/,
+  );
+});
+
+test("PR 5 server dispatcher guard rejects a widened allowlisted route", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const sharedSheetAnchor = "const sharedSheetFillMatch = url.pathname.match(";
+  const mutatedSource = currentSource.replace(
+    sharedSheetAnchor,
+    `const operationBatchCreateMatch = url.pathname.match(/.*/);\n    if (req.method === "POST" && operationBatchCreateMatch) {\n      return await handleOperationBatchCreate(operationBatchCreateMatch[1], req, res);\n    }\n    ${sharedSheetAnchor}`,
+  );
+  assert.notEqual(mutatedSource, currentSource, "widened operation route was not applied");
+
+  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === EXPECTED_SERVER_DISPATCHER_REGION.name,
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(
+      relativePath,
+      dispatcherRegion,
+      mutatedSource,
+      baselineFile(relativePath).toString("utf8"),
+    ),
+    /protected region "server dispatcher with approved PR 5 route slots" differs/,
+  );
+});
+
+test("PR 5 server dispatcher guard allows only the planned operation and email routes", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const emailRoutes = `if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/email/settings") {\n      return await handleEmailSettings(req, res);\n    }\n    if (req.method === "POST" && url.pathname === "/api/email/test") {\n      return await handleEmailTest(req, res);\n    }\n    `;
+  const operationEnvironmentRoutes = `if (req.method === "GET" && url.pathname === "/api/operation-console/environment") {\n      return await handleOperationConsoleEnvironment(req, res);\n    }\n    if (req.method === "POST" && url.pathname === "/api/operation-console/environment/install") {\n      return await handleOperationConsoleEnvironmentInstall(req, res);\n    }\n    if (req.method === "POST" && url.pathname === "/api/operation-console/environment/enable") {\n      return await handleOperationConsoleEnvironmentEnable(req, res);\n    }\n    `;
+  const taskRoutes = `const operationBatchDraftMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/draft$/);\n    if ((req.method === "GET" || req.method === "POST") && operationBatchDraftMatch) {\n      return await handleOperationBatchDraft(decodeURIComponent(operationBatchDraftMatch[1]), req, res);\n    }\n    const operationBatchCreateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);\n    if (req.method === "POST" && operationBatchCreateMatch) {\n      return await handleOperationBatchCreate(decodeURIComponent(operationBatchCreateMatch[1]), req, res);\n    }\n    const operationBatchResultMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/result$/);\n    if (req.method === "POST" && operationBatchResultMatch) {\n      return await handleOperationBatchResult(decodeURIComponent(operationBatchResultMatch[1]), req, res);\n    }\n    const contentRequirementEmailMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/content-requirement-email$/);\n    if (req.method === "POST" && contentRequirementEmailMatch) {\n      return await handleContentRequirementEmail(decodeURIComponent(contentRequirementEmailMatch[1]), req, res);\n    }\n    `;
+  const mutatedSource = currentSource
+    .replace(
+      "if (url.pathname === \"/api/customer-service-scheduler\" || url.pathname.startsWith(\"/api/customer-service-scheduler/\")) {",
+      `${emailRoutes}if (url.pathname === "/api/customer-service-scheduler" || url.pathname.startsWith("/api/customer-service-scheduler/")) {`,
+    )
+    .replace(
+      "if (req.method === \"GET\" && url.pathname === \"/api/tasks\") {",
+      `${operationEnvironmentRoutes}if (req.method === "GET" && url.pathname === "/api/tasks") {`,
+    )
+    .replace(
+      "const sharedSheetFillMatch = url.pathname.match(",
+      `${taskRoutes}const sharedSheetFillMatch = url.pathname.match(`,
+    );
+  assert.notEqual(
+    mutatedSource,
+    currentSource,
+    "planned operation and email route insertions were not applied",
+  );
+
+  const dispatcherRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === EXPECTED_SERVER_DISPATCHER_REGION.name,
+  );
+  assert.equal(dispatcherRegion.length, 1, "allowlisted server dispatcher policy is missing");
   assert.doesNotThrow(() => assertFileRegionsMatch(
     relativePath,
     dispatcherRegion,
