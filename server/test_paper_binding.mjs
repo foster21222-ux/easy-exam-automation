@@ -366,6 +366,34 @@ test("detects manually bound paper from tenant session forms endpoint first", as
   ]);
 });
 
+test("does not accept another requirement's paper for the same course", async () => {
+  const requestJson = async (_login, url) => {
+    if (String(url).endsWith("/forms/")) {
+      return { results: [{ code: "FORM-A", name: "第一场综合卷", course_code: "C-01", course_name: "综合能力" }] };
+    }
+    return {
+      id: "S-02",
+      courses: [{
+        code: "C-01",
+        name: "综合能力",
+        forms: [{ code: "FORM-A", name: "第一场综合卷" }],
+      }],
+    };
+  };
+
+  const result = await detectSessionPaperBindings({
+    login: {},
+    apiBase: "https://eztest.cn",
+    sessionId: "S-02",
+    courses: [{ code: "C-01", name: "综合能力", paper_name: "第二场综合卷" }],
+    requestJson,
+    emitLog: () => {},
+  });
+
+  assert.equal(result.status, "waiting_manual");
+  assert.deepEqual(result.missingCourseCodes, ["C-01"]);
+});
+
 test("detects manually bound single-subject paper even when task has no configured courses", async () => {
   const requestJson = async (_login, url) => {
     if (String(url).endsWith("/forms/")) return [];

@@ -78,22 +78,20 @@ function writeMinimalDocx(filePath, paragraphs) {
 }
 
 function writeMinimalPdf(filePath, lines) {
-  const python = process.env.CODEX_PYTHON || process.env.PYTHON || "python3";
-  execFileSync(python, ["-c", `
-from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-import sys
+  writeFileSync(filePath, [
+    "%PDF-1.4",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj",
+    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]>>endobj",
+    `4 0 obj<</FixtureLines(${escapePdf(lines.join(" "))})>>endobj`,
+    "trailer<</Root 1 0 R>>",
+    "%%EOF",
+    "",
+  ].join("\n"));
+}
 
-pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-c = canvas.Canvas(sys.argv[1])
-c.setFont("STSong-Light", 12)
-y = 800
-for line in sys.argv[2:]:
-    c.drawString(72, y, line)
-    y -= 22
-c.save()
-`, filePath, ...lines]);
+function escapePdf(value) {
+  return String(value).replace(/[\\()]/g, "\\$&");
 }
 
 function escapeXml(value) {

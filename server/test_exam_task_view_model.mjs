@@ -7,6 +7,7 @@ import {
   matchesExamTask,
   resolveCandidateTaskContext,
   resolveUnifiedExamCode,
+  sortTaskLogsNewestFirst,
 } from "../web/exam_task_view_model.mjs";
 
 const sessions = [
@@ -93,6 +94,31 @@ test("orders exam tasks by latest formal exam start time first", () => {
     "task-late",
     "task-early",
     "task-missing-formal-time",
+  ]);
+});
+
+test("orders exam task logs by newest time while keeping ties stable", () => {
+  const logs = [
+    { message: "older", time: "2026/7/16 11:29:46" },
+    { message: "newer-first", time: "2026/7/16 11:29:52" },
+    { message: "missing-time" },
+    { message: "newer-second", time: "2026/7/16 11:29:52" },
+    { message: "invalid-time", time: "not-a-time" },
+  ];
+
+  assert.deepEqual(sortTaskLogsNewestFirst(logs).map((log) => log.message), [
+    "newer-first",
+    "newer-second",
+    "older",
+    "missing-time",
+    "invalid-time",
+  ]);
+  assert.deepEqual(logs.map((log) => log.message), [
+    "older",
+    "newer-first",
+    "missing-time",
+    "newer-second",
+    "invalid-time",
   ]);
 });
 

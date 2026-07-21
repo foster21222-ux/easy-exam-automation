@@ -15,10 +15,12 @@ function normalizeCourseRecords(config = {}) {
       const name = String(course?.name || course?.course_name || course?.title || "").trim();
       const code = String(course?.code || course?.course_code || "").trim();
       const formCodes = normalizeCourseFormCodes(course?.form_codes || course?.formCodes || code);
+      const paperName = String(course?.paper_name || course?.paperName || course?.form_name || course?.formName || "").trim();
       return {
         name,
         code,
         form_codes: formCodes.length ? formCodes : code ? [code] : [],
+        ...(paperName ? { paper_name: paperName } : {}),
         order: index + 1,
       };
     })
@@ -168,22 +170,82 @@ function existingCourseByName(courses, name) {
   return courses.find((course) => normalizeCourseName(course?.name) === expected) || null;
 }
 
-export function assignCourseCodesForExamConfig(config = {}, existingTasks = []) {
+function existingCourseByNameAndCode(courses, name, code) {
+  const expectedName = normalizeCourseName(name);
+  const expectedCode = String(code || "").trim();
+  return courses.find((course) => (
+    normalizeCourseName(course?.name) === expectedName
+    && String(course?.code || course?.course_code || "").trim() === expectedCode
+  )) || null;
+}
+
+function taskExamConfigs(task = {}) {
+  const taskConfig = task?.config || {};
+  const requirements = Array.isArray(taskConfig.examRequirements) ? taskConfig.examRequirements : [];
+  return [
+    taskConfig,
+    ...requirements.map((requirement) => requirement?.config || {}),
+  ];
+}
+
+function sameProjectCourses(configs = []) {
+  return (configs || []).flatMap((item) => {
+    const config = item?.config || item || {};
+    return Array.isArray(config.courses) ? config.courses : [];
+  });
+}
+
+export function assignCourseCodesForExamConfig(config = {}, existingTasks = [], sameProjectConfigs = []) {
   const date = extractExamDate(config.startTimeDisplay || config.startTime || config.examStartTime);
   const rawCourses = Array.isArray(config.courses) ? config.courses : [];
   if (!date || !rawCourses.length) return config;
 
+  const projectCourses = sameProjectCourses(sameProjectConfigs);
+  const projectCourseByName = new Map();
+  for (const course of projectCourses) {
+    const name = normalizeCourseName(course?.name);
+    if (name && !projectCourseByName.has(name)) projectCourseByName.set(name, course);
+  }
+  const projectGroup = projectCourses
+    .map((course) => parseCourseCode(course?.code || course?.course_code))
+    .find(Boolean);
+  if (projectGroup) {
+    const usedSubjectSerials = new Set(
+      projectCourses
+        .map((course) => parseCourseCode(course?.code || course?.course_code))
+        .filter((parsed) => parsed?.date === projectGroup.date && parsed.examSerial === projectGroup.examSerial)
+        .map((parsed) => parsed.subjectSerial),
+    );
+    let nextSubjectSerial = 1;
+    const courses = rawCourses.map((course) => {
+      const existing = projectCourseByName.get(normalizeCourseName(course?.name));
+      if (existing) {
+        return withCourseCode(course, String(existing.code || existing.course_code || "").trim());
+      }
+      while (usedSubjectSerials.has(nextSubjectSerial)) nextSubjectSerial += 1;
+      if (nextSubjectSerial > 99) throw new Error("科目编号已占满，请手动处理。");
+      const code = buildCourseCode(projectGroup.date, projectGroup.examSerial, nextSubjectSerial);
+      usedSubjectSerials.add(nextSubjectSerial);
+      nextSubjectSerial += 1;
+      return withCourseCode(course, code);
+    });
+    return { ...config, courses };
+  }
+
   let sameDayTaskCount = 0;
   let maxSerial = 0;
   for (const task of existingTasks || []) {
-    const taskConfig = task?.config || {};
-    const taskDate = extractExamDate(taskConfig.startTimeDisplay || taskConfig.startTime || taskConfig.examStartTime);
-    if (taskDate !== date) continue;
-    sameDayTaskCount += 1;
-    for (const course of taskConfig.courses || []) {
-      const parsed = parseCourseCode(course?.code || course?.course_code);
-      if (parsed?.date === date) maxSerial = Math.max(maxSerial, parsed.examSerial);
+    let taskMatchesDate = false;
+    for (const taskConfig of taskExamConfigs(task)) {
+      const taskDate = extractExamDate(taskConfig.startTimeDisplay || taskConfig.startTime || taskConfig.examStartTime);
+      if (taskDate !== date) continue;
+      taskMatchesDate = true;
+      for (const course of taskConfig.courses || []) {
+        const parsed = parseCourseCode(course?.code || course?.course_code);
+        if (parsed?.date === date) maxSerial = Math.max(maxSerial, parsed.examSerial);
+      }
     }
+    if (taskMatchesDate) sameDayTaskCount += 1;
   }
 
   const examSerial = Math.min(99, Math.max(sameDayTaskCount, maxSerial) + 1);
@@ -280,19 +342,22 @@ export async function ensureFormalCoursesCreated({
   const usedCodes = new Set(
     tenantCourses.map((course) => String(course?.code || course?.course_code || "").trim()).filter(Boolean),
   );
-  const confirmedCourses = [];
-
-  const coursesToCreate = nextAvailableCourseGroup(courses, usedCodes, emitLog);
-
-  for (const course of coursesToCreate) {
-    const existing = existingCourseByName(tenantCourses, course.name);
-    if (existing) {
-      const existingCode = String(existing.code || existing.course_code || course.code).trim();
-      emitLog(`[API 科目] 科目名称已存在，跳过创建：${course.name} / ${existingCode}`);
-      confirmedCourses.push({ ...course, code: existingCode || course.code });
-      if (existingCode) usedCodes.add(existingCode);
+  const confirmedCourses = new Array(courses.length);
+  const pendingCourses = [];
+  for (const [index, course] of courses.entries()) {
+    const existing = existingCourseByNameAndCode(tenantCourses, course.name, course.code);
+    if (!existing) {
+      pendingCourses.push({ index, course });
       continue;
     }
+    emitLog(`[API 科目] 同项目科目已存在，复用编号：${course.name} / ${course.code}`);
+    confirmedCourses[index] = course;
+  }
+
+  const coursesToCreate = nextAvailableCourseGroup(pendingCourses.map((item) => item.course), usedCodes, emitLog);
+
+  for (const [pendingIndex, course] of coursesToCreate.entries()) {
+    const originalIndex = pendingCourses[pendingIndex].index;
 
     let createCode = nextAvailableCourseCode(course.code, usedCodes);
     if (createCode !== course.code) {
@@ -340,10 +405,10 @@ export async function ensureFormalCoursesCreated({
       emitLog,
     });
     usedCodes.add(created.finalCourseCode);
-    confirmedCourses.push(withCourseCode(course, created.finalCourseCode));
+    confirmedCourses[originalIndex] = withCourseCode(course, created.finalCourseCode);
   }
 
-  return confirmedCourses;
+  return confirmedCourses.filter(Boolean);
 }
 
 export { normalizeCourseRecords, normalizeCourseList, nextAvailableCourseCode, isCourseCodeExistsError };

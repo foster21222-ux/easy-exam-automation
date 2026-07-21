@@ -7,10 +7,30 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 
+DEFAULT_CONTENT_ITEMS = ("考前等待提示", "欢迎语", "考试承诺书内容")
+
+
 def normalize_text(value):
     if value is None:
         return ""
     return str(value).strip()
+
+
+def read_requirement_defaults(template_path):
+    wb = load_workbook(Path(template_path), read_only=True, data_only=True)
+    ws = wb["业务需求单"]
+    defaults = {"欢迎语": ""}
+    for row in ws.iter_rows(min_row=5):
+        if len(row) < 4:
+            continue
+        item = normalize_text(row[2].value)
+        if item not in DEFAULT_CONTENT_ITEMS:
+            continue
+        value = normalize_text(row[3].value)
+        if value:
+            defaults[item] = value
+    wb.close()
+    return defaults
 
 
 def fill_requirement_workbook(template_path, output_path, fields):
@@ -42,8 +62,14 @@ def fill_requirement_workbook(template_path, output_path, fields):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--defaults":
+        print(json.dumps(read_requirement_defaults(sys.argv[2]), ensure_ascii=False))
+        return
     if len(sys.argv) != 4:
-        raise SystemExit("Usage: fanwei_requirement_workbook.py <template.xlsx> <payload.json> <output.xlsx>")
+        raise SystemExit(
+            "Usage: fanwei_requirement_workbook.py <template.xlsx> <payload.json> <output.xlsx>\n"
+            "   or: fanwei_requirement_workbook.py --defaults <template.xlsx>"
+        )
     template_path = Path(sys.argv[1])
     payload_path = Path(sys.argv[2])
     output_path = Path(sys.argv[3])

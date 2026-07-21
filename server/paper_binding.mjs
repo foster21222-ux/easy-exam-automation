@@ -226,11 +226,17 @@ function sessionFormResults(sessionId, papers, source = "session_forms") {
 function filterSessionFormsForCourses(papers, courses = []) {
   const requestedCourses = Array.isArray(courses) ? courses : [];
   if (!requestedCourses.length) return papers;
-  const requestedCodes = new Set(requestedCourses.map(normalizeCourseCode).filter(Boolean));
+  const requested = requestedCourses.map((course) => ({
+    code: normalizeCourseCode(course),
+    paperName: normalizeCoursePaperName(course),
+  }));
+  const requestedCodes = new Set(requested.map((course) => course.code).filter(Boolean));
   if (!requestedCodes.size) return papers;
   const withCourseCodes = papers.filter((paper) => paper.courseCode);
-  if (!withCourseCodes.length) return papers;
-  return withCourseCodes.filter((paper) => requestedCodes.has(paper.courseCode));
+  return papers.filter((paper) => requested.some((course) => {
+    if (withCourseCodes.length && paper.courseCode !== course.code) return false;
+    return !course.paperName || paperNameMatches(course.paperName, paper.name);
+  }));
 }
 
 async function fetchSessionForms({ login, apiBase, sessionId, courses, requestJson, emitLog }) {
@@ -355,12 +361,15 @@ async function detectSessionPaperBindings({
   for (const course of requestedCourses) {
     const requestedCourseCode = normalizeCourseCode(course);
     const requestedCourseName = normalizeCourseName(course);
+    const requestedPaperName = normalizeCoursePaperName(course);
     if (!requestedCourseCode) throw new Error(INVALID_PAPER_BINDING_MESSAGE);
     const matched = sessionCourses.find((candidate) => {
       if (candidate.code && candidate.code === requestedCourseCode) return true;
       return !candidate.code && requestedCourseName && candidate.name === requestedCourseName;
     });
-    const papers = (matched?.papers || []).filter((paper) => paper.code || paper.name);
+    const papers = (matched?.papers || [])
+      .filter((paper) => paper.code || paper.name)
+      .filter((paper) => !requestedPaperName || paperNameMatches(requestedPaperName, paper.name));
     if (!matched || !papers.length) {
       missingCourseCodes.push(requestedCourseCode);
       continue;

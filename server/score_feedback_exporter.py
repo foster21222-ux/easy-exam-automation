@@ -8,6 +8,7 @@ from pathlib import Path
 
 DATA_START_ROW = 7
 HEADERS = ("姓名", "性别", "证件号码", "手机号码", "邮箱", "科目", "准考证号", "考试状态", "得分", "违纪情况")
+BASE_COLUMN_COUNT = len(HEADERS)
 TEXT_COLUMNS = (3, 4, 7)
 YELLOW_FILL_RGB = "FFFFFF00"
 TOP_HEADER_MERGES = (
@@ -23,14 +24,21 @@ TOP_HEADER_MERGES = (
     "I4:J4",
 )
 TOP_HEADER_COLUMN_WIDTHS = {
-    "G": 12.0,
-    "H": 12.0,
-    "I": 12.0,
-    "J": 12.0,
+    "B": 12.0,
+    "C": 30.0,
+    "D": 14.0,
+    "E": 22.0,
+    "F": 44.0,
+    "G": 16.0,
+    "H": 8.0,
+    "I": 8.0,
+    "J": 16.0,
 }
 HEADER_FILL_RGB = "FFCCCCCC"
 BODY_FONT_NAME = "微软雅黑"
 BODY_FONT_SIZE = 10
+CONTENT_ROW_HEIGHT = 30
+TOP_CONTENT_ROW_HEIGHT = 34
 
 
 def text(value):
@@ -89,9 +97,10 @@ def copy_row_style(sheet, source_row, target_row):
             target.border = copy.copy(source.border)
 
 
-def clear_row_values(sheet, row):
-    for column in range(1, 11):
+def clear_row_values(sheet, row, max_column=BASE_COLUMN_COUNT):
+    for column in range(1, max_column + 1):
         sheet.cell(row, column).value = None
+        sheet.cell(row, column).hyperlink = None
 
 
 def is_yellow_fill(fill):
@@ -126,7 +135,7 @@ def copy_cell_style(source, target):
     target.border = copy.copy(source.border)
 
 
-def apply_border(sheet, min_row, max_row, min_column=1, max_column=10):
+def apply_border(sheet, min_row, max_row, min_column=1, max_column=BASE_COLUMN_COUNT):
     from openpyxl.styles import Border, Side
 
     thin = Side(style="thin", color="FF000000")
@@ -155,13 +164,30 @@ def set_body_font(cell):
     )
 
 
-def apply_body_font(sheet, min_row, max_row, min_column=1, max_column=10):
+def apply_body_font(sheet, min_row, max_row, min_column=1, max_column=BASE_COLUMN_COUNT):
     for row in range(min_row, max_row + 1):
         for column in range(min_column, max_column + 1):
             set_body_font(sheet.cell(row, column))
 
 
-def apply_header_style(sheet, min_row, max_row, min_column=1, max_column=10):
+def set_centered_content_alignment(cell):
+    from openpyxl.styles import Alignment
+
+    cell.alignment = Alignment(
+        horizontal="center",
+        vertical="center",
+        wrap_text=True,
+        shrink_to_fit=False,
+    )
+
+
+def apply_centered_content_alignment(sheet, min_row, max_row, min_column=1, max_column=BASE_COLUMN_COUNT):
+    for row in range(min_row, max_row + 1):
+        for column in range(min_column, max_column + 1):
+            set_centered_content_alignment(sheet.cell(row, column))
+
+
+def apply_header_style(sheet, min_row, max_row, min_column=1, max_column=BASE_COLUMN_COUNT):
     source = first_cell_with_fill(sheet, HEADER_FILL_RGB)
     if not source:
         return
@@ -170,13 +196,28 @@ def apply_header_style(sheet, min_row, max_row, min_column=1, max_column=10):
             copy_cell_style(source, sheet.cell(row, column))
 
 
-def ensure_score_detail_header(sheet):
+def ensure_title_span(sheet, end_column=BASE_COLUMN_COUNT):
+    from openpyxl.styles import Alignment
+
+    for merged_range in list(sheet.merged_cells.ranges):
+        if merged_range.min_row == 1 and merged_range.max_row == 1:
+            sheet.unmerge_cells(str(merged_range))
+    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_column)
+    cell = sheet.cell(1, 1)
+    cell.alignment = Alignment(
+        horizontal="center",
+        vertical="center",
+        wrap_text=cell.alignment.wrap_text,
+    )
+
+
+def ensure_score_detail_header(sheet, end_column=BASE_COLUMN_COUNT):
     from openpyxl.styles import Alignment
 
     for merged_range in list(sheet.merged_cells.ranges):
         if merged_range.min_row == 5 and merged_range.max_row == 5:
             sheet.unmerge_cells(str(merged_range))
-    sheet.merge_cells(start_row=5, start_column=1, end_row=5, end_column=10)
+    sheet.merge_cells(start_row=5, start_column=1, end_row=5, end_column=end_column)
     cell = sheet.cell(5, 1)
     cell.value = "成绩明细"
     cell.alignment = copy.copy(cell.alignment)
@@ -206,8 +247,7 @@ def ensure_top_header_layout(sheet):
         sheet.merge_cells(range_ref)
     apply_header_style(sheet, 2, 3)
     for column_letter, width in TOP_HEADER_COLUMN_WIDTHS.items():
-        if not sheet.column_dimensions[column_letter].width or sheet.column_dimensions[column_letter].width < width:
-            sheet.column_dimensions[column_letter].width = width
+        sheet.column_dimensions[column_letter].width = width
 
     labels = {
         "A2": "单位名称",
@@ -228,6 +268,13 @@ def ensure_top_header_layout(sheet):
     sheet["F4"] = procurement_contact
     sheet["G4"] = project_manager
     sheet["I4"] = assessment_manager
+    sheet.row_dimensions[4].height = TOP_CONTENT_ROW_HEIGHT
+    for coordinate in ("A4", "B4", "D4", "F4", "G4", "I4"):
+        set_centered_content_alignment(sheet[coordinate])
+    sheet.page_setup.orientation = "landscape"
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
 
 
 def write_row(sheet, row_index, row, default_course):
@@ -252,6 +299,98 @@ def write_row(sheet, row_index, row, default_course):
         cell.value = value
         if column in TEXT_COLUMNS:
             cell.number_format = "@"
+        set_centered_content_alignment(cell)
+    sheet.row_dimensions[row_index].height = max(
+        sheet.row_dimensions[row_index].height or 0,
+        CONTENT_ROW_HEIGHT,
+    )
+
+
+def normalized_reports(row):
+    reports = row.get("reports") or row.get("score_reports") or row.get("assessment_reports") or []
+    if isinstance(reports, dict):
+        reports = list(reports.values())
+    if not isinstance(reports, list):
+        return []
+    normalized = []
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        name = text(report.get("name") or report.get("title") or report.get("label")).strip()
+        url = text(report.get("url") or report.get("link") or report.get("href")).strip()
+        status = text(report.get("status")).strip()
+        if not name or not url:
+            continue
+        normalized.append({"name": name, "url": url, "status": status})
+    return normalized
+
+
+def report_columns(rows):
+    names = []
+    seen = set()
+    for row in rows:
+        for report in normalized_reports(row):
+            key = report["name"]
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(key)
+    return names
+
+
+def report_by_name(row):
+    return {report["name"]: report for report in normalized_reports(row)}
+
+
+def report_column_width(name):
+    return max(22, min(42, len(name) + 8))
+
+
+def apply_report_columns(sheet, rows, report_names, last_data_row):
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    if not report_names:
+        return
+
+    header_source = sheet.cell(6, BASE_COLUMN_COUNT)
+    body_source = sheet.cell(DATA_START_ROW, BASE_COLUMN_COUNT)
+    start_column = BASE_COLUMN_COUNT + 1
+    for offset, name in enumerate(report_names):
+        column = start_column + offset
+        column_letter = get_column_letter(column)
+        sheet.column_dimensions[column_letter].width = report_column_width(name)
+
+        header_cell = sheet.cell(6, column)
+        copy_cell_style(header_source, header_cell)
+        header_cell.value = name
+        set_centered_content_alignment(header_cell)
+
+        for row_index in range(DATA_START_ROW, last_data_row + 1):
+            body_cell = sheet.cell(row_index, column)
+            copy_cell_style(body_source, body_cell)
+            set_centered_content_alignment(body_cell)
+            body_cell.value = None
+            body_cell.hyperlink = None
+
+    for offset, row in enumerate(rows):
+        row_reports = report_by_name(row)
+        row_index = DATA_START_ROW + offset
+        for report_name, report in row_reports.items():
+            if report_name not in report_names:
+                continue
+            column = start_column + report_names.index(report_name)
+            cell = sheet.cell(row_index, column)
+            cell.value = report["name"]
+            cell.hyperlink = report["url"]
+            cell.font = Font(
+                name=BODY_FONT_NAME,
+                sz=BODY_FONT_SIZE,
+                color="FF0563C1",
+                underline="single",
+            )
+
+    apply_border(sheet, 6, last_data_row, start_column, start_column + len(report_names) - 1)
 
 
 def export_score_feedback(template_path, payload_path, output_path):
@@ -268,6 +407,8 @@ def export_score_feedback(template_path, payload_path, output_path):
 
     payload = json.loads(payload_path.read_text("utf-8"))
     rows = payload.get("rows") or []
+    report_names = report_columns(rows)
+    content_column_count = BASE_COLUMN_COUNT + len(report_names)
     workbook = load_workbook(template_path)
     sheet = workbook.active
 
@@ -275,6 +416,7 @@ def export_score_feedback(template_path, payload_path, output_path):
     exam_time = text(payload.get("examTime") or "")
     today = date.today()
     processed_date = text(payload.get("processedDate") or f"{today.year}年{today.month}月{today.day}日")
+    ensure_title_span(sheet, content_column_count)
     ensure_top_header_layout(sheet)
     sheet["B4"] = exam_name
     sheet["D4"] = exam_time
@@ -298,8 +440,8 @@ def export_score_feedback(template_path, payload_path, output_path):
     last_data_row = footer_gap_row - 1
     for row_index in range(DATA_START_ROW, last_data_row + 1):
         copy_row_style(sheet, DATA_START_ROW, row_index)
-        clear_row_values(sheet, row_index)
-    clear_row_values(sheet, footer_gap_row)
+        clear_row_values(sheet, row_index, content_column_count)
+    clear_row_values(sheet, footer_gap_row, content_column_count)
 
     default_course = exam_name
     for offset, row in enumerate(rows):
@@ -312,7 +454,11 @@ def export_score_feedback(template_path, payload_path, output_path):
             sheet.cell(row_index, column).number_format = "@"
 
     remove_yellow_fills(sheet)
-    ensure_score_detail_header(sheet)
+    ensure_score_detail_header(sheet, content_column_count)
+    apply_report_columns(sheet, rows, report_names, last_data_row)
+    apply_centered_content_alignment(sheet, 6, 6, 1, content_column_count)
+    last_content_row = max(6, DATA_START_ROW + len(rows) - 1)
+    apply_body_font(sheet, 2, last_content_row, 1, content_column_count)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
@@ -320,6 +466,7 @@ def export_score_feedback(template_path, payload_path, output_path):
         "ok": True,
         "path": str(output_path),
         "rows": len(rows),
+        "reportColumns": len(report_names),
         "errors": [],
     }
 

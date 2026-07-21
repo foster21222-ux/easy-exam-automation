@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -44,6 +45,22 @@ class ExamRequestParserTest(unittest.TestCase):
         self.assertEqual(result["config"]["manualScoreText"], "旧版判分（包含系统判分及悦评对接）")
         self.assertIn(["考试后", "人工判分", "旧版判分（包含系统判分及悦评对接）", "按需求单配置"], result["previewRows"])
 
+    def test_reads_short_and_chinese_time_ranges(self):
+        year = datetime.now().year
+        result = self.parse_workbook(
+            [
+                ["基本信息", 1, "考试名称", "短时间格式测试"],
+                ["", 2, "考试日期时间", "7-21 15 ：00-16:30"],
+                ["", "", "试考日期时间", "7-21 15 点-16 点半"],
+                ["试卷信息", 17, "科目信息", "综合能力"],
+            ],
+        )
+
+        self.assertEqual(result["config"]["startTimeDisplay"], f"{year}/07/21 15:00")
+        self.assertEqual(result["config"]["endTimeDisplay"], f"{year}/07/21 16:30")
+        self.assertEqual(result["config"]["mockStartTimeDisplay"], f"{year}/07/21 15:00")
+        self.assertEqual(result["config"]["mockEndTimeDisplay"], f"{year}/07/21 16:30")
+
     def test_leaves_manual_scoring_disabled_when_explicitly_not_needed(self):
         result = self.parse_workbook(
             [
@@ -54,6 +71,29 @@ class ExamRequestParserTest(unittest.TestCase):
         )
 
         self.assertFalse(result["config"]["manualScore"])
+
+    def test_defaults_watermark_and_copy_protection_to_enabled(self):
+        default_result = self.parse_workbook(
+            [
+                ["基本信息", 1, "考试名称", "默认防护测试"],
+                ["", 2, "考试日期时间", "2026/7/3 09:00-2026/7/3 10:30"],
+            ],
+        )
+        disabled_result = self.parse_workbook(
+            [
+                ["基本信息", 1, "考试名称", "关闭防护测试"],
+                ["", 2, "考试日期时间", "2026/7/3 09:00-2026/7/3 10:30"],
+                ["考试配置", 20, "答题水印", "否"],
+                ["", 21, "禁止复制", "否"],
+            ],
+        )
+
+        self.assertTrue(default_result["config"]["watermark"])
+        self.assertTrue(default_result["config"]["disableCopy"])
+        self.assertIn(["考试中", "答题水印", "是", "自动勾选"], default_result["previewRows"])
+        self.assertIn(["考试中", "禁止复制", "是", "自动勾选"], default_result["previewRows"])
+        self.assertFalse(disabled_result["config"]["watermark"])
+        self.assertFalse(disabled_result["config"]["disableCopy"])
 
     def test_reads_per_course_paper_names_from_subject_sheet(self):
         with tempfile.TemporaryDirectory() as tmp:

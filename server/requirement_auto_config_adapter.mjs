@@ -6,8 +6,9 @@ export function buildAutoConfigFromRequirement(requirement = {}, options = {}) {
   const formalRange = parseDateTimeRange(requirement.formal_exam_time_range);
   const mockRange = parseDateTimeRange(requirement.mock_exam_time_range);
   const subjects = normalizeSubjects(requirement.subjects || requirement.subjects_text);
+  const paperNames = normalizeSubjects(requirement.paper_names || requirement.paper_names_text);
   const examType = normalizeExamType(requirement.exam_client_type);
-  const courses = buildGeneratedCourses(subjects, formalRange.start);
+  const courses = buildGeneratedCourses(subjects, formalRange.start, paperNames);
 
   if (!requirement.exam_name) warnings.push("缺少考试名称。");
   if (!formalRange.start || !formalRange.end) warnings.push("正式考试时间无法解析。");
@@ -15,6 +16,7 @@ export function buildAutoConfigFromRequirement(requirement = {}, options = {}) {
   if (!requirement.mock_exam_time_range) warnings.push("未读取到试考时间，试考自动创建会跳过。");
   if (!subjects.length) warnings.push("未读取到科目信息，批量导入科目步骤会跳过。");
   if (subjects.length && !courses.length) warnings.push("科目信息缺少考试日期，无法按规则生成 code/form_codes。");
+  if (paperNames.length && paperNames.length !== subjects.length) warnings.push("试卷名称数量与科目数量不一致，请按科目顺序逐项填写。");
 
   const config = {
     examName: normalizeText(requirement.exam_name),
@@ -31,9 +33,9 @@ export function buildAutoConfigFromRequirement(requirement = {}, options = {}) {
     timeRule: normalizeText(requirement.time_rule),
     examAddress: normalizeText(requirement.exam_address),
     unifiedExamAddress: normalizeText(requirement.exam_address) === "统一考试地址",
-    preLoginPrompt: normalizeText(requirement.pre_login_prompt),
+    preLoginPrompt: normalizeRichText(requirement.pre_login_prompt),
     welcomeText: normalizeText(requirement.welcome_text),
-    pledgeContent: normalizeText(requirement.pledge_content),
+    pledgeContent: normalizeRichText(requirement.pledge_content),
     videoMonitor: normalizeBoolean(requirement.video_monitor_required),
     videoRecord: normalizeBoolean(requirement.video_record_required),
     loginVerifyMode: "考后公安验证",
@@ -68,12 +70,77 @@ export function buildAutoConfigFromRequirement(requirement = {}, options = {}) {
 export function parseDateTimeRange(value) {
   const text = normalizeText(value);
   if (!text) return { start: null, end: null };
+  const flexibleRange = parseFlexibleDateTimeRange(text);
+  if (flexibleRange.start && flexibleRange.end) return flexibleRange;
   const matches = [...text.matchAll(/(\d{4}[/-]\d{1,2}[/-]\d{1,2})\s+(\d{1,2}:\d{2})(?::\d{2})?/g)];
   if (matches.length < 2) return { start: null, end: null };
   return {
     start: parseDateTime(`${matches[0][1]} ${matches[0][2]}`),
     end: parseDateTime(`${matches[1][1]} ${matches[1][2]}`),
   };
+}
+
+function normalizeDateTimeText(value) {
+  return normalizeText(value)
+    .replace(/[：]/g, ":")
+    .replace(/[－–—~～]/g, "-")
+    .replace(/到|至/g, "-")
+    .replace(/\s*:\s*/g, ":")
+    .replace(/([0-2]?\d)\s*[点时]\s*半/g, "$1:30")
+    .replace(/([0-2]?\d)\s*[点时](?!\s*半)/g, "$1:00")
+    .replace(/分/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dateMatchToParts(match) {
+  const offset = match.length >= 5 ? 1 : 0;
+  const year = match[offset + 1] ? Number(match[offset + 1]) : new Date().getFullYear();
+  return { year, month: Number(match[offset + 2]), day: Number(match[offset + 3]) };
+}
+
+function extractTimeTokens(text) {
+  return [...String(text || "").matchAll(/(?:^|[^\d])([0-2]?\d)(?::([0-5]?\d))?(?::[0-5]?\d)?(?=$|[^\d])/g)]
+    .map((match) => ({ hour: Number(match[1]), minute: match[2] === undefined ? 0 : Number(match[2]) }))
+    .filter((item) => item.hour >= 0 && item.hour <= 23 && item.minute >= 0 && item.minute <= 59);
+}
+
+function isValidDateTime(value) {
+  if (!value) return false;
+  const date = new Date(value.year, value.month - 1, value.day);
+  return date.getFullYear() === value.year
+    && date.getMonth() === value.month - 1
+    && date.getDate() === value.day
+    && value.hour >= 0
+    && value.hour <= 23
+    && value.minute >= 0
+    && value.minute <= 59;
+}
+
+function parseFlexibleDateTimeRange(value) {
+  const text = normalizeDateTimeText(value);
+  const datePattern = /(^|[^\d:：]|[^\d][:：])(?:(\d{4})\s*[\/\-.年]\s*)?(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})\s*(?:日)?/g;
+  const dateMatches = [...text.matchAll(datePattern)]
+    .filter((match) => isValidDateTime({ ...dateMatchToParts(match), hour: 0, minute: 0 }));
+  if (dateMatches.length >= 2) {
+    const startDate = dateMatchToParts(dateMatches[0]);
+    const endDate = dateMatchToParts(dateMatches[1]);
+    const startTime = extractTimeTokens(text.slice(dateMatches[0].index + dateMatches[0][0].length, dateMatches[1].index))[0];
+    const endTime = extractTimeTokens(text.slice(dateMatches[1].index + dateMatches[1][0].length))[0];
+    const start = startTime ? { ...startDate, ...startTime } : null;
+    const end = endTime ? { ...endDate, ...endTime } : null;
+    return isValidDateTime(start) && isValidDateTime(end) ? { start, end } : { start: null, end: null };
+  }
+  if (dateMatches.length === 1) {
+    const date = dateMatchToParts(dateMatches[0]);
+    const times = extractTimeTokens(text.slice(dateMatches[0].index + dateMatches[0][0].length));
+    if (times.length >= 2) {
+      const start = { ...date, ...times[0] };
+      const end = { ...date, ...times[1] };
+      return isValidDateTime(start) && isValidDateTime(end) ? { start, end } : { start: null, end: null };
+    }
+  }
+  return { start: null, end: null };
 }
 
 function parseDateTime(value) {
@@ -102,7 +169,7 @@ function formatIsoDateTime(value) {
   ].join("-") + `T${String(value.hour).padStart(2, "0")}:${String(value.minute).padStart(2, "0")}:00.000`;
 }
 
-function buildGeneratedCourses(subjects, start) {
+function buildGeneratedCourses(subjects, start, paperNames = []) {
   if (!subjects.length || !start) return [];
   const prefix = [
     String(start.year).padStart(4, "0"),
@@ -111,13 +178,31 @@ function buildGeneratedCourses(subjects, start) {
   ].join("");
   return subjects.map((subject, index) => {
     const code = `${prefix}-01-${String(index + 1).padStart(2, "0")}`;
-    return { name: subject, code, form_codes: [code] };
+    const paperName = normalizeText(paperNames[index]);
+    return { name: subject, code, form_codes: [code], ...(paperName ? { paper_name: paperName } : {}) };
   });
 }
 
 function normalizeText(value) {
   if (value === null || value === undefined) return "";
   return String(value).trim();
+}
+
+function normalizeRichText(value) {
+  const text = normalizeText(value);
+  return richTextPlainText(text) ? text : "";
+}
+
+function richTextPlainText(value) {
+  return normalizeText(value)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .trim();
 }
 
 function normalizeSubjects(value) {

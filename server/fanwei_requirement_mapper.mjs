@@ -98,17 +98,20 @@ function firstNonEmpty(...values) {
 function deriveExamName(fields) {
   const projectName = firstNonEmpty(fields["项目名称"], fields["标题"]);
   const rawOther = cleanText(fields["其他说明"]);
-  const splitCollapsedOther = rawOther
-    .replace(/(有限公司|研究院|集团|学校|中心)\s+([^，,；;\n]+(?:考试|笔试|面试|测评|招聘|校招|统考|联考|考核))/g, "$1\n$2");
+  const firstSeparatorIndex = rawOther.search(/\s/);
+  const splitCollapsedOther = firstSeparatorIndex >= 0
+    ? `${rawOther.slice(0, firstSeparatorIndex)}\n${rawOther.slice(firstSeparatorIndex).trimStart()}`
+    : rawOther;
   const otherLines = splitCollapsedOther
     .split(/\n+/)
-    .map((line) => line.replace(/^[\d、.．)\s-]+/, "").trim())
+    .map((line) => line.replace(/^\s*\d+\s*[、.．)]\s*/, "").trim())
     .filter(Boolean)
     .filter((line) => !/^(无|暂无|详见附件|见附件|备注|说明)$/i.test(line));
+  if (otherLines.length >= 2) return otherLines[1];
   const nameLikeLines = otherLines.filter((line) => {
     if (line.length < 4 || line.length > 80) return false;
     if (/[:：]/.test(line)) return false;
-    return /(考试|笔试|面试|测评|招聘|校招|统考|联考|考核)/.test(line);
+    return /(考试|笔试|面试|测评|招聘|选聘|校招|统考|联考|考核)/.test(line);
   });
   if (nameLikeLines.length) return nameLikeLines.join("\n");
   return projectName;
@@ -256,7 +259,12 @@ export function buildFanweiRequirementModel(fanwei) {
   appendPreview(previewFields, "考试服务范围", fields["考试服务范围"], "泛微主表");
   appendPreview(previewFields, "报名方式", fields["报名方式"], "泛微主表");
   appendPreview(previewFields, "单位名称", confirmationFields["单位名称"], "服务确认单");
-  appendPreview(previewFields, "考试名称", mapped["考试名称"], "服务确认单");
+  appendPreview(
+    previewFields,
+    "考试名称",
+    mapped["考试名称"],
+    confirmationFields["考试名称"] ? "服务确认单" : "泛微主表",
+  );
   appendPreview(
     previewFields,
     "考试时间",

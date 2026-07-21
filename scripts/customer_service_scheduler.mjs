@@ -104,6 +104,7 @@ function recordLocalCustomerServiceSchedulerRun(settings, {
   profileId,
   summary = null,
   error = "",
+  paused = false,
   runAt = new Date().toISOString(),
 } = {}) {
   const profiles = Array.isArray(settings.apiKeyProfiles) ? settings.apiKeyProfiles : [];
@@ -111,7 +112,7 @@ function recordLocalCustomerServiceSchedulerRun(settings, {
   if (!profile) return false;
   profile.customerServiceScheduler = {
     ...(profile.customerServiceScheduler || {}),
-    enabled: profile.customerServiceScheduler?.enabled !== false,
+    enabled: paused ? false : profile.customerServiceScheduler?.enabled !== false,
     intervalMinutes: profile.customerServiceScheduler?.intervalMinutes || 60,
     lastRunAt: runAt,
     lastSummary: summary,
@@ -121,7 +122,7 @@ function recordLocalCustomerServiceSchedulerRun(settings, {
   return true;
 }
 
-async function persistCustomerServiceSchedulerResults({
+export async function persistCustomerServiceSchedulerResults({
   summary,
   runtimeSettingsPath = path.join(defaultRootDir, ".easy_exam_runtime", "settings.json"),
   userSettingsPath = path.join(defaultRootDir, ".easy_exam_runtime", "user_settings.json"),
@@ -144,6 +145,7 @@ async function persistCustomerServiceSchedulerResults({
         profileId: item.profileId,
         summary: profileSummary,
         error: item.error || "",
+        paused: item.paused === true,
         runAt,
       }) || changedSettings;
     } else {
@@ -154,10 +156,27 @@ async function persistCustomerServiceSchedulerResults({
         error: item.error || "",
         runAt,
       }) || changedUserSettings;
+      if (item.paused === true) {
+        changedUserSettings = pauseUserCustomerServiceScheduler(userSettings, {
+          userId: item.userId,
+          profileId: item.profileId,
+        }) || changedUserSettings;
+      }
     }
   }
   if (changedSettings) await writeJsonFile(runtimeSettingsPath, settings);
   if (changedUserSettings) await writeJsonFile(userSettingsPath, userSettings);
+}
+
+function pauseUserCustomerServiceScheduler(userSettings, { userId, profileId } = {}) {
+  const key = String(userId || "").trim().toLowerCase();
+  const profile = userSettings?.users?.[key]?.apiKeyProfiles?.find((item) => item.id === profileId);
+  if (!profile) return false;
+  profile.customerServiceScheduler = {
+    ...(profile.customerServiceScheduler || {}),
+    enabled: false,
+  };
+  return true;
 }
 
 async function main() {

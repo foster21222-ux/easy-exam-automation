@@ -76,6 +76,7 @@ export async function runCustomerServiceScheduler({
   const summary = { total: 0, planned: 0, updated: 0, skipped: 0, failed: 0 };
   const sessions = await listTenantSessions({ apiBase, apiKey, fetchImpl });
   summary.total = sessions.length;
+  const actions = [];
 
   for (const item of sessions) {
     const decision = decideCustomerServiceAction(item, now);
@@ -85,13 +86,32 @@ export async function runCustomerServiceScheduler({
       continue;
     }
     summary.planned += 1;
-    logger(`[客服定时] ${dryRun ? "计划" : "执行"} ${decision.action} ${item.id}`);
-    if (dryRun) continue;
+    if (dryRun) {
+      logger(`[客服定时] 计划 ${decision.action} ${item.id}`);
+      continue;
+    }
+    actions.push({ item, decision });
+  }
+
+  if (dryRun || actions.length === 0) return summary;
+
+  const webBase = normalizeWebBase(login?.url || "https://eztest.org");
+  let cookie;
+  try {
+    cookie = await loginToEasyExamManager({ webBase, login, fetchImpl });
+  } catch (error) {
+    error.schedulerSummary = { ...summary, failed: 1 };
+    error.pauseScheduler = true;
+    throw error;
+  }
+  logger(`[客服定时] 管理端登录成功，本轮复用会话处理 ${actions.length} 个场次`);
+
+  for (const { item, decision } of actions) {
+    logger(`[客服定时] 执行 ${decision.action} ${item.id}`);
     try {
       const updateResult = await updateTenantSessionCustomerService({
-        apiBase,
-        apiKey,
-        login,
+        webBase,
+        cookie,
         session: item,
         enabled: decision.desiredEnabled,
         fetchImpl,
@@ -153,7 +173,14 @@ export async function runCustomerServiceSchedulerForTargets({
       });
     } catch (error) {
       summary.failedProfiles += 1;
-      summary.failed += 1;
+      const profileSummary = error?.schedulerSummary || {
+        total: 0,
+        planned: 0,
+        updated: 0,
+        skipped: 0,
+        failed: 1,
+      };
+      addSchedulerTotals(summary, profileSummary);
       const message = error instanceof Error ? error.message : String(error);
       logger(`[${target.userId || "local"} / ${target.label || target.profileId || "API Key"}] ${message}`);
       summary.profiles.push({
@@ -162,11 +189,8 @@ export async function runCustomerServiceSchedulerForTargets({
         label: target.label || "",
         keyHint: target.keyHint || "",
         ok: false,
-        total: 0,
-        planned: 0,
-        updated: 0,
-        skipped: 0,
-        failed: 1,
+        ...profileSummary,
+        paused: error?.pauseScheduler === true,
         error: message,
       });
     }
@@ -183,9 +207,7 @@ async function listTenantSessions({ apiBase, apiKey, fetchImpl }) {
   return normalizeTenantSessions(payload);
 }
 
-async function updateTenantSessionCustomerService({ apiBase, login, session, enabled, fetchImpl }) {
-  const webBase = normalizeWebBase(login?.url || "https://eztest.org");
-  const cookie = await loginToEasyExamManager({ webBase, login, fetchImpl });
+async function updateTenantSessionCustomerService({ webBase, cookie, session, enabled, fetchImpl }) {
   await primeEasyExamSessionContext({ webBase, cookie, session, fetchImpl });
   const currentEnabled = await fetchManagerCustomerServiceState({ webBase, cookie, session, fetchImpl });
   if (currentEnabled === enabled) return { skipped: true, reason: "manager_already_correct" };

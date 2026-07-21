@@ -61,8 +61,10 @@ test("FinalScreenshot component owns the whole screenshot panel", () => {
 test("CandidateImportPage loads task context when entering the route", async () => {
   let entered = 0;
   const root = {};
+  const topbar = {};
   const page = CandidateImportPage({
     root,
+    topbar,
     loadContext: async () => {
       entered += 1;
     },
@@ -71,4 +73,5 @@ test("CandidateImportPage loads task context when entering the route", async () 
   await page.enter();
 
   assert.equal(entered, 1);
+  assert.deepEqual(page.roots, [topbar, root]);
 });

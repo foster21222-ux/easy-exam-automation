@@ -200,6 +200,81 @@ test("derives exam name from collapsed other description lines", () => {
   assert.equal(fields["考试名称"], "四川省通川工程技术开发有限公司校招笔试");
 });
 
+test("keeps a leading year when deriving an exam name from other description", () => {
+  const fields = mapFanweiToRequirementFields({
+    fields: {
+      "运控流水号": "R0041106",
+      "项目名称": "蜀道投资集团有限责任公司招聘笔试",
+      "其他说明": "四川蜀道装备科技股份有限公司\n2026年第4次招聘（校招）-法律事务管理岗/出纳及融资实施岗线上笔试",
+    },
+  });
+
+  assert.equal(
+    fields["考试名称"],
+    "2026年第4次招聘（校招）-法律事务管理岗/出纳及融资实施岗线上笔试",
+  );
+});
+
+test("uses the second other-description line as the internal selection exam name", () => {
+  const fields = mapFanweiToRequirementFields({
+    fields: {
+      "运控流水号": "R0042290",
+      "项目名称": "蜀道投资集团有限责任公司招聘笔试",
+      "其他说明": "四川省川瑞发展投资有限公司 2026年度一般管理岗位内部选聘",
+    },
+  });
+
+  assert.equal(
+    fields["考试名称"],
+    "2026年度一般管理岗位内部选聘",
+  );
+});
+
+test("uses the second other-description line after a branch company name", () => {
+  const fields = mapFanweiToRequirementFields({
+    fields: {
+      "运控流水号": "R0041832",
+      "项目名称": "蜀道投资集团有限责任公司招聘笔试",
+      "其他说明": "四川路桥集团勘察设计分公司 四川路桥集团勘察设计分公司心理测评",
+    },
+  });
+
+  assert.equal(
+    fields["考试名称"],
+    "四川路桥集团勘察设计分公司心理测评",
+  );
+});
+
+test("uses the second collapsed line when it contains the complete recruitment name", () => {
+  const fields = mapFanweiToRequirementFields({
+    fields: {
+      "运控流水号": "R0042377",
+      "项目名称": "蜀道投资集团有限责任公司招聘笔试",
+      "其他说明": "四川省交通建设集团有限责任公司 四川省交通建设集团有限责任公司2026年社会招聘",
+    },
+  });
+
+  assert.equal(
+    fields["考试名称"],
+    "四川省交通建设集团有限责任公司2026年社会招聘",
+  );
+});
+
+test("labels a derived exam name as coming from the Fanwei main form", () => {
+  const model = buildFanweiRequirementModel({
+    fields: {
+      "运控流水号": "R0042290",
+      "项目名称": "蜀道投资集团有限责任公司招聘笔试",
+      "其他说明": "四川省川瑞发展投资有限公司 2026年度一般管理岗位内部选聘",
+    },
+  });
+
+  assert.equal(
+    model.previewFields.find((item) => item.label === "考试名称")?.source,
+    "泛微主表",
+  );
+});
+
 test("builds Fanwei requirement model for R0042182 with hidden fields removed", () => {
   const model = buildFanweiRequirementModel({
     ...fanweiR0042182,

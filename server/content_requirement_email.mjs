@@ -141,9 +141,15 @@ export async function writeEmailSettingsFile(filePath, settings) {
 
 export function buildContentRequirementEmail({ task = {}, requirement = {} } = {}) {
   const business = task.config?.businessRequirement || {};
+  const examRequirement = task.config?.examRequirement || {};
+  const requirementConfig = examRequirement.config || {};
+  const requirementFields = examRequirement.fields || {};
+  const supplements = examRequirement.supplements || {};
+  const strictSnapshot = Boolean(Object.keys(examRequirement).length);
+  const legacyBusiness = strictSnapshot ? {} : business;
   const latest = requirement.latest?.requirement || {};
-  const projectName = firstValue(latest.exam_name, latest.examName, latest.projectName, business.project_name, task.projectName);
-  const customerName = firstValue(latest.customerName, business.customer_name, task.config?.customerName);
+  const projectName = firstValue(latest.exam_name, latest.examName, latest.projectName, requirementConfig.examName, requirementFields["考试名称"], task.projectName);
+  const customerName = firstValue(latest.customerName, requirement.customer?.name, requirementConfig.customerName, task.config?.customerName, legacyBusiness.customer_name);
   const projectCode = firstValue(business.project_code, task.config?.projectCode);
   const batchCode = firstValue(task.config?.operationBatchCode, task.config?.operationBatch?.code);
   const formalExamTime = firstValue(
@@ -151,30 +157,38 @@ export function buildContentRequirementEmail({ task = {}, requirement = {} } = {
     latest.formalExamTime,
     latest.examTime,
     latest.startTimeDisplay,
-    business.formal_exam_time,
-    business.exam_time,
+    requirementFields["考试日期时间"],
+    requirementConfig.startTimeDisplay && requirementConfig.endTimeDisplay
+      ? `${requirementConfig.startTimeDisplay}-${requirementConfig.endTimeDisplay}`
+      : "",
+    legacyBusiness.formal_exam_time,
+    legacyBusiness.exam_time,
   );
   const trialExamTime = firstValue(
     latest.mock_exam_time_range,
     latest.trialExamTime,
     latest.mockStartTimeDisplay,
-    business.trial_exam_time,
+    requirementFields["试考日期时间"],
+    requirementConfig.mockStartTimeDisplay && requirementConfig.mockEndTimeDisplay
+      ? `${requirementConfig.mockStartTimeDisplay}-${requirementConfig.mockEndTimeDisplay}`
+      : "",
+    legacyBusiness.trial_exam_time,
   );
-  const dates = scheduleDates(business, formalExamTime);
+  const dates = scheduleDates(legacyBusiness, formalExamTime);
   const batchName = firstValue(draftField(task, "batchName"), task.config?.operationBatch?.batchName);
   const examStartDate = firstValue(draftField(task, "examStartDate"), dates.start);
   const examEndDate = firstValue(draftField(task, "examEndDate"), dates.end);
-  const systemType = firstValue(draftField(task, "systemType"), business.system_type, latest.systemType);
-  const maxSubjectCount = firstValue(draftField(task, "estimatedMaxSubjectCount"), business.estimated_subject_count);
-  const projectManager = firstValue(latest.projectManager, latest.project_manager, business.project_manager, task.config?.projectManager);
-  const interfaceBackground = firstValue(latest.interfaceBackground, latest.interface_background, task.config?.interfaceBackground);
-  const loginMethod = firstValue(latest.loginMethod, latest.login_method, task.config?.loginMethod);
-  const paperLanguage = firstValue(latest.paperLanguage, latest.paper_language, task.config?.paperLanguage);
-  const systemLanguage = firstValue(latest.systemLanguage, latest.system_language, task.config?.systemLanguage);
-  const tenantName = firstValue(latest.tenantName, latest.tenant_name, task.config?.tenantName);
-  const tenantId = firstValue(latest.tenantId, latest.tenant_id, task.config?.tenantId);
-  const requirementVersion = firstValue(requirement.latest?.version);
-  const subjects = subjectRows(firstValue(latest.subjects, latest.examSubjects, business.subjects));
+  const systemType = firstValue(supplements.systemType, latest.systemType, strictSnapshot ? "易考" : draftField(task, "systemType"), legacyBusiness.system_type);
+  const maxSubjectCount = firstValue(supplements.estimatedMaxSubjectCount, latest.estimatedMaxSubjectCount, strictSnapshot ? "" : draftField(task, "estimatedMaxSubjectCount"), legacyBusiness.estimated_subject_count);
+  const projectManager = firstValue(latest.projectManager, latest.project_manager, requirementConfig.projectManager, supplements.projectManager, strictSnapshot ? "" : legacyBusiness.project_manager, task.config?.projectManager);
+  const interfaceBackground = firstValue(latest.interfaceBackground, latest.interface_background, supplements.interfaceBackground, task.config?.interfaceBackground);
+  const loginMethod = firstValue(latest.loginMethod, latest.login_method, supplements.loginMethod, task.config?.loginMethod);
+  const paperLanguage = firstValue(latest.paperLanguage, latest.paper_language, supplements.paperLanguage, task.config?.paperLanguage);
+  const systemLanguage = firstValue(latest.systemLanguage, latest.system_language, supplements.systemLanguage, task.config?.systemLanguage);
+  const tenantName = firstValue(latest.tenantName, latest.tenant_name, supplements.tenantName, task.config?.tenantName);
+  const tenantId = firstValue(latest.tenantId, latest.tenant_id, supplements.tenantId, task.config?.tenantId);
+  const requirementVersion = firstValue(requirement.latest?.version, examRequirement.version);
+  const subjects = subjectRows(firstValue(latest.subjects, latest.examSubjects, requirementConfig.courses, requirementConfig.subjects, requirementFields["科目信息"], legacyBusiness.subjects));
   const sendCount = Array.isArray(task.config?.contentRequirementEmail?.history)
     ? task.config.contentRequirementEmail.history.length
     : 0;

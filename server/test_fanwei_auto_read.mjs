@@ -59,6 +59,21 @@ test("fanwei DOM extractor returns only the requested serial when present", () =
   assert.match(extractor, /JSON\.stringify\(\{ requestid, fields, examSceneRows: sceneRows, opaRows \}\)/);
 });
 
+test("fanwei DOM extractor ignores conditionally hidden form rows", () => {
+  const extractor = buildFanweiDomExtractorScript();
+
+  assert.match(extractor, /getClientRects\(\)\.length/);
+  assert.match(extractor, /row\.cells\.length && isVisible\(row\.tr\)/);
+});
+
+test("fanwei DOM extractor preserves line breaks in other description", () => {
+  const extractor = buildFanweiDomExtractorScript();
+
+  assert.match(extractor, /const cleanMultiline/);
+  assert.match(extractor, /key === "其他说明" \? cleanMultiline\(value\) : clean\(value\)/);
+  assert.match(extractor, /cleanMultiline\(valueCell\.innerText \|\| valueCell\.textContent\)/);
+});
+
 test("AppleScript strings escape quotes, backslashes and newlines", () => {
   assert.equal(escapeAppleScriptString('a"b\\c\n'), 'a\\"b\\\\c\\n');
 });

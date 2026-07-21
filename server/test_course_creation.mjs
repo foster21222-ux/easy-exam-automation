@@ -36,6 +36,47 @@ test("assigns date exam serial and subject serial from existing local tasks", ()
   assert.deepEqual(config.courses.map((course) => course.form_codes), [["20260629-02-01"], ["20260629-02-02"]]);
 });
 
+test("reuses a course code for the same subject across requirements in one project", () => {
+  const first = assignCourseCodesForExamConfig({
+    startTimeDisplay: "2026/07/21 14:30",
+    courses: [{ name: "综合能力" }],
+  });
+  const second = assignCourseCodesForExamConfig({
+    startTimeDisplay: "2026/07/21 14:30",
+    courses: [{ name: "综合能力" }],
+  }, [], [first]);
+
+  assert.equal(first.courses[0].code, "20260721-01-01");
+  assert.equal(second.courses[0].code, "20260721-01-01");
+});
+
+test("assigns the next subject serial for a different subject in the same project", () => {
+  const first = assignCourseCodesForExamConfig({
+    startTimeDisplay: "2026/07/21 14:30",
+    courses: [{ name: "综合能力" }],
+  });
+  const second = assignCourseCodesForExamConfig({
+    startTimeDisplay: "2026/07/22 09:00",
+    courses: [{ name: "专业知识" }],
+  }, [], [first]);
+
+  assert.equal(second.courses[0].code, "20260721-01-02");
+});
+
+test("does not reuse a course code for the same subject in another project", () => {
+  const firstProject = assignCourseCodesForExamConfig({
+    startTimeDisplay: "2026/07/21 09:00",
+    courses: [{ name: "综合能力" }],
+  });
+  const secondProject = assignCourseCodesForExamConfig({
+    startTimeDisplay: "2026/07/21 14:30",
+    courses: [{ name: "综合能力" }],
+  }, [{ config: firstProject }]);
+
+  assert.equal(firstProject.courses[0].code, "20260721-01-01");
+  assert.equal(secondProject.courses[0].code, "20260721-02-01");
+});
+
 test("treats empty requirement subjects as completed without tenant course requests", async () => {
   const logs = [];
   let requested = false;
@@ -72,7 +113,7 @@ test("creates a course with the next available code when the requested name is n
   const courses = await ensureFormalCoursesCreated({
     login: {},
     apiBase: "https://eztest.cn",
-    config: { courses: [{ name: "美术", code: "20260629-02-01" }] },
+    config: { courses: [{ name: "美术", code: "20260629-02-01", paper_name: "第二场美术卷" }] },
     requestJson,
     emitLog: (message) => logs.push(message),
   });
@@ -86,7 +127,7 @@ test("creates a course with the next available code when the requested name is n
     code: "20260629-03-01",
     form_codes: ["20260629-03-01"],
   });
-  assert.deepEqual(courses, [{ name: "美术", code: "20260629-03-01", form_codes: ["20260629-03-01"], order: 1 }]);
+  assert.deepEqual(courses, [{ name: "美术", code: "20260629-03-01", form_codes: ["20260629-03-01"], paper_name: "第二场美术卷", order: 1 }]);
   assert.ok(logs.some((message) => message.includes("科目名称不存在，准备创建：美术")));
   assert.ok(logs.some((message) => message.includes("科目编号已占用，改用：20260629-03-01")));
 });
@@ -121,11 +162,34 @@ test("keeps all subjects on the same next exam serial when one tenant course cod
   assert.deepEqual(courses.map((course) => course.code), ["20260629-02-01", "20260629-02-02"]);
 });
 
-test("skips creation and reuses the existing code when a course name already exists", async () => {
+test("creates a new code when another project already has the same course name", async () => {
   const calls = [];
   const requestJson = async (_login, url, options) => {
     calls.push({ url, options });
-    return { results: [{ name: "美术", code: "COURSE-EXISTING" }] };
+    if (String(url).includes("/tenant/api/courses/")) {
+      return { results: [{ name: "美术", code: "20260629-01-01" }] };
+    }
+    return JSON.parse(options.body);
+  };
+
+  const courses = await ensureFormalCoursesCreated({
+    login: {},
+    apiBase: "https://eztest.cn",
+    config: { courses: [{ name: "美术", code: "20260629-02-01" }] },
+    requestJson,
+    emitLog: () => {},
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://eztest.cn/tenant/api/courses/?apply=session");
+  assert.deepEqual(courses, [{ name: "美术", code: "20260629-02-01", form_codes: ["20260629-02-01"], order: 1 }]);
+});
+
+test("reuses an existing course only when both name and requested code match", async () => {
+  const calls = [];
+  const requestJson = async (_login, url, options) => {
+    calls.push({ url, options });
+    return { results: [{ name: "美术", code: "20260629-02-01" }] };
   };
 
   const courses = await ensureFormalCoursesCreated({
@@ -137,8 +201,7 @@ test("skips creation and reuses the existing code when a course name already exi
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://eztest.cn/tenant/api/courses/?apply=session");
-  assert.deepEqual(courses, [{ name: "美术", code: "COURSE-EXISTING", form_codes: ["20260629-02-01"], order: 1 }]);
+  assert.deepEqual(courses, [{ name: "美术", code: "20260629-02-01", form_codes: ["20260629-02-01"], order: 1 }]);
 });
 
 test("retries course creation with incremented codes when tenant reports code already exists", async () => {

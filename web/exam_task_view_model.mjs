@@ -18,9 +18,35 @@ function aggregateStatus(sessions) {
 
 function parseExamTime(value) {
   if (!value) return Number.POSITIVE_INFINITY;
-  const normalized = String(value).trim().replace(/\//g, "-").replace(" ", "T");
+  const text = String(value).trim();
+  const localMatch = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (localMatch) {
+    const [, year, month, day, hour, minute, second = "0"] = localMatch;
+    const localTime = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    ).getTime();
+    return Number.isFinite(localTime) ? localTime : Number.POSITIVE_INFINITY;
+  }
+  const normalized = text.replace(/\//g, "-").replace(" ", "T");
   const time = Date.parse(normalized);
   return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY;
+}
+
+export function sortTaskLogsNewestFirst(logs = []) {
+  return logs
+    .map((log, index) => ({ log, index, time: parseExamTime(log?.time) }))
+    .sort((left, right) => {
+      if (!Number.isFinite(left.time) && !Number.isFinite(right.time)) return left.index - right.index;
+      if (!Number.isFinite(left.time)) return 1;
+      if (!Number.isFinite(right.time)) return -1;
+      return right.time - left.time || left.index - right.index;
+    })
+    .map(({ log }) => log);
 }
 
 function resolveTaskProgress(sessions) {

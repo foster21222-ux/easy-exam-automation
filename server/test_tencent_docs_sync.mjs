@@ -87,6 +87,23 @@ test("leaves AI cloud monitoring blank when hawkeye is disabled", () => {
   assert.equal(rows[0][26], "");
 });
 
+test("omits trial instructions when the requirement has no trial exam", () => {
+  const [row] = buildTencentDocRows({
+    config: {
+      ...config,
+      mockExamEnabled: false,
+      mockStartTimeDisplay: "",
+      mockEndTimeDisplay: "",
+    },
+    created: [created[0]],
+  });
+
+  assert.doesNotMatch(row[29], /本次考试设置试考环节/);
+  assert.doesNotMatch(row[29], /试考时间为/);
+  assert.doesNotMatch(row[29], /正式考试和试考时/);
+  assert.match(row[29], /客户端下载地址：.* 。打开考试客户端/);
+});
+
 test("client exam L column uses client login limit instead of web leave limit", () => {
   const [row] = buildTencentDocRows({
     config: {
@@ -264,6 +281,22 @@ test("trial R column follows the formal exam monitor rule", () => {
 
   assert.equal(rows[0][17], "双监控");
   assert.equal(rows[1][17], "双监控");
+});
+
+test("builds one Tencent Docs row for every formal and trial session", () => {
+  const rows = buildTencentDocRows({
+    config: { ...config, unifiedExamAddress: false, examAddress: "独立考试地址" },
+    created: [
+      { sessionType: "formal", session_id: "431603", name: "需求单1正式考试", start: "2026-07-21 14:30", end: "2026-07-21 16:30" },
+      { sessionType: "trial", session_id: "431604", name: "需求单1试考", start: "2026-07-20 16:00", end: "2026-07-21 14:00" },
+      { sessionType: "formal", session_id: "431605", name: "需求单2正式考试", start: "2026-07-21 14:30", end: "2026-07-21 16:30" },
+    ],
+  });
+
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((row) => row[0]), ["需求单1正式考试", "需求单1试考", "需求单2正式考试"]);
+  assert.deepEqual(rows.map((row) => row[15]), ["431603", "431604", "431605"]);
+  assert.equal(rows[1][3], "试考-分散模式");
 });
 
 test("copies Tencent Docs example rows before overriding task-specific fields", () => {

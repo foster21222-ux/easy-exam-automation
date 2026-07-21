@@ -133,6 +133,7 @@ test("scheduler updates mismatched sessions and skips already-correct sessions",
 
   assert.equal(result.updated, 2);
   assert.equal(result.skipped, 1);
+  assert.equal(calls.filter((call) => call.url.endsWith("/dapi/login/")).length, 1);
   assert.deepEqual(
     calls.filter((call) => call.method === "POST" && call.url.includes("/dapi/schedule/session/")).map((call) => ({
       url: call.url,
@@ -266,6 +267,43 @@ test("scheduler continues after one session update fails", async () => {
 
   assert.equal(result.updated, 1);
   assert.equal(result.failed, 1);
+});
+
+test("scheduler stops a profile after one manager login failure", async () => {
+  const calls = [];
+  const sessions = [
+    session({ id: "first", config: { customer_service: false } }),
+    session({ id: "second", config: { customer_service: false } }),
+  ];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), method: options.method || "GET" });
+    if (String(url).endsWith("/tenant/api/session/")) return jsonResponse({ results: sessions });
+    if (String(url).endsWith("/dapi/login/")) return jsonResponse({ error: "invalid credentials" }, 400);
+    return jsonResponse({ ok: true });
+  };
+
+  const result = await runCustomerServiceSchedulerForTargets({
+    targets: [{
+      userId: "alice@example.com",
+      profileId: "p1",
+      label: "Alice",
+      apiBase: "https://eztest.cn",
+      apiKey: "secret",
+      login: { username: "alice@example.com", password: "wrong-pass" },
+    }],
+    now: NOW,
+    fetchImpl,
+    logger: () => {},
+  });
+
+  assert.equal(calls.filter((call) => call.url.endsWith("/dapi/login/")).length, 1);
+  assert.equal(result.failedProfiles, 1);
+  assert.equal(result.total, 2);
+  assert.equal(result.planned, 2);
+  assert.equal(result.failed, 1);
+  assert.equal(result.profiles[0].paused, true);
+  assert.match(result.profiles[0].error, /登录易考后台失败：400/);
+  assert.equal(calls.some((call) => call.url.includes("/dapi/schedule/session/")), false);
 });
 
 test("profile scheduler runs all enabled targets", async () => {

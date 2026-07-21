@@ -117,10 +117,90 @@ def parse_time_range(value):
     text = normalize_text(value)
     if not text:
         return None, None
+    start_dt, end_dt = parse_flexible_time_range(text)
+    if start_dt and end_dt:
+        return start_dt, end_dt
     parts = [part.strip() for part in re.split(r"\s*(?:-|–|—|~|至)\s*", text) if part.strip()]
     if len(parts) != 2:
         return None, None
     return parse_datetime(parts[0]), parse_datetime(parts[1])
+
+
+def normalize_datetime_text(value):
+    text = normalize_text(value)
+    replacements = {
+        "：": ":",
+        "－": "-",
+        "–": "-",
+        "—": "-",
+        "~": "-",
+        "～": "-",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    text = re.sub(r"到|至", "-", text)
+    text = re.sub(r"\s*:\s*", ":", text)
+    text = re.sub(r"([0-2]?\d)\s*[点时]\s*半", r"\1:30", text)
+    text = re.sub(r"([0-2]?\d)\s*[点时](?!\s*半)", r"\1:00", text)
+    text = text.replace("分", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def date_match_parts(match):
+    year = int(match.group(2)) if match.group(2) else datetime.now().year
+    return year, int(match.group(3)), int(match.group(4))
+
+
+def safe_datetime(year, month, day, hour, minute):
+    try:
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return datetime(year, month, day, hour, minute)
+    except ValueError:
+        return None
+
+
+def extract_time_tokens(text):
+    tokens = []
+    for match in re.finditer(r"(?:^|[^\d])([0-2]?\d)(?::([0-5]?\d))?(?::[0-5]?\d)?(?=$|[^\d])", text or ""):
+        hour = int(match.group(1))
+        minute = int(match.group(2) or 0)
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            tokens.append((hour, minute))
+    return tokens
+
+
+def parse_flexible_time_range(value):
+    text = normalize_datetime_text(value)
+    date_pattern = re.compile(r"(^|[^\d:：]|[^\d][:：])(?:(\d{4})\s*[\/\-.年]\s*)?(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})\s*(?:日)?")
+    matches = []
+    for match in date_pattern.finditer(text):
+        year, month, day = date_match_parts(match)
+        if safe_datetime(year, month, day, 0, 0):
+            matches.append(match)
+    if len(matches) >= 2:
+        start_year, start_month, start_day = date_match_parts(matches[0])
+        end_year, end_month, end_day = date_match_parts(matches[1])
+        start_times = extract_time_tokens(text[matches[0].end():matches[1].start()])
+        end_times = extract_time_tokens(text[matches[1].end():])
+        if start_times and end_times:
+            start_hour, start_minute = start_times[0]
+            end_hour, end_minute = end_times[0]
+            return (
+                safe_datetime(start_year, start_month, start_day, start_hour, start_minute),
+                safe_datetime(end_year, end_month, end_day, end_hour, end_minute),
+            )
+    if len(matches) == 1:
+        year, month, day = date_match_parts(matches[0])
+        times = extract_time_tokens(text[matches[0].end():])
+        if len(times) >= 2:
+            start_hour, start_minute = times[0]
+            end_hour, end_minute = times[1]
+            return (
+                safe_datetime(year, month, day, start_hour, start_minute),
+                safe_datetime(year, month, day, end_hour, end_minute),
+            )
+    return None, None
 
 
 def parse_datetime(value):
@@ -262,7 +342,7 @@ def build_preview(config):
     add("基础信息", "考试地址", config["examAddress"] or "系统默认", "按需求单选择")
     add("基础信息", "考前等待提示", config["preLoginPrompt"] or "空", "自动填写")
     add("基础信息", "欢迎语", config["welcomeText"] or "空", "自动填写")
-    add("科目管理", "批量导入科目", "、".join(config["subjects"]) or "空", "下载后台模板后导入")
+    add("科目管理", "批量导入科目", "、".join(config["subjects"]) or "空", "自动生成")
     add("选择试卷", "跳过试卷设置", "是", "自动跳过")
     add("个人信息", "考生可见字段", "姓名, 身份证号", "自动勾选")
     add("个人信息", "允许编辑字段", "无", "自动取消")
@@ -385,8 +465,8 @@ def parse_workbook(path_str):
         "clientLoginLimit": parse_minutes(get_field("登陆次数", "登录次数", "允许登录次数")) or 10,
         "manualScore": parse_enabled_text(manual_score_text),
         "manualScoreText": manual_score_text,
-        "watermark": parse_bool(field_map.get("答题水印")),
-        "disableCopy": parse_bool(field_map.get("禁止复制")),
+        "watermark": parse_bool(field_map.get("答题水印")) if str(field_map.get("答题水印") or "").strip() else True,
+        "disableCopy": parse_bool(field_map.get("禁止复制")) if str(field_map.get("禁止复制") or "").strip() else True,
         "subjects": subjects,
         "courses": courses,
         "subjectImportPath": subject_import_path,

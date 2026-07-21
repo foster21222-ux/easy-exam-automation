@@ -7,8 +7,8 @@ const normalizationSource = serverSource.slice(
   serverSource.indexOf("function normalizeScoreFieldName"),
   serverSource.indexOf("function scoreRowKey"),
 );
-const loadNormalizer = new Function(`${normalizationSource}\nreturn { normalizeScoreRow, attachCourseNamesToCandidates };`);
-const { normalizeScoreRow, attachCourseNamesToCandidates } = loadNormalizer();
+const loadNormalizer = new Function(`${normalizationSource}\nreturn { normalizeScoreRow, attachCourseNamesToCandidates, scoreCourseFallback };`);
+const { normalizeScoreRow, attachCourseNamesToCandidates, scoreCourseFallback } = loadNormalizer();
 
 test("reads phone and email from required custom-field labels", () => {
   const row = normalizeScoreRow({
@@ -56,4 +56,28 @@ test("maps each local candidate course code to the final course name", () => {
 
   assert.equal(candidates[0].course_name, "项目管理类");
   assert.equal(candidates[1].course_name, "工程技术类");
+});
+
+test("uses the configured course for a single-course score export", () => {
+  assert.equal(
+    scoreCourseFallback([{ code: "C001", name: "社会招聘" }], "社会招聘笔试"),
+    "社会招聘",
+  );
+});
+
+test("uses the exam name when a single-course requirement has no course name", () => {
+  assert.equal(scoreCourseFallback([{ code: "C001", name: "" }], "社会招聘笔试"), "社会招聘笔试");
+});
+
+test("does not use one configured course as the fallback for a multi-course score export", () => {
+  assert.equal(
+    scoreCourseFallback(
+      [
+        { code: "C001", name: "项目管理类" },
+        { code: "C002", name: "工程技术类" },
+      ],
+      "综合招聘笔试",
+    ),
+    "综合招聘笔试",
+  );
 });

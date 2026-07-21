@@ -91,6 +91,7 @@ async function main() {
   const port = Number(args.port || await findFreePort());
   const apiBase = `http://127.0.0.1:${port}`;
   const dbPath = path.join(tempDir, "requirements.sqlite3");
+  const runtimeDir = path.join(tempDir, ".easy_exam_runtime");
   const configPath = path.join(tempDir, "wechat-groups.json");
   const statePath = path.join(tempDir, "wechat-state.json");
   const initialChatPath = path.join(tempDir, "initial-chat.txt");
@@ -125,9 +126,13 @@ async function main() {
     env: {
       ...process.env,
       PORT: String(port),
+      EASY_EXAM_RUNTIME_DIR: runtimeDir,
       REQUIREMENT_DB_PATH: dbPath,
       CODEX_PYTHON: pythonBin,
       CODEX_NODE: nodeBin,
+      APP_LOGIN_EMAIL: "",
+      APP_LOGIN_PASSWORD: "",
+      PAPER_BIND_SCHEDULER_DISABLED: "1",
       NODE_ENV: "test",
     },
     stdio: ["ignore", "pipe", "pipe"],

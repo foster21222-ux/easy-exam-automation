@@ -38,22 +38,29 @@ export function buildFanweiDomExtractorScript({ serialNo = "" } = {}) {
     .replace(/[ \\t\\r\\n]+/g, " ")
     .replace(/\\s+([；;])/g, "$1")
     .trim();
+  const cleanMultiline = (value) => String(value ?? "")
+    .replace(/\\u00a0/g, " ")
+    .replace(/\\r\\n?/g, "\\n")
+    .replace(/[ \\t\\f\\v]+/g, " ")
+    .replace(/ *\\n+ */g, "\\n")
+    .trim();
   const selectedLabels = (container) => Array.from(container.querySelectorAll("input:checked")).map((input) => {
     const label = input.closest("label") || (input.id ? document.querySelector('label[for="' + input.id + '"]') : null) || input.parentElement;
     return clean(label?.innerText || label?.textContent || input.value || input.getAttribute("title") || input.getAttribute("name"));
   }).filter(Boolean);
+  const isVisible = (element) => Boolean(element && element.getClientRects().length);
   const rows = Array.from(document.querySelectorAll("tr")).map((tr) => {
     const elements = Array.from(tr.children);
     const cells = elements.map((td) => clean(td.innerText || td.textContent));
     return { tr, elements, cells };
-  }).filter((row) => row.cells.length);
+  }).filter((row) => row.cells.length && isVisible(row.tr));
   const fieldKeys = [
     "标题","申请人","申请人部门","申请日期","运控流水号","项目名称","项目编码","客户名称（仅供参考）","客户及项目属性","业务方向","系统类型","预估科次","预估收入","结算依据","考试服务范围","报名方式","是否需要报名网站","在线报名开始时间","是否需要ATA安排人工监考","是否需要ATA安排集中监考场地","ATA内容制题参与方式","内容来源","试题类型","科目数","试卷数","是否需要封闭制题","是否需要人工阅卷","阅卷安排","EPI测试","性格测试工具","考核内容是否仅性格测试","其他说明","附件","选项项目组长","选择项目经理","项目经理操作"
   ];
   const fieldAliases = {"流水号":"运控流水号","销售项目名称":"项目名称","本批次预估科次":"预估科次"};
   const fields = {};
   const setField = (key, value) => {
-    const cleaned = clean(value);
+    const cleaned = key === "其他说明" ? cleanMultiline(value) : clean(value);
     if (key && cleaned && cleaned !== key) fields[key] = cleaned;
   };
   rows.forEach(({ tr, cells }) => {
@@ -63,7 +70,9 @@ export function buildFanweiDomExtractorScript({ serialNo = "" } = {}) {
       if (!fieldKeys.includes(key)) continue;
       const valueCell = tr.children[i + 1] || tr.children[i]?.nextElementSibling || tr;
       const checked = selectedLabels(valueCell);
-      const next = cells[i + 1] || "";
+      const next = key === "其他说明"
+        ? cleanMultiline(valueCell.innerText || valueCell.textContent)
+        : cells[i + 1] || "";
       setField(key, checked.length ? checked.join("；") : next);
     }
   });

@@ -30,6 +30,63 @@ class TaskStoreTest(unittest.TestCase):
         self.assertEqual({item["sourceAccount"] for item in projects}, {"account-a", "account-b"})
         self.assertEqual({item["session_id"] for item in sessions}, {"10001", "10002"})
 
+    def test_keeps_multiple_requirement_sessions_under_one_task(self):
+        task = self.store.create_task("多场考试", "account-a", {
+            "examRequirements": [{"fields": {}}, {"fields": {}}, {"fields": {}}],
+        })
+        for requirement_index in range(3):
+            self.store.upsert_session(task["taskId"], "formal", {
+                "session_id": str(41001 + requirement_index * 2),
+                "name": f"第{requirement_index + 1}场正式考试",
+            }, requirement_index)
+            self.store.upsert_session(task["taskId"], "trial", {
+                "session_id": str(41002 + requirement_index * 2),
+                "name": f"第{requirement_index + 1}场试考",
+            }, requirement_index)
+
+        detail = self.store.get_task(task["taskId"])
+
+        self.assertEqual(len(detail["sessions"]), 6)
+        self.assertEqual(
+            [(item["requirementIndex"], item["sessionType"], item["session_id"]) for item in detail["sessions"]],
+            [
+                (0, "formal", "41001"), (0, "trial", "41002"),
+                (1, "formal", "41003"), (1, "trial", "41004"),
+                (2, "formal", "41005"), (2, "trial", "41006"),
+            ],
+        )
+
+        self.store.upsert_session(task["taskId"], "formal", {
+            "session_id": "51003", "name": "第2场正式考试重建",
+        }, 1)
+        updated = self.store.get_task(task["taskId"])
+        self.assertEqual(len(updated["sessions"]), 6)
+        self.assertEqual(updated["sessions"][2]["session_id"], "51003")
+
+    def test_project_card_summary_exposes_identity_without_raw_fanwei_payload(self):
+        task = self.store.create_task("项目卡测试", "account-a", {
+            "customerName": "四川省公路设计院",
+            "projectCode": "F-UI-8877",
+            "projectCard": {
+                "createdAt": "2026-07-18T02:00:00.000Z",
+                "updatedAt": "2026-07-18T02:00:00.000Z",
+                "status": "ready_for_config",
+                "sourceType": "fanwei",
+                "sourceKey": "R-UI-8877",
+            },
+            "fanweiSource": {"raw": {"fields": {"其他说明": "仅详情可见"}}},
+        })
+
+        summary = next(item for item in self.store.list_tasks() if item["taskId"] == task["taskId"])
+        detail = self.store.get_task(task["taskId"])
+
+        self.assertEqual(summary["customerName"], "四川省公路设计院")
+        self.assertEqual(summary["projectCode"], "F-UI-8877")
+        self.assertEqual(summary["projectCard"]["sourceKey"], "R-UI-8877")
+        self.assertNotIn("config", summary)
+        self.assertNotIn("仅详情可见", json.dumps(summary, ensure_ascii=False))
+        self.assertEqual(detail["config"]["fanweiSource"]["raw"]["fields"]["其他说明"], "仅详情可见")
+
     def test_list_sessions_includes_task_config_for_unified_exam_display(self):
         task = self.store.create_task("统一项目", "account-a", {
             "unifiedExamAddress": True,
@@ -57,6 +114,18 @@ class TaskStoreTest(unittest.TestCase):
         self.assertEqual(detail["ownerEmail"], "mate@example.com")
         self.assertEqual(sessions[0]["ownerEmail"], "mate@example.com")
 
+    def test_update_config_can_pin_the_actual_automation_account(self):
+        task = self.store.create_task("切换账号项目", "account-old", {"apiKeyProfileId": "profile-old"})
+
+        updated = self.store.update_config(
+            task["taskId"],
+            {"apiKeyProfileId": "profile-new"},
+            source_account="account-new",
+        )
+
+        self.assertEqual(updated["sourceAccount"], "account-new")
+        self.assertEqual(updated["config"]["apiKeyProfileId"], "profile-new")
+
     def test_steps_are_independent_and_persist_timestamps(self):
         task = self.store.create_task("项目甲", "account-a", {})
         task_id = task["taskId"]
@@ -70,6 +139,54 @@ class TaskStoreTest(unittest.TestCase):
         self.assertIsNotNone(trial["completedAt"])
         self.assertEqual(formal["status"], "pending")
         self.assertGreater(detail["progress"], 0)
+
+    def test_tracks_and_aggregates_step_status_per_requirement(self):
+        task = self.store.create_task("多场考试", "account-a", {
+            "examRequirements": [{"fields": {}}, {"fields": {}}, {"fields": {}}],
+        })
+        task_id = task["taskId"]
+
+        first = self.store.update_step(task_id, "formal_session_create", "success", {
+            "message": "需求单1正式考试创建成功",
+            "result": {"sessionId": "431487"},
+        }, requirement_index=0)
+        first_step = next(step for step in first["steps"] if step["stepKey"] == "formal_session_create")
+        self.assertEqual(first_step["status"], "running")
+        self.assertEqual(first_step["requirementProgress"]["0"]["status"], "success")
+        self.assertEqual(first_step["requirementProgress"]["0"]["result"]["sessionId"], "431487")
+
+        second = self.store.update_step(task_id, "formal_session_create", "success", {
+            "message": "需求单2正式考试创建成功",
+            "result": {"sessionId": "431489"},
+        }, requirement_index=1)
+        second_step = next(step for step in second["steps"] if step["stepKey"] == "formal_session_create")
+        self.assertEqual(second_step["status"], "running")
+
+        failed = self.store.update_step(task_id, "formal_session_create", "failed", {
+            "errorMessage": "第三场创建失败",
+        }, requirement_index=2)
+        failed_step = next(step for step in failed["steps"] if step["stepKey"] == "formal_session_create")
+        self.assertEqual(failed_step["status"], "failed")
+        self.assertEqual(failed_step["requirementProgress"]["2"]["errorMessage"], "第三场创建失败")
+
+        running = self.store.update_step(task_id, "formal_session_create", "running", {
+            "message": "需求单3重新创建",
+        }, requirement_index=2)
+        running_step = next(step for step in running["steps"] if step["stepKey"] == "formal_session_create")
+        self.assertEqual(running_step["status"], "running")
+        self.assertIsNone(running_step["requirementProgress"]["2"]["errorMessage"])
+
+        complete = self.store.update_step(task_id, "formal_session_create", "success", {
+            "message": "需求单3正式考试创建成功",
+            "result": {"sessionId": "431491"},
+        }, requirement_index=2)
+        complete_step = next(step for step in complete["steps"] if step["stepKey"] == "formal_session_create")
+        self.assertEqual(complete_step["status"], "success")
+        self.assertEqual(
+            [complete_step["requirementProgress"][str(index)]["status"] for index in range(3)],
+            ["success", "success", "success"],
+        )
+        self.assertEqual(len(complete_step["requirementProgress"]["2"]["logs"]), 2)
 
     def test_paper_bind_step_is_formal_course_session_binding(self):
         task = self.store.create_task("项目甲", "account-a", {})
@@ -179,9 +296,10 @@ class TaskStoreTest(unittest.TestCase):
 
         updated = self.store.update_config(task["taskId"], {
             "courses": [{"name": "体育", "code": "20260629-03-01"}]
-        })
+        }, project_name="项目甲（已修改）")
 
         self.assertEqual(updated["config"]["courses"][0]["code"], "20260629-03-01")
+        self.assertEqual(updated["projectName"], "项目甲（已修改）")
 
     def test_deletes_task_with_sessions_and_steps(self):
         task = self.store.create_task("待删除项目", "account-a", {})
@@ -198,6 +316,17 @@ class TaskStoreTest(unittest.TestCase):
         self.assertEqual(self.store.list_tasks(include_hidden=True), [])
         self.assertIsNone(self.store.get_task(task_id))
         self.assertEqual(self.store.list_sessions(), [])
+
+    def test_hides_task_for_project_archiving(self):
+        task = self.store.create_task("待归档项目", "account-a", {})
+
+        hidden = self.store.hide_task(task["taskId"])
+
+        self.assertTrue(hidden)
+        self.assertEqual(self.store.list_tasks(), [])
+        archived = self.store.list_tasks(include_hidden=True)
+        self.assertEqual(len(archived), 1)
+        self.assertIsNotNone(archived[0]["hiddenAt"])
 
     def test_upserts_candidates_with_custom_fields(self):
         task = self.store.create_task("候选人扩展字段项目", "account-a", {})

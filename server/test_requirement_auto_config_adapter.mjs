@@ -16,6 +16,7 @@ test("converts a complete WeChat requirement into the existing auto config shape
     exam_client_type: "网页考试",
     leave_limit_count: 3,
     subjects: ["综合能力", "专业知识"],
+    paper_names: ["第一场综合能力卷", "第一场专业知识卷"],
   }, {
     customerName: "四川省通川工程技术开发有限公司",
   });
@@ -42,10 +43,53 @@ test("converts a complete WeChat requirement into the existing auto config shape
   assert.equal(result.config.leaveLimit, 3);
   assert.deepEqual(result.config.subjects, ["综合能力", "专业知识"]);
   assert.deepEqual(result.config.courses, [
-    { name: "综合能力", code: "20260705-01-01", form_codes: ["20260705-01-01"] },
-    { name: "专业知识", code: "20260705-01-02", form_codes: ["20260705-01-02"] },
+    { name: "综合能力", code: "20260705-01-01", form_codes: ["20260705-01-01"], paper_name: "第一场综合能力卷" },
+    { name: "专业知识", code: "20260705-01-02", form_codes: ["20260705-01-02"], paper_name: "第一场专业知识卷" },
   ]);
   assert.equal(result.config.confirmOnly, true);
+});
+
+test("warns when per-requirement paper names do not align with subjects", () => {
+  const result = buildAutoConfigFromRequirement({
+    exam_name: "多科目考试",
+    formal_exam_time_range: "2026-07-05 09:30 到 2026-07-05 11:30",
+    subjects_text: "综合能力、专业知识",
+    paper_names_text: "仅一张试卷",
+  });
+
+  assert.equal(result.config.courses[0].paper_name, "仅一张试卷");
+  assert.equal(result.config.courses[1].paper_name, undefined);
+  assert.ok(result.warnings.includes("试卷名称数量与科目数量不一致，请按科目顺序逐项填写。"));
+});
+
+test("treats blank rich waiting prompt and pledge HTML as cleared fields", () => {
+  const result = buildAutoConfigFromRequirement({
+    exam_name: "空富文本测试",
+    formal_exam_time_range: "2026-07-05 09:30 到 2026-07-05 11:30",
+    subjects: "综合能力",
+    pre_login_prompt: "<p><br></p>",
+    pledge_content: "<div>&nbsp;</div>",
+  });
+
+  assert.equal(result.config.preLoginPrompt, "");
+  assert.equal(result.config.pledgeContent, "");
+});
+
+test("accepts short and Chinese time range formats", () => {
+  const year = new Date().getFullYear();
+  const result = buildAutoConfigFromRequirement({
+    exam_name: "短时间格式测试",
+    formal_exam_time_range: "7-21 15 ：00-16:30",
+    mock_exam_time_range: "7-21 15 点-16 点半",
+    subjects: "综合能力",
+  });
+
+  assert.equal(result.config.startTimeDisplay, `${year}/07/21 15:00`);
+  assert.equal(result.config.endTimeDisplay, `${year}/07/21 16:30`);
+  assert.equal(result.config.mockStartTimeDisplay, `${year}/07/21 15:00`);
+  assert.equal(result.config.mockEndTimeDisplay, `${year}/07/21 16:30`);
+  assert.equal(result.warnings.includes("正式考试时间无法解析。"), false);
+  assert.equal(result.warnings.includes("试考时间无法解析，试考自动创建会跳过。"), false);
 });
 
 test("reports warnings when execution-critical fields cannot be normalized", () => {

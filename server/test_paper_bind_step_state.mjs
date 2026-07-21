@@ -10,7 +10,7 @@ const serverSource = fs.readFileSync(path.join(rootDir, "server/easy_exam_server
 
 test("paper form bind retry does not mark missing form codes as success", () => {
   assert.ok(serverSource.includes('if (bindResult.status === "waiting_manual")'));
-  assert.ok(serverSource.includes('updatePaperFormBindState(task.taskId, "failed"'));
+  assert.ok(serverSource.includes('updatePaperFormBindState(task.taskId, requirementIndex, "failed"'));
   assert.ok(serverSource.includes("status: 409"));
   assert.ok(serverSource.includes("missingCourseCodes"));
 });
@@ -34,6 +34,15 @@ test("paper binding scheduler runs hourly before the formal exam starts", () => 
   assert.ok(serverSource.includes("shouldAttemptScheduledPaperBind"));
   assert.ok(serverSource.includes("runScheduledPaperBindingOnce"));
   assert.ok(serverSource.includes("setInterval(runScheduledPaperBindingOnce"));
+});
+
+test("paper binding state and execution are isolated by requirement", () => {
+  assert.ok(serverSource.includes("function taskRequirementConfig(task = {}, requirementIndex = 0)"));
+  assert.ok(serverSource.includes("function taskFormalSession(task = {}, requirementIndex = 0)"));
+  assert.ok(serverSource.includes("function paperFormBindState(task = {}, requirementIndex = 0)"));
+  assert.ok(serverSource.includes("paperFormBinds[normalizedIndex] = next"));
+  assert.ok(serverSource.includes("normalizeCourseRecords(taskRequirementConfig(task, requirementIndex))"));
+  assert.ok(serverSource.includes("runPaperFormBindForTask(task, login, { scheduled: true, requirementIndex })"));
 });
 
 test("paper binding scheduler skips recently failed automatic checks", () => {
@@ -89,7 +98,8 @@ test("paper binding detail renders bound form codes and manual action", () => {
   assert.ok(html.includes("paper-bind-feedback success"));
   assert.ok(html.includes("course-bind-feedback success"));
   assert.ok(html.includes("paper-bind-label\">试卷名"));
-  assert.equal(html.includes("paper-bind-label\">科目编号"), false);
+  assert.ok(html.includes("paper-bind-label\">科目编号"));
+  assert.equal(html.includes("paper-bind-label\">试卷编号"), false);
   assert.ok(html.includes("course-bind-label\">科目编号"));
   assert.ok(html.includes("data-trigger-step=\"paper_form_bind\""));
 });

@@ -176,7 +176,7 @@ function leaveLimitText(config, session, deviceText) {
   return `${deviceText}，${count}次`;
 }
 
-function notificationText(config, session) {
+function notificationText(config, session, hasTrial) {
   const formalStart = text(config.startTimeDisplay || session.start);
   const formalEnd = text(config.endTimeDisplay || session.end);
   const trialStart = text(config.mockStartTimeDisplay);
@@ -186,6 +186,9 @@ function notificationText(config, session) {
   const trialRange = trialStart && trialEnd
     ? `${fullDateTimeText(trialStart)}-${monthDayTime(trialEnd)}`
     : "XXX年XX月XX日XX:XX-X月XX日XX:XX";
+  const trialNotice = hasTrial
+    ? `本次考试设置试考环节，请提前参加试考调试考试设备。试考时间为${trialRange}，请在上述时间内完成考前测试。正式考试和试考时，`
+    : "";
   const sessionId = text(session.session_id || session.id);
   const examCode = examPasswordText(config, session);
   const clientDownload = text(
@@ -195,7 +198,7 @@ function notificationText(config, session) {
       ? `https://eztest.org/exam/session/${encodeURIComponent(sessionId)}/client/download`
       : "【客户端下载】"),
   );
-  return `考生您好！${examTitle}将于北京时间${formalRange}举行。本次考试为在线考试，要求使用电脑下载安装考试客户端作答，并自行准备第二台移动设备作为第二视角监控，客户端下载地址：${clientDownload} 。本次考试设置试考环节，请提前参加试考调试考试设备。试考时间为${trialRange}，请在上述时间内完成考前测试。正式考试和试考时，打开考试客户端输入口令和您的准考证号即可登录参加考试，考试口令统一为：${examCode}，准考证号均为个人手机号。正式考试可提前30分钟登录系统，迟到20分钟后系统将无法登录。若遇系统问题，请联系考试系统界面上的技术支持。祝您考试顺利！（蜀道集团）`;
+  return `考生您好！${examTitle}将于北京时间${formalRange}举行。本次考试为在线考试，要求使用电脑下载安装考试客户端作答，并自行准备第二台移动设备作为第二视角监控，客户端下载地址：${clientDownload} 。${trialNotice}打开考试客户端输入口令和您的准考证号即可登录参加考试，考试口令统一为：${examCode}，准考证号均为个人手机号。正式考试可提前30分钟登录系统，迟到20分钟后系统将无法登录。若遇系统问题，请联系考试系统界面上的技术支持。祝您考试顺利！（蜀道集团）`;
 }
 
 function templateForSession(remoteRows = [], isTrial = false) {
@@ -213,7 +216,7 @@ function applyTemplate(values, template = []) {
   return row;
 }
 
-function sessionRow(config, session, template = []) {
+function sessionRow(config, session, template = [], hasTrial = false) {
   const isTrial = session.kind === "mock" || session.sessionType === "trial";
   const kind = isTrial ? "mock" : "main";
   const start = text(session.start || (isTrial ? config.mockStartTimeDisplay : config.startTimeDisplay));
@@ -256,18 +259,21 @@ function sessionRow(config, session, template = []) {
     config.hawkeye ? "鹰眼" : "",
     text(config.invigilatorText),
     text(config.specialRequirementText) || "声音监控",
-    text(config.notificationContent) || notificationText(config, session),
+    text(config.notificationContent) || notificationText(config, session, hasTrial),
   ], template);
   row[2] = "";
   return row;
 }
 
 export function buildTencentDocRows({ config = {}, created = [], remoteRows = [] } = {}) {
+  const hasTrial = Boolean(
+    config.mockExamEnabled || created.some((session) => session?.kind === "mock" || session?.sessionType === "trial"),
+  );
   return created
     .filter((session) => text(session?.id || session?.session_id))
     .map((session) => {
       const isTrial = session.kind === "mock" || session.sessionType === "trial";
-      return sessionRow(config, session, templateForSession(remoteRows, isTrial));
+      return sessionRow(config, session, templateForSession(remoteRows, isTrial), hasTrial);
     });
 }
 

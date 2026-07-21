@@ -4,7 +4,7 @@ import { ConfigPreview } from "../components/auto-config/ConfigPreview.mjs";
 import { FinalScreenshot } from "../components/auto-config/FinalScreenshot.mjs";
 import { RequirementUpload } from "../components/auto-config/RequirementUpload.mjs";
 
-export function AutoConfigPage({ documentObject = document }) {
+export function AutoConfigPage({ documentObject = document, loadProject = async () => {} }) {
   const root = documentObject.querySelector("#autoWorkbench");
   const components = [
     RequirementUpload(documentObject),
@@ -21,6 +21,6 @@ export function AutoConfigPage({ documentObject = document }) {
       root,
     ],
     components,
-    enter: async () => {},
+    enter: () => loadProject(),
   };
 }

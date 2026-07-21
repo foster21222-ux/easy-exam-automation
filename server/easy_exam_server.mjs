@@ -65,11 +65,15 @@ import { runOperationBatchCreation } from "./operation_batch_runner.mjs";
 import { deleteTaskSessionsFromTenant } from "./session_deletion.mjs";
 import { calculateRoomSizes } from "./room_assignment.mjs";
 import {
+  apiKeyHint,
+  apiKeyProfileId,
+  apiKeyProfileCredentialsForUser,
   apiKeyProfilesForUser,
   currentUserLogin,
   deleteApiKeyProfileForUser,
   defaultUserSettings,
   normalizeUserSettings,
+  loginForApiKeyProfile,
   publicApiKeyProfiles,
   publicApiKeyProfilesForUser,
   saveUserLogin,
@@ -103,6 +107,12 @@ import {
   validateFanweiReadPayload,
 } from "./fanwei_requirement_mapper.mjs";
 import {
+  buildFanweiProjectConfig,
+  buildProjectWorkflow,
+  normalizeFanweiBusinessRequirement,
+} from "./project_workflow.mjs";
+import { buildAutoConfigFromRequirement } from "./requirement_auto_config_adapter.mjs";
+import {
   buildWindowsChromeLaunchArgs,
   fanweiAutoReadPlatform,
   fanweiAutoReadUnavailableMessage,
@@ -116,6 +126,7 @@ import {
   sendContentRequirementEmail,
   writeEmailSettingsFile,
 } from "./content_requirement_email.mjs";
+import { convertScoreFeedbackToPdf } from "./score_feedback_pdf.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -138,6 +149,7 @@ const fanweiWorkbookScript = path.join(__dirname, "fanwei_requirement_workbook.p
 const candidateParserScript = path.join(__dirname, "candidate_list_parser.py");
 const monitorAccountExporterScript = path.join(__dirname, "monitor_account_exporter.py");
 const scoreFeedbackExporterScript = path.join(__dirname, "score_feedback_exporter.py");
+const zipDirectoryScript = path.join(__dirname, "zip_directory.py");
 const taskStateScript = path.join(__dirname, "task_state_db.py");
 const requirementStateScript = path.join(__dirname, "requirement_request_db.py");
 const scoreFeedbackTemplatePath = path.join(rootDir, "template", "成绩单模板.xlsx");
@@ -325,6 +337,11 @@ function safeFileName(raw = "file") {
 function safeExcelFileName(raw = "monitor_accounts") {
   const base = safeFileName(raw).replace(/\.(xlsx|xls|csv)$/i, "").trim() || "monitor_accounts";
   return `${base}.xlsx`;
+}
+
+function safeZipFileName(raw = "archive") {
+  const base = safeFileName(raw).replace(/\.zip$/i, "").trim() || "archive";
+  return `${base}.zip`;
 }
 
 function monitorSessionUrl(sessionId) {
@@ -536,7 +553,8 @@ async function saveApiCreationCapture(job, created) {
 function buildSessionPayloads(config) {
   const videoMonitor = boolValue(config.videoMonitor);
   const clientExam = boolValue(config.clientExam) || String(config.examType || "").includes("客户端");
-  const pledgeContent = String(config.pledgeContent || "").trim();
+  const preLoginPrompt = normalizeRequirementRichField(config.preLoginPrompt);
+  const pledgeContent = normalizeRequirementRichField(config.pledgeContent);
   const usePostPoliceVerify = videoMonitor && String(config.loginVerifyMode || "考后公安验证").includes("考后公安");
   const unifiedExamAddress =
     boolValue(config.unifiedExamAddress) || String(config.examAddress || config.examUrlType || "").includes("统一");
@@ -566,7 +584,7 @@ function buildSessionPayloads(config) {
     watermark: true,
     copy_item_unable: true,
     message: String(config.welcomeText || ""),
-    notice: String(config.preLoginPrompt || ""),
+    notice: preLoginPrompt,
     nda: Boolean(pledgeContent),
     nda_notice: pledgeContent,
     personal: buildPersonalInformation(),
@@ -638,6 +656,9 @@ function buildSessionPayloads(config) {
 
 async function runYikaoApiCreationJob({ job, login }) {
   const ts = () => new Date().toISOString();
+  const updateJobStep = (stepKey, status, result = {}) => (
+    updateTaskStep(job.taskId, stepKey, status, result, job.requirementIndex)
+  );
   const emitLog = (message, level = "success") => {
     pushEvent(job, { type: "log", level, message, ts: ts() });
   };
@@ -658,7 +679,7 @@ async function runYikaoApiCreationJob({ job, login }) {
       sessionPayloads: payloads,
       createSession: async (item, index) => {
         activeStep = item.kind === "main" ? "formal_session_create" : "trial_session_create";
-        await updateTaskStep(job.taskId, activeStep, "running", {
+        await updateJobStep(activeStep, "running", {
           message: `开始创建${item.kind === "main" ? "正式考试" : "试考"}：${item.payload.name}`,
         });
         emitStage(item.kind === "main" ? "创建主考试" : "创建试考", 20 + index * 35);
@@ -688,6 +709,7 @@ async function runYikaoApiCreationJob({ job, login }) {
         };
         await runTaskState("upsert_session", {
           taskId: job.taskId,
+          requirementIndex: job.requirementIndex,
           sessionType: item.kind === "main" ? "formal" : "trial",
           session: {
             session_id: sessionId,
@@ -698,7 +720,7 @@ async function runYikaoApiCreationJob({ job, login }) {
             url: result?.url || "",
           },
         });
-        await updateTaskStep(job.taskId, activeStep, "success", {
+        await updateJobStep(activeStep, "success", {
           message: `创建成功：${item.payload.name}${sessionId ? `，session_id=${sessionId}` : ""}`,
           result: { sessionId, name: item.payload.name, kind: item.kind },
         });
@@ -707,7 +729,7 @@ async function runYikaoApiCreationJob({ job, login }) {
       },
       configureCourses: async (formalSession) => {
         activeStep = "course_create";
-        await updateTaskStep(job.taskId, "course_create", "running", { message: "开始创建并确认正式考试科目" });
+        await updateJobStep("course_create", "running", { message: "开始创建并确认正式考试科目" });
         emitStage("正式考试科目", 85);
         const courses = await ensureFormalCoursesCreated({
           login,
@@ -717,8 +739,8 @@ async function runYikaoApiCreationJob({ job, login }) {
           emitLog,
         });
         job.config = { ...job.config, courses };
-        await runTaskState("update_config", { taskId: job.taskId, config: { courses } });
-        await updateTaskStep(job.taskId, "course_create", "success", {
+        await persistTaskRequirementCourses(job.taskId, job.requirementIndex, courses);
+        await updateJobStep("course_create", "success", {
           message: courses.length
             ? `科目创建/确认完成，最终科目编号：${courses.map((course) => `${course.name}/${course.code}`).join("、")}`
             : "需求单科目为空，已跳过科目创建。",
@@ -726,7 +748,7 @@ async function runYikaoApiCreationJob({ job, login }) {
         });
 
         activeStep = "paper_bind";
-        await updateTaskStep(job.taskId, "paper_bind", "running", {
+        await updateJobStep("paper_bind", "running", {
           message: "开始将科目绑定到正式考试场次",
         });
         const bindResult = await bindCoursesToFormalSession({
@@ -737,7 +759,7 @@ async function runYikaoApiCreationJob({ job, login }) {
           requestJson: readTenantJsonWithLogin,
           emitLog,
         });
-        await updateTaskStep(job.taskId, "paper_bind", "success", {
+        await updateJobStep("paper_bind", "success", {
           message: courses.length ? `已将 ${courses.length} 个科目绑定到正式考试场次` : "需求单科目为空，已跳过正式场次科目绑定。",
           result: { bindResult },
         });
@@ -747,7 +769,7 @@ async function runYikaoApiCreationJob({ job, login }) {
     const trialSession = created.find((session) => session?.kind === "mock");
     if (trialSession?.id) {
       activeStep = "trial_paper_bind";
-      await updateTaskStep(job.taskId, "trial_paper_bind", "running", {
+      await updateJobStep("trial_paper_bind", "running", {
         message: `开始绑定试考默认试卷，session_id=${trialSession.id}`,
       });
       const trialPaperLogs = [];
@@ -763,18 +785,18 @@ async function runYikaoApiCreationJob({ job, login }) {
         emitLog: trialEmitLog,
       });
       if (bindResult.status === "waiting_manual") {
-        await updateTaskStep(job.taskId, "trial_paper_bind", "waiting_manual", {
+        await updateJobStep("trial_paper_bind", "waiting_manual", {
           message: trialPaperLogs.join("\n") || "默认试考科目未关联试卷，请在租户后台关联后重试",
           result: { sessionId: trialSession.id, bindResult },
         });
       } else {
-        await updateTaskStep(job.taskId, "trial_paper_bind", "success", {
+        await updateJobStep("trial_paper_bind", "success", {
           message: trialPaperLogs.join("\n") || "试考默认试卷绑定成功",
           result: { sessionId: trialSession.id, bindResult },
         });
       }
     } else {
-      await updateTaskStep(job.taskId, "trial_paper_bind", "skipped", {
+      await updateJobStep("trial_paper_bind", "skipped", {
         message: "需求单未启用试考，跳过试考试卷绑定",
       });
     }
@@ -793,7 +815,7 @@ async function runYikaoApiCreationJob({ job, login }) {
       },
     });
   } catch (error) {
-    await updateTaskStep(job.taskId, activeStep, "failed", {
+    await updateJobStep(activeStep, "failed", {
       errorMessage: error instanceof Error ? error.message : String(error),
       message: `步骤执行失败：${error instanceof Error ? error.message : String(error)}`,
     }).catch(() => {});
@@ -876,9 +898,9 @@ function taskRequirementIds(task = {}) {
   ].map((value) => String(value || "").trim()).filter(Boolean);
 }
 
-async function updateTaskStep(taskId, stepKey, status, result = {}) {
+async function updateTaskStep(taskId, stepKey, status, result = {}, requirementIndex = null) {
   if (!taskId) return null;
-  return await runTaskState("update_step", { taskId, stepKey, status, result });
+  return await runTaskState("update_step", { taskId, stepKey, status, result, requirementIndex });
 }
 
 async function findVisibleTaskBySessionId(req, sessionId) {
@@ -913,11 +935,22 @@ function mergedStepSubStatus(task, stepKey, sessionType, status) {
   };
 }
 
+function mergedRequirementStepSubStatus(task, stepKey, requirementIndex, sessionType, status) {
+  const step = taskStepByKey(task, stepKey);
+  const requirementKey = String(Number(requirementIndex || 0));
+  const existing = step?.requirementProgress?.[requirementKey]?.subStatus || {};
+  return {
+    ...existing,
+    [taskSessionSubStatusKey(sessionType)]: status,
+  };
+}
+
 async function updateTaskSessionProgress(task, sessionId, patch = {}) {
   const session = taskSessionForId(task, sessionId);
   if (!task?.taskId || !session) return null;
   return await runTaskState("upsert_session", {
     taskId: task.taskId,
+    requirementIndex: Number(session.requirementIndex || 0),
     sessionType: session.sessionType,
     session: {
       session_id: session.session_id,
@@ -938,7 +971,7 @@ function taskStepByKey(task, stepKey) {
 
 async function syncTaskDetailSessionState(req, task) {
   if (!task?.taskId) return task;
-  const login = getYikaoLoginForRequest(req);
+  const login = getYikaoLoginForTask(task);
   let currentTask = task;
   for (const session of task.sessions || []) {
     const sessionId = String(session.session_id || "").trim();
@@ -965,31 +998,36 @@ async function syncTaskDetailSessionState(req, task) {
     if (entriesNum > 0) {
       const importStepKey = taskSessionImportStepKey(session.sessionType);
       const importStep = taskStepByKey(currentTask, importStepKey);
-      if (importStep?.status !== "success") {
+      const requirementIndex = Number(session.requirementIndex || 0);
+      const importRequirement = importStep?.requirementProgress?.[String(requirementIndex)] || null;
+      if (importRequirement?.status !== "success") {
         currentTask = await updateTaskStep(currentTask.taskId, importStepKey, "success", {
           message: `同步场次状态：考生导入已完成，${entriesNum} 人`,
           result: { sessionId, entriesNum },
-        }) || currentTask;
+        }, requirementIndex) || currentTask;
       }
     }
 
     if (roomsCount > 0) {
       const subKey = taskSessionSubStatusKey(session.sessionType);
+      const requirementIndex = Number(session.requirementIndex || 0);
       const roomsStep = taskStepByKey(currentTask, "sessions_auto_rooms");
-      if (roomsStep?.subStatus?.[subKey] !== "success") {
+      const roomsRequirement = roomsStep?.requirementProgress?.[String(requirementIndex)] || null;
+      if (roomsRequirement?.subStatus?.[subKey] !== "success") {
         currentTask = await updateTaskStep(currentTask.taskId, "sessions_auto_rooms", "running", {
-          subStatus: mergedStepSubStatus(currentTask, "sessions_auto_rooms", session.sessionType, "success"),
+          subStatus: mergedRequirementStepSubStatus(currentTask, "sessions_auto_rooms", requirementIndex, session.sessionType, "success"),
           message: `同步场次状态：${session.sessionType === "formal" ? "正式考试" : "试考"}已完成自动分班，${roomsCount} 个班级`,
           result: { sessionId, entriesNum, roomCount: roomsCount },
-        }) || currentTask;
+        }, requirementIndex) || currentTask;
       }
       const monitorStep = taskStepByKey(currentTask, "sessions_invigilator_export");
-      if (monitorStep?.subStatus?.[subKey] !== "success") {
+      const monitorRequirement = monitorStep?.requirementProgress?.[String(requirementIndex)] || null;
+      if (monitorRequirement?.subStatus?.[subKey] !== "success") {
         currentTask = await updateTaskStep(currentTask.taskId, "sessions_invigilator_export", "running", {
-          subStatus: mergedStepSubStatus(currentTask, "sessions_invigilator_export", session.sessionType, "success"),
+          subStatus: mergedRequirementStepSubStatus(currentTask, "sessions_invigilator_export", requirementIndex, session.sessionType, "success"),
           message: `同步场次状态：${session.sessionType === "formal" ? "正式考试" : "试考"}监考账号可下载`,
           result: { sessionId, roomCount: roomsCount },
-        }) || currentTask;
+        }, requirementIndex) || currentTask;
       }
     }
   }
@@ -1000,6 +1038,38 @@ async function parseWorkbook(uploadPath) {
   return await runPythonJson([parserScript, uploadPath]);
 }
 
+function pinTaskApiKeyProfile(config = {}, login = {}) {
+  const tenantApiKey = String(login?.tenantApiKey || "").trim();
+  if (!tenantApiKey) return config;
+  return {
+    ...config,
+    apiKeyProfileId: apiKeyProfileId({
+      apiBase: process.env.YIKAO_API_BASE || login.apiBase,
+      tenantApiKey,
+    }),
+  };
+}
+
+async function bindTaskToAutomationLogin(taskId, login = {}) {
+  const task = await runTaskState("get", { taskId });
+  if (!task) throw new Error("任务不存在，无法固定自动配置账号。");
+  const config = pinTaskApiKeyProfile(task.config || {}, login);
+  const examRequirements = Array.isArray(config.examRequirements)
+    ? config.examRequirements.map((requirement) => ({
+      ...requirement,
+      config: pinTaskApiKeyProfile(requirement?.config || {}, login),
+    }))
+    : null;
+  return await runTaskState("update_config", {
+    taskId,
+    sourceAccount: login.username || "",
+    config: {
+      ...config,
+      ...(examRequirements ? { examRequirements } : {}),
+    },
+  });
+}
+
 async function createImportFromWorkbook({
   importId,
   uploadPath,
@@ -1007,6 +1077,8 @@ async function createImportFromWorkbook({
   req,
   messagePrefix = "需求单解析完成",
   ownerEmail = "",
+  existingTaskId = "",
+  buildTaskConfig = null,
 }) {
   const parsed = await parseWorkbook(uploadPath);
   const taskSummaries = await runTaskState("list_all");
@@ -1019,14 +1091,24 @@ async function createImportFromWorkbook({
   const projectName = String(parsed?.config?.examName || filename.replace(/\.[^.]+$/, "") || "未命名项目").trim();
   const authUser = getAuthUserFromRequest(auth, req);
   const login = getYikaoLoginForRequest(req);
+  parsed.config = pinTaskApiKeyProfile(parsed.config, login);
   const taskOwnerEmail = ownerEmail || authUser?.email || "";
-  const task = await runTaskState("create", {
-    projectName,
-    sourceAccount: login.username || "",
-    ownerEmail: auth.enabled ? taskOwnerEmail : "",
-    config: parsed?.config || {},
-  });
   const uploadId = importId || randomUUID();
+  const extraConfig = typeof buildTaskConfig === "function"
+    ? await buildTaskConfig({ parsed, uploadId, projectName, existingTasks })
+    : {};
+  const taskConfig = { ...(parsed?.config || {}), ...(extraConfig || {}) };
+  let task = null;
+  if (existingTaskId) {
+    task = await runTaskState("update_config", { taskId: existingTaskId, config: taskConfig });
+  } else {
+    task = await runTaskState("create", {
+      projectName,
+      sourceAccount: login.username || "",
+      ownerEmail: auth.enabled ? taskOwnerEmail : "",
+      config: taskConfig,
+    });
+  }
   await updateTaskStep(task.taskId, "requirement_parse", "success", {
     message: `${messagePrefix}：${filename}`,
     result: { filename, uploadId },
@@ -1041,6 +1123,7 @@ function createJob(importRecord, login) {
     id: randomUUID(),
     importId: importRecord.id,
     taskId: importRecord.taskId,
+    requirementIndex: Number(importRecord.requirementIndex || 0),
     config: importRecord.parsed.config,
     login,
     status: "queued",
@@ -1115,6 +1198,7 @@ async function handleImport(req, res) {
   const projectName = String(parsed?.config?.examName || filename.replace(/\.[^.]+$/, "") || "未命名项目").trim();
   const authUser = getAuthUserFromRequest(auth, req);
   const login = getYikaoLoginForRequest(req);
+  parsed.config = pinTaskApiKeyProfile(parsed.config, login);
   const task = await runTaskState("create", {
     projectName,
     sourceAccount: login.username || "",
@@ -1214,46 +1298,401 @@ function validateFanweiReadPayloadForRequest(payload) {
   }
 }
 
-function buildFanweiRequirementPreviewFromPayload(payload) {
+let fanweiRequirementDefaultsPromise = null;
+
+function loadFanweiRequirementDefaults() {
+  if (!fanweiRequirementDefaultsPromise) {
+    fanweiRequirementDefaultsPromise = runPythonJson([
+      fanweiWorkbookScript,
+      "--defaults",
+      examRequestTemplatePath,
+    ]).catch((error) => {
+      fanweiRequirementDefaultsPromise = null;
+      throw error;
+    });
+  }
+  return fanweiRequirementDefaultsPromise;
+}
+
+async function buildFanweiRequirementPreviewFromPayload(payload) {
   const fanwei = validateFanweiReadPayloadForRequest(payload);
   const model = buildFanweiRequirementModel(fanwei);
+  model.requirementFields = {
+    ...(await loadFanweiRequirementDefaults()),
+    ...model.requirementFields,
+  };
   return { fanwei: model };
+}
+
+async function findFanweiProject(serialNo, ownerEmail = "") {
+  const normalizedSerial = String(serialNo || "").trim();
+  const normalizedOwner = normalizeEmail(ownerEmail || "");
+  if (!normalizedSerial) return null;
+  const summaries = await runTaskState("list_all");
+  for (const summary of summaries || []) {
+    if (normalizedOwner && normalizeEmail(summary.ownerEmail || "") !== normalizedOwner) continue;
+    const task = await runTaskState("get", { taskId: summary.taskId });
+    const sourceKey = String(task?.config?.projectCard?.sourceKey || task?.config?.fanweiSource?.serialNo || "").trim();
+    if (sourceKey === normalizedSerial) return task;
+  }
+  return null;
 }
 
 async function handleFanweiRequirementPreview(req, res) {
   const payload = parseJsonSafe(await readBody(req)) || {};
-  json(res, 200, buildFanweiRequirementPreviewFromPayload(payload));
+  json(res, 200, await buildFanweiRequirementPreviewFromPayload(payload));
 }
 
 async function createFanweiRequirementImportFromPayload(payload, req, options = {}) {
   const fanwei = validateFanweiReadPayloadForRequest(payload);
   const model = buildFanweiRequirementModel(fanwei);
-  if (payload.requirementFields && typeof payload.requirementFields === "object") {
-    model.requirementFields = {
-      ...model.requirementFields,
-      ...payload.requirementFields,
-    };
-  }
+  model.requirementFields = {
+    ...(await loadFanweiRequirementDefaults()),
+    ...model.requirementFields,
+  };
+  const submittedRequirementFields = Array.isArray(payload.requirementFieldsList)
+    ? payload.requirementFieldsList
+    : [payload.requirementFields];
+  const requirementFieldsList = submittedRequirementFields
+    .filter((fields) => fields && typeof fields === "object" && !Array.isArray(fields))
+    .map((fields) => ({ ...model.requirementFields, ...editableRequirementFieldsRecord(fields) }));
+  if (!requirementFieldsList.length) requirementFieldsList.push({ ...model.requirementFields });
+  model.requirementFields = { ...requirementFieldsList[0] };
   const importId = randomUUID();
   const baseName = safeFileName(`泛微_${model.fields["运控流水号"] || payload.serialNo || importId}_易考新建考试需求单.xlsx`);
   const payloadPath = path.join(generatedDir, `${importId}-fanwei-requirement.json`);
   const uploadPath = path.join(uploadsDir, `${importId}-${baseName}`);
+  const user = getAuthUserFromRequest(auth, req);
+  const ownerEmail = options.ownerEmail || user?.email || "";
+  const existingTask = await findFanweiProject(model.fields["运控流水号"] || payload.serialNo, auth.enabled ? ownerEmail : "");
   await fs.writeFile(payloadPath, JSON.stringify(model, null, 2), "utf8");
   await runPythonJson([fanweiWorkbookScript, examRequestTemplatePath, payloadPath, uploadPath]);
+  let examRequirements = [];
   const imported = await createImportFromWorkbook({
     importId,
     uploadPath,
     filename: baseName,
     req,
     messagePrefix: "泛微需求单生成并解析完成",
-    ownerEmail: options.ownerEmail || "",
+    ownerEmail,
+    existingTaskId: existingTask?.taskId || "",
+    buildTaskConfig: ({ parsed, uploadId, existingTasks }) => {
+      const otherProjectTasks = (existingTasks || []).filter((task) => task?.taskId !== existingTask?.taskId);
+      const projectRequirementConfigs = [];
+      examRequirements = requirementFieldsList.map((fields, index) => {
+        const generated = buildAutoConfigFromRequirement(
+          autoConfigRequirementFromFields(fields, parsed.config || {}),
+          { customerName: parsed.config?.customerName || "" },
+        );
+        let config = {
+          ...(index === 0 ? parsed.config : {}),
+          ...generated.config,
+          apiKeyProfileId: parsed.config?.apiKeyProfileId || generated.config?.apiKeyProfileId || "",
+        };
+        config = assignCourseCodesForExamConfig(config, otherProjectTasks, projectRequirementConfigs);
+        projectRequirementConfigs.push(config);
+        const previewRows = index === 0 && Array.isArray(parsed.previewRows)
+          ? parsed.previewRows
+          : Object.entries(fields).map(([label, value]) => ["易考需求单", label, String(value ?? ""), "项目卡"]);
+        const warnings = index === 0 && Array.isArray(parsed.warnings) ? parsed.warnings : generated.warnings;
+        return {
+          fields,
+          config,
+          previewRows,
+          warnings,
+          metrics: {
+            recognizedFields: Object.values(fields).filter((value) => String(value ?? "").trim()).length,
+            needsReview: warnings.length,
+            etaMinutes: 4,
+          },
+          filename: index === 0 ? baseName : "",
+          uploadId: index === 0 ? uploadId : "",
+        };
+      });
+      return buildFanweiProjectConfig({
+        fanwei,
+        model,
+        parsed,
+        filename: baseName,
+        uploadId,
+        requirements: examRequirements,
+        previousConfig: existingTask?.config || {},
+      });
+    },
   });
-  return { ...imported, fanwei: model, workbookPath: uploadPath };
+  return { ...imported, fanwei: model, examRequirements, workbookPath: uploadPath, projectReused: Boolean(existingTask) };
 }
 
 async function handleFanweiRequirementImport(req, res) {
   const payload = parseJsonSafe(await readBody(req)) || {};
   json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));
+}
+
+async function handleProjectWorkflow(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const batchDraft = buildOperationBatchDraft(task, operationBatchDraftOverridesFromTask(task));
+  return json(res, 200, { ok: true, task, batchDraft, workflow: buildProjectWorkflow(task, batchDraft) });
+}
+
+function editableStringRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [String(key), String(item ?? "").trim()]));
+}
+
+const richRequirementFields = new Set(["考前等待提示", "考试承诺书内容"]);
+
+function richRequirementPlainText(value) {
+  return String(value ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\u00a0/g, " ")
+    .trim();
+}
+
+function normalizeRequirementRichField(value) {
+  const text = String(value ?? "").trim();
+  return richRequirementPlainText(text) ? text : "";
+}
+
+function editableRequirementFieldsRecord(value) {
+  const fields = editableStringRecord(value);
+  for (const field of richRequirementFields) {
+    if (Object.hasOwn(fields, field)) fields[field] = normalizeRequirementRichField(fields[field]);
+  }
+  return fields;
+}
+
+function projectRequirementFieldChanges(beforeFields = {}, afterFields = {}) {
+  const before = editableStringRecord(beforeFields);
+  const after = editableStringRecord(afterFields);
+  return Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
+    .sort((left, right) => left.localeCompare(right, "zh-CN"))
+    .filter((field) => before[field] !== after[field])
+    .map((field) => ({
+      field,
+      before: before[field] || "",
+      after: after[field] || "",
+    }));
+}
+
+function fanweiHistoryFields(raw = {}) {
+  const fields = {};
+  for (const [field, value] of Object.entries(editableStringRecord(raw.fields))) {
+    fields[`泛微需求 / ${field}`] = value;
+  }
+  for (const [field, value] of Object.entries(editableStringRecord(raw.serviceConfirmation?.fields))) {
+    fields[`服务确认 / ${field}`] = value;
+  }
+  editableExamSceneRows(raw.examSceneRows).forEach((row, index) => {
+    for (const [field, value] of Object.entries(row)) fields[`考试场次 ${index + 1} / ${field}`] = value;
+  });
+  return fields;
+}
+
+function appendProjectSourceChangeHistory(task = {}, record = {}) {
+  const history = Array.isArray(task.config?.projectSourceChangeHistory)
+    ? [...task.config.projectSourceChangeHistory]
+    : [];
+  if (!record.changes?.length) return history;
+  history.push({ changeId: randomUUID(), ...record });
+  return history;
+}
+
+function editableExamSceneRows(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 100).map((row) => ({
+    "考试日期": String(row?.["考试日期"] || "").trim(),
+    "场次安排说明": String(row?.["场次安排说明"] || "").trim(),
+    "备注": String(row?.["备注"] || "").trim(),
+  }));
+}
+
+function autoConfigRequirementFromFields(fields = {}, current = {}) {
+  return {
+    exam_name: fields["考试名称"],
+    formal_exam_time_range: fields["考试日期时间"],
+    mock_exam_time_range: fields["试考日期时间"],
+    early_login_minutes: fields["提前登录时间"],
+    late_limit_minutes: fields["限制迟到时间"],
+    time_rule: fields["试卷扣时规则"],
+    exam_address: fields["考试地址"],
+    pre_login_prompt: normalizeRequirementRichField(fields["考前等待提示"]),
+    welcome_text: fields["欢迎语"],
+    pledge_content: normalizeRequirementRichField(fields["考试承诺书内容"]),
+    video_monitor_required: fields["视频监控"],
+    video_record_required: fields["视频录制"],
+    hawkeye_required: fields["鹰眼监控"],
+    exam_client_type: fields["考试类型"],
+    client_login_limit: fields["登陆次数"],
+    manual_score_text: fields["人工判分"],
+    paper_names_text: fields["试卷名称"],
+    subjects_text: fields["科目信息"],
+    watermark_enabled: current.watermark,
+    copy_forbidden: current.disableCopy,
+    leave_limit_count: current.leaveLimit,
+    u8_code: current.u8Code,
+    project_manager: current.projectManager,
+    customer_name: current.customerName,
+    candidate_count: current.candidateCount,
+  };
+}
+
+function mergeRequirementCoursePaperNames(currentCourses = [], generatedCourses = []) {
+  return (Array.isArray(currentCourses) ? currentCourses : []).map((course, index) => {
+    const next = { ...course };
+    const generated = generatedCourses[index] || {};
+    const paperName = String(generated.paper_name || generated.paperName || "").trim();
+    if (paperName) next.paper_name = paperName;
+    else delete next.paper_name;
+    return next;
+  });
+}
+
+function taskExamRequirements(task = {}) {
+  const requirements = task.config?.examRequirements;
+  if (Array.isArray(requirements) && requirements.length) return requirements;
+  return task.config?.examRequirement?.fields ? [task.config.examRequirement] : [];
+}
+
+async function persistTaskRequirementCourses(taskId, requirementIndex, courses) {
+  const task = await runTaskState("get", { taskId });
+  const requirements = taskExamRequirements(task);
+  const normalizedIndex = Math.max(Number(requirementIndex || 0), 0);
+  if (!requirements.length || !requirements[normalizedIndex]) {
+    return await runTaskState("update_config", { taskId, config: { courses } });
+  }
+  const examRequirements = [...requirements];
+  examRequirements[normalizedIndex] = {
+    ...examRequirements[normalizedIndex],
+    config: {
+      ...(examRequirements[normalizedIndex].config || {}),
+      courses,
+    },
+  };
+  return await runTaskState("update_config", {
+    taskId,
+    config: {
+      examRequirements,
+      examRequirement: examRequirements[0],
+      ...(normalizedIndex === 0 ? { courses } : {}),
+    },
+  });
+}
+
+async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const source = String(payload.source || "").trim();
+  const now = new Date().toISOString();
+  let configPatch = {};
+
+  if (source === "fanwei") {
+    const currentSource = task.config?.fanweiSource || {};
+    const currentRaw = currentSource.raw || {};
+    const raw = {
+      ...currentRaw,
+      fields: editableStringRecord(payload.fields),
+      serviceConfirmation: {
+        ...(currentRaw.serviceConfirmation || {}),
+        fields: editableStringRecord(payload.serviceConfirmationFields),
+      },
+      examSceneRows: editableExamSceneRows(payload.examSceneRows),
+    };
+    const changes = projectRequirementFieldChanges(fanweiHistoryFields(currentRaw), fanweiHistoryFields(raw));
+    const requirementFields = task.config?.examRequirement?.fields || {};
+    const businessRequirement = normalizeFanweiBusinessRequirement(raw, { requirementFields });
+    const fanweiSource = {
+      ...currentSource,
+      version: Number(currentSource.version || 0) + 1,
+      modifiedAt: now,
+      serialNo: businessRequirement.operation_serial_number || currentSource.serialNo || "",
+      raw,
+    };
+    const projectCard = {
+      ...(task.config?.projectCard || {}),
+      sourceKey: fanweiSource.serialNo || task.config?.projectCard?.sourceKey || "",
+      updatedAt: now,
+    };
+    configPatch = {
+      projectCard,
+      fanweiSource,
+      businessRequirement,
+      customerName: businessRequirement.customer_name || task.config?.customerName || "",
+      projectCode: businessRequirement.project_code || task.config?.projectCode || "",
+      projectSourceChangeHistory: appendProjectSourceChangeHistory(task, {
+        source: "fanwei",
+        changedAt: now,
+        versionBefore: Number(currentSource.version || 0),
+        versionAfter: Number(fanweiSource.version || 0),
+        changes,
+      }),
+    };
+  } else if (source === "examRequirement") {
+    const currentRequirements = taskExamRequirements(task);
+    const requestedIndex = Number(payload.requirementIndex ?? 0);
+    const requirementIndex = Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < currentRequirements.length
+      ? requestedIndex
+      : 0;
+    const current = currentRequirements[requirementIndex] || task.config?.examRequirement || {};
+    const currentConfig = current.config || {};
+    const fields = editableRequirementFieldsRecord(payload.fields);
+    const changes = projectRequirementFieldChanges(current.fields, fields);
+    const generated = buildAutoConfigFromRequirement(
+      autoConfigRequirementFromFields(fields, currentConfig),
+      { customerName: task.config?.customerName || currentConfig.customerName || "" },
+    );
+    const generatedConfig = generated.config || {};
+    const courseBasisUnchanged = JSON.stringify(currentConfig.subjects || []) === JSON.stringify(generatedConfig.subjects || [])
+      && String(currentConfig.startTimeDisplay || "") === String(generatedConfig.startTimeDisplay || "");
+    const config = {
+      ...currentConfig,
+      ...generatedConfig,
+      ...(courseBasisUnchanged ? {
+        courses: mergeRequirementCoursePaperNames(currentConfig.courses, generatedConfig.courses),
+        subjectImportPath: currentConfig.subjectImportPath || generatedConfig.subjectImportPath || "",
+      } : {}),
+      apiKeyProfileId: currentConfig.apiKeyProfileId || "",
+    };
+    const examRequirement = {
+      ...current,
+      version: Number(current.version || 0) + 1,
+      modifiedAt: now,
+      confirmedAt: now,
+      fields,
+      config,
+    };
+    const examRequirements = currentRequirements.length ? [...currentRequirements] : [examRequirement];
+    examRequirements[requirementIndex] = examRequirement;
+    configPatch = {
+      examRequirements,
+      examRequirement: examRequirements[0],
+      projectSourceChangeHistory: appendProjectSourceChangeHistory(task, {
+        source: "examRequirement",
+        requirementIndex,
+        changedAt: now,
+        versionBefore: Number(current.version || 0),
+        versionAfter: Number(examRequirement.version || 0),
+        changes,
+      }),
+    };
+  } else {
+    return badRequest(res, "仅支持修改泛微业务需求或易考需求单。");
+  }
+
+  const updated = await runTaskState("update_config", {
+    taskId,
+    config: configPatch,
+    projectName: source === "fanwei" ? (configPatch.businessRequirement?.project_name || task.projectName || "") : undefined,
+  });
+  const batchDraft = buildOperationBatchDraft(updated, operationBatchDraftOverridesFromTask(updated));
+  return json(res, 200, { ok: true, task: updated, batchDraft, workflow: buildProjectWorkflow(updated, batchDraft) });
 }
 
 async function handleFanweiBridgeToken(req, res) {
@@ -2074,10 +2513,11 @@ function mergeMonitorRooms(tenantRooms = [], cachedRooms = []) {
 }
 
 async function handleSessionMonitorAccounts(sessionId, req, res) {
-  const login = getYikaoLoginForRequest(req);
   const query = new URL(req.url, "http://localhost").searchParams;
   const sessionName = String(query.get("name") || "");
   const task = await findVisibleTaskBySessionId(req, sessionId).catch(() => null);
+  if (!task) return notFound(res);
+  const login = getYikaoLoginForTask(task);
   const tenantRooms = (await getRoomList(login, sessionId)).map(normalizeMonitorRoom);
   const taskRooms = findTaskMonitorRooms(task, sessionId);
   const cachedRooms = hasCompleteMonitorAccounts(taskRooms) ? taskRooms : await findCachedMonitorAccounts(sessionId);
@@ -2394,6 +2834,13 @@ function attachCourseNamesToCandidates(candidates = [], courses = []) {
   }));
 }
 
+function scoreCourseFallback(courses = [], examName = "") {
+  const configuredNames = (courses || [])
+    .map((course) => String(course?.name || course?.course_name || "").trim())
+    .filter(Boolean);
+  return configuredNames.length === 1 ? configuredNames[0] : String(examName || "").trim();
+}
+
 function scoreRowKey(row = {}) {
   return String(row.permit || row.identity_id || row.name || "").trim();
 }
@@ -2536,6 +2983,240 @@ async function fetchSingleEntryScore(login, sessionId, permit, logs = []) {
       `[成绩处理] 考生 permit=${permit} 单个成绩查询失败：HTTP ${error?.status || ""} ${tenantErrorDetail(error)}`.trim(),
     );
     return null;
+  }
+}
+
+function normalizeAssessmentReports(payload = {}) {
+  const reports = Array.isArray(payload?.reports)
+    ? payload.reports
+    : Array.isArray(payload?.data?.reports)
+      ? payload.data.reports
+      : [];
+  return reports
+    .map((report) => ({
+      name: String(report?.name || report?.title || report?.label || "").trim(),
+      url: String(report?.url || report?.link || report?.href || "").trim(),
+      status: String(report?.status || "").trim(),
+    }))
+    .filter((report) => report.name && report.url);
+}
+
+async function fetchSingleEntryScoreDetail(login, sessionId, permit, logs = []) {
+  const base = normalizeApiBase(process.env.YIKAO_API_BASE);
+  const tenantUrl = new URL(
+    `/tenant/api/session/${encodeURIComponent(sessionId)}/entry/${encodeURIComponent(permit)}/score/detail/`,
+    base,
+  );
+  try {
+    return await readTenantJsonWithLogin(login, tenantUrl, {}, "查询单个考生成绩详情");
+  } catch (error) {
+    const status = Number(error?.status);
+    if (status === 403 || status === 404) return null;
+    logs.push(
+      `[成绩处理] 考生 permit=${permit} 测评报告查询失败：HTTP ${error?.status || ""} ${tenantErrorDetail(error)}`.trim(),
+    );
+    return null;
+  }
+}
+
+function shouldQueryAssessmentReports(row = {}) {
+  const status = String(row.exam_status || "").trim();
+  return Boolean(row.permit) && (scoreValuePresent(row) || status === "已完成" || status === "参考");
+}
+
+async function attachAssessmentReportsToRows({ login, sessionId, rows = [], logs = [] }) {
+  const outputRows = rows.map((row) => ({ ...row }));
+  const candidates = outputRows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => shouldQueryAssessmentReports(row));
+  if (!candidates.length) {
+    logs.push("[成绩处理] 无已完成考生，跳过测评报告链接查询");
+    return outputRows;
+  }
+
+  logs.push(`[成绩处理] 开始查询测评报告链接，候选人数=${candidates.length}`);
+  const concurrency = 4;
+  let candidateWithReports = 0;
+  let reportLinkCount = 0;
+  for (let index = 0; index < candidates.length; index += concurrency) {
+    const batch = candidates.slice(index, index + concurrency);
+    const details = await Promise.all(
+      batch.map(({ row }) => fetchSingleEntryScoreDetail(login, sessionId, row.permit, logs)),
+    );
+    details.forEach((detail, detailIndex) => {
+      const reports = normalizeAssessmentReports(detail);
+      if (!reports.length) return;
+      const target = outputRows[batch[detailIndex].index];
+      target.reports = reports;
+      candidateWithReports += 1;
+      reportLinkCount += reports.length;
+    });
+  }
+  logs.push(`[成绩处理] 测评报告链接查询完成：${candidateWithReports} 名考生有报告，共 ${reportLinkCount} 个链接`);
+  return outputRows;
+}
+
+function stripAssessmentReports(rows = []) {
+  return rows.map(({ reports, score_reports, assessment_reports, ...row }) => row);
+}
+
+function countAssessmentReportLinks(rows = []) {
+  return rows.reduce((total, row) => {
+    const reports = Array.isArray(row?.reports) ? row.reports : [];
+    return total + reports.filter((report) => report?.url).length;
+  }, 0);
+}
+
+function contentDispositionFileName(header = "") {
+  const encodedMatch = String(header || "").match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return encodedMatch[1];
+    }
+  }
+  const plainMatch = String(header || "").match(/filename="?([^";]+)"?/i);
+  return plainMatch ? plainMatch[1] : "";
+}
+
+function safeReportPathName(raw = "file", fallback = "file") {
+  const value = String(raw || "").trim() || fallback;
+  const normalized = value
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/[^\w.\-\u4e00-\u9fff]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 120)
+    .replace(/^\.+|\.+$/g, "")
+    .trim();
+  return normalized || fallback;
+}
+
+function uniqueReportPathName(usedNames, rawName) {
+  const baseName = safeReportPathName(rawName);
+  const extension = path.extname(baseName);
+  const stem = extension ? baseName.slice(0, -extension.length) : baseName;
+  let candidate = baseName;
+  let index = 2;
+  while (usedNames.has(candidate)) {
+    candidate = `${stem}_${index}${extension}`;
+    index += 1;
+  }
+  usedNames.add(candidate);
+  return candidate;
+}
+
+function scoreReportCandidateFolderName(row = {}, index = 0) {
+  const name = String(row?.name || row?.姓名 || "").trim();
+  const permit = String(row?.permit || row?.准考证号 || row?.ticket || "").trim();
+  return safeReportPathName([name, permit].filter(Boolean).join("_"), `考生_${index + 1}`);
+}
+
+function assessmentReportsFromScoreRows(rows = []) {
+  const folderNames = new Set();
+  const reportItems = [];
+  for (const [rowIndex, row] of rows.entries()) {
+    const reports = Array.isArray(row?.reports)
+      ? row.reports
+      : Array.isArray(row?.score_reports)
+        ? row.score_reports
+        : Array.isArray(row?.assessment_reports)
+          ? row.assessment_reports
+          : [];
+    const filteredReports = reports.filter((report) => report?.url);
+    if (!filteredReports.length) continue;
+    const folderName = uniqueReportPathName(folderNames, scoreReportCandidateFolderName(row, rowIndex));
+    filteredReports.forEach((report, reportIndex) => {
+      reportItems.push({ row, rowIndex, report, reportIndex, folderName });
+    });
+  }
+  return reportItems;
+}
+
+function scoreReportFileExtension(response, reportUrl) {
+  const contentType = String(response?.headers?.get?.("content-type") || "").split(";")[0].trim().toLowerCase();
+  const contentTypeExtensions = new Map([
+    ["application/pdf", ".pdf"],
+    ["application/msword", ".doc"],
+    ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"],
+    ["application/vnd.ms-excel", ".xls"],
+    ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"],
+    ["application/zip", ".zip"],
+  ]);
+  if (contentTypeExtensions.has(contentType)) return contentTypeExtensions.get(contentType);
+  try {
+    const urlPathName = decodeURIComponent(new URL(reportUrl).pathname);
+    const extension = path.extname(urlPathName);
+    if (/^\.[a-z0-9]{1,12}$/i.test(extension)) return extension;
+  } catch {}
+  return ".pdf";
+}
+
+function scoreReportFileName(report = {}, response, reportUrl, index = 0) {
+  const headerFileName = contentDispositionFileName(response?.headers?.get?.("content-disposition"));
+  const rawName = headerFileName || String(report?.name || "").trim() || `测评文档_${index + 1}`;
+  const fileName = safeReportPathName(rawName, `测评文档_${index + 1}`);
+  if (path.extname(fileName)) return fileName;
+  return `${fileName}${scoreReportFileExtension(response, reportUrl)}`;
+}
+
+function scoreFeedbackPayloadPathFromResult(result = {}) {
+  const explicitPath = String(result?.payloadPath || "").trim();
+  if (explicitPath) return explicitPath;
+  const workbookPath = String(result?.filePath || "").trim();
+  return workbookPath ? workbookPath.replace(/\.xlsx$/i, ".json") : "";
+}
+
+function scoreReportArchiveFileName(task, session) {
+  return safeZipFileName(`${task?.projectName || session?.name || "测评文档"}-测评文档`);
+}
+
+function scoreReportUrl(rawUrl, login = {}) {
+  const base = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
+  return new URL(String(rawUrl || "").trim(), base);
+}
+
+function scoreReportFetchHeaders(login = {}, reportUrl) {
+  const headers = { Accept: "*/*" };
+  const base = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
+  try {
+    return reportUrl.host === new URL(base).host ? tenantHeadersForLogin(login, headers) : headers;
+  } catch {
+    return headers;
+  }
+}
+
+async function downloadAssessmentReportFiles({ login, reportItems = [], outputDir }) {
+  const usedFileNamesByFolder = new Map();
+  let downloaded = 0;
+  for (const item of reportItems) {
+    const reportUrl = scoreReportUrl(item.report.url, login);
+    const response = await fetch(reportUrl, {
+      headers: scoreReportFetchHeaders(login, reportUrl),
+    });
+    if (!response.ok) {
+      throw new Error(`测评文档下载失败：${item.folderName}/${item.report?.name || `测评文档_${item.reportIndex + 1}`}，HTTP ${response.status}`);
+    }
+    const folderPath = path.join(outputDir, item.folderName);
+    await fs.mkdir(folderPath, { recursive: true });
+    if (!usedFileNamesByFolder.has(item.folderName)) {
+      usedFileNamesByFolder.set(item.folderName, new Set());
+    }
+    const usedFileNames = usedFileNamesByFolder.get(item.folderName);
+    const fileName = uniqueReportPathName(
+      usedFileNames,
+      scoreReportFileName(item.report, response, reportUrl, item.reportIndex),
+    );
+    await fs.writeFile(path.join(folderPath, fileName), Buffer.from(await response.arrayBuffer()));
+    downloaded += 1;
+  }
+  return downloaded;
+}
+
+async function zipDirectory(sourceDir, zipPath) {
+  const result = await runPythonJson([zipDirectoryScript, sourceDir, zipPath]);
+  if (!result.ok) {
+    throw new Error((result.errors || []).join("；") || "测评文档打包失败");
   }
 }
 
@@ -2797,7 +3478,6 @@ async function handleSessions(req, res) {
 
 async function handleCandidateImport(req, res) {
   const payload = parseJsonSafe(await readBody(req));
-  const login = getYikaoLoginForRequest(req);
   const sessionId = String(payload?.session_id || "").trim();
   let candidates = payload?.candidates || [];
   if (!sessionId) {
@@ -2812,6 +3492,8 @@ async function handleCandidateImport(req, res) {
   }
 
   const task = await findVisibleTaskBySessionId(req, sessionId);
+  if (!task) return notFound(res);
+  const login = getYikaoLoginForTask(task);
   const courseAssignment = prepareCandidatesForCourseImport(candidates, task, { sessionId });
   if (courseAssignment.errors.length) {
     return json(res, 400, {
@@ -2962,7 +3644,7 @@ async function handleCandidateImport(req, res) {
           requestedCount: candidates.length,
           fail,
         },
-      });
+      }, Number(session.requirementIndex || 0));
     }
   }
 
@@ -3000,7 +3682,6 @@ async function handleCandidateImport(req, res) {
 
 async function handleRoomsPreview(sessionId, req, res) {
   const payload = parseJsonSafe(await readBody(req));
-  const login = getYikaoLoginForRequest(req);
   const targetSize = Number(payload?.targetSize || 30);
   if (!sessionId) {
     return badRequest(res, "session_id 为空");
@@ -3008,6 +3689,10 @@ async function handleRoomsPreview(sessionId, req, res) {
   if (!Number.isInteger(targetSize) || targetSize <= 0) {
     return badRequest(res, "每个班级人数必须是正整数");
   }
+
+  const task = await findVisibleTaskBySessionId(req, sessionId);
+  if (!task) return notFound(res);
+  const login = getYikaoLoginForTask(task);
 
   const latestState = await getSessionImportState(login, sessionId);
   const entryCount = latestState.entryCount;
@@ -3030,7 +3715,6 @@ async function handleRoomsPreview(sessionId, req, res) {
 
 async function handleRoomsAuto(sessionId, req, res) {
   const payload = parseJsonSafe(await readBody(req));
-  const login = getYikaoLoginForRequest(req);
   const requestedRooms = Array.isArray(payload?.rooms) ? payload.rooms : [];
   const overwrite = Boolean(payload?.overwrite);
   const targetSize = Number(payload?.targetSize || 30);
@@ -3040,6 +3724,10 @@ async function handleRoomsAuto(sessionId, req, res) {
   if (!Number.isInteger(targetSize) || targetSize <= 0) {
     return badRequest(res, "每个班级人数必须是正整数");
   }
+
+  const task = await findVisibleTaskBySessionId(req, sessionId);
+  if (!task) return notFound(res);
+  const login = getYikaoLoginForTask(task);
 
   const base = normalizeApiBase(process.env.YIKAO_API_BASE);
   const roomsUrl = new URL(`/tenant/api/session/${encodeURIComponent(sessionId)}/rooms/`, base);
@@ -3109,25 +3797,37 @@ async function handleRoomsAuto(sessionId, req, res) {
     return json(res, 500, { error: "自动分班接口未返回 progressbar id", detail: result });
   }
   const progressbar = await pollProgressbar(login, progressbarId);
-  const task = await findVisibleTaskBySessionId(req, sessionId);
   const session = taskSessionForId(task, sessionId);
   if (task?.taskId && session?.sessionType) {
     await updateTaskSessionProgress(task, sessionId, {
       candidateCount: entriesNum,
       roomCount: rooms.length,
     });
-    const roomsSubStatus = mergedStepSubStatus(task, "sessions_auto_rooms", session.sessionType, "success");
-    const monitorSubStatus = mergedStepSubStatus(task, "sessions_invigilator_export", session.sessionType, "success");
+    const requirementIndex = Number(session.requirementIndex || 0);
+    const roomsSubStatus = mergedRequirementStepSubStatus(
+      task,
+      "sessions_auto_rooms",
+      requirementIndex,
+      session.sessionType,
+      "success",
+    );
+    const monitorSubStatus = mergedRequirementStepSubStatus(
+      task,
+      "sessions_invigilator_export",
+      requirementIndex,
+      session.sessionType,
+      "success",
+    );
     await updateTaskStep(task.taskId, "sessions_auto_rooms", "running", {
       subStatus: roomsSubStatus,
       message: `${session.sessionType === "formal" ? "正式考试" : "试考"}自动分班完成：${entriesNum} 人，${rooms.length} 个班级`,
       result: { sessionId, entriesNum, roomCount: rooms.length, progressbarId, rooms },
-    });
+    }, requirementIndex);
     await updateTaskStep(task.taskId, "sessions_invigilator_export", "running", {
       subStatus: monitorSubStatus,
       message: `${session.sessionType === "formal" ? "正式考试" : "试考"}监考账号已生成：${rooms.length} 个班级`,
       result: { sessionId, roomCount: rooms.length, rooms },
-    });
+    }, requirementIndex);
   }
   json(res, 200, {
     session_id: sessionId,
@@ -3144,10 +3844,40 @@ async function handleRoomsAuto(sessionId, req, res) {
 
 async function handleCreateJob(req, res) {
   const payload = parseJsonSafe(await readBody(req));
-  if (!payload?.uploadId) {
-    return badRequest(res, "缺少 uploadId");
+  if (!payload?.uploadId && !payload?.taskId) {
+    return badRequest(res, "缺少 uploadId 或 taskId");
   }
-  const importRecord = state.imports.get(payload.uploadId);
+  let importRecord = null;
+  let requirementIndex = 0;
+  if (payload.taskId) {
+    const task = await runTaskState("get", { taskId: payload.taskId });
+    if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+    const requirements = taskExamRequirements(task);
+    if (requirements.length) {
+      requirementIndex = Number(payload.requirementIndex ?? 0);
+      if (!Number.isInteger(requirementIndex) || requirementIndex < 0 || requirementIndex >= requirements.length) {
+        return badRequest(res, "需求单序号不存在，请刷新项目后重试。");
+      }
+      const requirement = requirements[requirementIndex];
+      importRecord = {
+        id: requirement.uploadId || `task:${task.taskId}:requirement:${requirementIndex + 1}`,
+        taskId: task.taskId,
+        requirementIndex,
+        filename: requirement.filename || `${task.projectName || "项目"}-需求单${requirementIndex + 1}.xlsx`,
+        uploadPath: "",
+        parsed: {
+          config: requirement.config || {},
+          previewRows: requirement.previewRows || [],
+          warnings: requirement.warnings || [],
+        },
+        createdAt: requirement.confirmedAt || task.createdAt,
+      };
+    }
+  }
+  if (!importRecord && payload.uploadId) {
+    const uploadedRecord = state.imports.get(payload.uploadId) || null;
+    importRecord = uploadedRecord ? { ...uploadedRecord, requirementIndex } : null;
+  }
   if (!importRecord) {
     return badRequest(res, "需求单记录不存在，请重新导入。");
   }
@@ -3178,6 +3908,8 @@ async function handleCreateJob(req, res) {
     });
   }
 
+  await bindTaskToAutomationLogin(job.taskId, login);
+
   runYikaoApiCreationJob({ job, login });
 
   json(res, 200, { jobId: job.id, taskId: job.taskId });
@@ -3204,20 +3936,24 @@ function getYikaoLoginForRequest(req) {
 
 function getYikaoLoginForTask(task = {}) {
   const ownerEmail = normalizeEmail(task.ownerEmail || "");
-  const sourceAccount = normalizeEmail(task.sourceAccount || "");
-  const users = [ownerEmail, sourceAccount].filter(Boolean);
-  for (const email of users) {
-    const login = currentUserLogin({
-      user: { email },
+  const profileId = String(task.config?.apiKeyProfileId || "").trim();
+  const profileLabel = String(task.sourceAccount || "").trim();
+  if (ownerEmail) {
+    const login = loginForApiKeyProfile({
+      user: { email: ownerEmail },
       userSettings: state.userSettings,
       legacySettings: state.settings,
+      profileId,
+      profileLabel,
     });
     if (login?.tenantApiKey) return { ...login, allowEnvFallback: !auth.enabled };
   }
-  const login = currentUserLogin({
-    user: null,
+  const login = loginForApiKeyProfile({
+    user: ownerEmail ? { email: ownerEmail } : null,
     userSettings: state.userSettings,
     legacySettings: state.settings,
+    profileId,
+    profileLabel,
   });
   return { ...login, allowEnvFallback: !auth.enabled };
 }
@@ -3251,6 +3987,7 @@ async function handleSaveSettings(req, res) {
         apiBase: nextLogin.apiBase || "https://eztest.cn",
         tenantApiKey: nextLogin.tenantApiKey,
         label: nextLogin.username || nextLogin.tenantApiKey,
+        login: nextLogin,
       }, { current: true });
     }
     state.settings = nextSettings;
@@ -3270,6 +4007,9 @@ async function handleCustomerServiceScheduler(req, res, url) {
   if (auth.enabled && !user) return json(res, 401, { error: "请先登录" });
 
   const profileMatch = url.pathname.match(/^\/api\/customer-service-scheduler\/profiles\/([^/]+)$/);
+  const profileCredentialsMatch = url.pathname.match(
+    /^\/api\/customer-service-scheduler\/profiles\/([^/]+)\/credentials$/,
+  );
   if (req.method === "GET" && url.pathname === "/api/customer-service-scheduler") {
     return json(res, 200, {
       ok: true,
@@ -3277,6 +4017,19 @@ async function handleCustomerServiceScheduler(req, res, url) {
         ? publicApiKeyProfilesForUser({ user, userSettings: state.userSettings })
         : publicApiKeyProfiles(state.settings.apiKeyProfiles || []),
     });
+  }
+
+  if (req.method === "GET" && profileCredentialsMatch) {
+    const profileId = decodeURIComponent(profileCredentialsMatch[1]);
+    const credentials = apiKeyProfileCredentialsForUser({
+      user: auth.enabled ? user : null,
+      userSettings: state.userSettings,
+      legacySettings: state.settings,
+      profileId,
+    });
+    if (!credentials) return json(res, 404, { error: "未找到账号配置。" });
+    res.setHeader("Cache-Control", "no-store");
+    return json(res, 200, { ok: true, credentials });
   }
 
   if (req.method === "PATCH" && profileMatch) {
@@ -3331,22 +4084,29 @@ async function handleCustomerServiceScheduler(req, res, url) {
     const selectedProfiles = requestedProfileId
       ? profiles.filter((profile) => profile.id === requestedProfileId)
       : profiles.filter((profile) => profile.customerServiceScheduler?.enabled !== false);
-    const login = getYikaoLoginForRequest(req);
     const targets = selectedProfiles
       .filter((profile) => profile.tenantApiKey)
-      .map((profile) => ({
-        userId: auth.enabled ? normalizeEmail(user.email) : "local",
-        profileId: profile.id,
-        label: profile.label,
-        apiBase: profile.apiBase,
-        apiKey: profile.tenantApiKey,
-        keyHint: profile.keyHint,
-        login: {
-          url: login.url,
-          username: login.username,
-          password: login.password,
-        },
-      }));
+      .map((profile) => {
+        const profileLogin = loginForApiKeyProfile({
+          user: auth.enabled ? user : null,
+          userSettings: state.userSettings,
+          legacySettings: state.settings,
+          profileId: profile.id,
+        });
+        return {
+          userId: auth.enabled ? normalizeEmail(user.email) : "local",
+          profileId: profile.id,
+          label: profile.label,
+          apiBase: profile.apiBase,
+          apiKey: profile.tenantApiKey,
+          keyHint: profile.keyHint,
+          login: {
+            url: profileLogin.url,
+            username: profileLogin.username,
+            password: profileLogin.password,
+          },
+        };
+      });
     const summary = await runCustomerServiceSchedulerForTargets({
       targets,
       dryRun: payload.dryRun !== false,
@@ -3362,18 +4122,30 @@ function updateLocalApiKeyProfile(profileId, updates = {}) {
   const profiles = state.settings.apiKeyProfiles || [];
   const index = profiles.findIndex((profile) => profile.id === profileId);
   if (index < 0) throw new Error("未找到 API Key 配置。");
-  if (updates.current === true) {
-    profiles.forEach((profile) => {
-      profile.current = false;
-    });
-    state.settings.login = {
-      ...(state.settings.login || {}),
-      tenantApiKey: profiles[index].tenantApiKey,
-    };
-  }
+  const nextAccount = normalizeEmail(
+    updates.login?.username || updates.label || profiles[index].login?.username || profiles[index].label || "",
+  );
+  const duplicateAccount = nextAccount && profiles.some((profile, profileIndex) => (
+    profileIndex !== index &&
+    normalizeEmail(profile.login?.username || profile.label || "") === nextAccount
+  ));
+  if (duplicateAccount) throw new Error("该账号邮箱已绑定一个 API Key，请编辑原账号。");
   profiles[index] = {
     ...profiles[index],
     label: updates.label === undefined ? profiles[index].label : String(updates.label || "").trim(),
+    remark: updates.remark === undefined ? String(profiles[index].remark || "") : String(updates.remark || "").trim(),
+    tenantApiKey: String(updates.tenantApiKey || profiles[index].tenantApiKey || "").trim(),
+    keyHint: apiKeyHint(updates.tenantApiKey || profiles[index].tenantApiKey),
+    login: updates.login && typeof updates.login === "object"
+      ? {
+          ...(profiles[index].login || {}),
+          ...updates.login,
+          username: String(updates.login.username || updates.label || profiles[index].login?.username || profiles[index].label || "").trim(),
+          password: updates.login.password === undefined
+            ? String(profiles[index].login?.password || "")
+            : String(updates.login.password || ""),
+        }
+      : profiles[index].login,
     current: updates.current === undefined ? profiles[index].current : Boolean(updates.current),
     customerServiceScheduler: {
       ...(profiles[index].customerServiceScheduler || {}),
@@ -3386,6 +4158,19 @@ function updateLocalApiKeyProfile(profileId, updates = {}) {
     },
     updatedAt: new Date().toISOString(),
   };
+  if (updates.current === true || profiles[index].current) {
+    if (updates.current === true) {
+      profiles.forEach((profile, profileIndex) => {
+        if (profileIndex !== index) profile.current = false;
+      });
+    }
+    state.settings.login = {
+      ...(state.settings.login || {}),
+      ...(profiles[index].login || {}),
+      username: profiles[index].login?.username || profiles[index].label || state.settings.login?.username || "",
+      tenantApiKey: profiles[index].tenantApiKey,
+    };
+  }
   state.settings.apiKeyProfiles = profiles;
 }
 
@@ -3402,6 +4187,8 @@ function deleteLocalApiKeyProfile(profileId) {
     apiKeyProfiles: nextProfiles,
     login: {
       ...(state.settings.login || {}),
+      ...(current?.login || {}),
+      username: current?.login?.username || current?.label || state.settings.login?.username || "",
       tenantApiKey: current?.tenantApiKey || "",
     },
   };
@@ -3544,7 +4331,9 @@ function visibleByOwner(auth, req, item) {
 }
 
 async function handleTaskList(req, res) {
-  const tasks = await runTaskState("list");
+  const requestUrl = new URL(req.url, "http://127.0.0.1");
+  const includeArchived = requestUrl.searchParams.get("includeArchived") === "1";
+  const tasks = await runTaskState(includeArchived ? "list_all" : "list");
   json(res, 200, { tasks: tasks.filter((task) => visibleByOwner(auth, req, task)) });
 }
 
@@ -3601,7 +4390,7 @@ async function handleSessionChangePreview(taskId, sessionId, req, res) {
   if (!sessionChangeFeatureEnabled) return sessionChangeDisabled(res);
   const { task, session } = await visibleTaskSession(taskId, sessionId, req, res);
   if (!task || !session) return;
-  const login = getYikaoLoginForRequest(req);
+  const login = getYikaoLoginForTask(task);
   const apiBase = sessionChangeApiBase(login);
   try {
     const detail = await fetchTenantSessionDetail({
@@ -3644,7 +4433,7 @@ async function handleSessionChange(taskId, sessionId, req, res) {
 
   const { task, session } = await visibleTaskSession(taskId, sessionId, req, res);
   if (!task || !session) return;
-  const login = getYikaoLoginForRequest(req);
+  const login = getYikaoLoginForTask(task);
   const apiBase = sessionChangeApiBase(login);
   let detail = null;
   let detailWarning = null;
@@ -3721,6 +4510,7 @@ async function handleSessionChange(taskId, sessionId, req, res) {
 
   const updatedTask = await runTaskState("upsert_session", {
     taskId,
+    requirementIndex: Number(session.requirementIndex || 0),
     sessionType: session.sessionType,
     session: {
       session_id: session.session_id,
@@ -3784,15 +4574,19 @@ async function handleSessionChange(taskId, sessionId, req, res) {
 }
 
 async function enrichTaskPaperUnitInfoForDetail(req, task) {
-  const paperState = task?.config?.paperFormBind || {};
-  const bindResult = paperState.result?.bindResult || {};
-  const results = Array.isArray(bindResult.results) ? bindResult.results : [];
-  if (paperState.status !== "success" || !results.length) return task;
+  const states = taskRequirementIndexes(task).map((requirementIndex) => ({
+    requirementIndex,
+    state: paperFormBindState(task, requirementIndex),
+  }));
+  const successfulStates = states.filter(({ state }) => (
+    state.status === "success" && Array.isArray(state.result?.bindResult?.results) && state.result.bindResult.results.length
+  ));
+  if (!successfulStates.length) return task;
 
-  const login = getYikaoLoginForRequest(req);
+  const login = getYikaoLoginForTask(task);
   const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
-  const formCodes = [...new Set(results.flatMap((item) => (
-    Array.isArray(item.form_codes) ? item.form_codes : []
+  const formCodes = [...new Set(successfulStates.flatMap(({ state }) => (
+    state.result.bindResult.results.flatMap((item) => (Array.isArray(item.form_codes) ? item.form_codes : []))
   )).map((item) => String(item || "").trim()).filter(Boolean))];
   const unitInfoEntries = await Promise.all(formCodes.map(async (formCode) => {
     try {
@@ -3808,31 +4602,37 @@ async function enrichTaskPaperUnitInfoForDetail(req, task) {
     }
   }));
   const unitInfoByCode = new Map(unitInfoEntries);
-  const withUnitInfo = results.map((item) => {
-    const unitInfos = (Array.isArray(item.form_codes) ? item.form_codes : [])
-      .map((formCode) => unitInfoByCode.get(String(formCode || "").trim()))
-      .filter(Boolean);
-    return {
-      ...item,
-      ...(unitInfos.length === 1 ? { unit_info: unitInfos[0] } : {}),
-      ...(unitInfos.length > 1 ? { unit_infos: unitInfos } : {}),
+  const paperFormBinds = Array.isArray(task.config?.paperFormBinds) ? [...task.config.paperFormBinds] : [];
+  for (const { requirementIndex, state } of successfulStates) {
+    const bindResult = state.result.bindResult;
+    const withUnitInfo = bindResult.results.map((item) => {
+      const unitInfos = (Array.isArray(item.form_codes) ? item.form_codes : [])
+        .map((formCode) => unitInfoByCode.get(String(formCode || "").trim()))
+        .filter(Boolean);
+      return {
+        ...item,
+        ...(unitInfos.length === 1 ? { unit_info: unitInfos[0] } : {}),
+        ...(unitInfos.length > 1 ? { unit_infos: unitInfos } : {}),
+      };
+    });
+    paperFormBinds[requirementIndex] = {
+      ...state,
+      result: {
+        ...(state.result || {}),
+        bindResult: {
+          ...bindResult,
+          results: withUnitInfo,
+        },
+      },
     };
-  });
+  }
 
   return {
     ...task,
     config: {
       ...(task.config || {}),
-      paperFormBind: {
-        ...paperState,
-        result: {
-          ...(paperState.result || {}),
-          bindResult: {
-            ...bindResult,
-            results: withUnitInfo,
-          },
-        },
-      },
+      paperFormBinds,
+      paperFormBind: paperFormBinds[0] || task.config?.paperFormBind || {},
     },
   };
 }
@@ -3880,18 +4680,23 @@ async function handleProjectSharedSheetFill(taskId, req, res) {
 
   const logs = [];
   try {
-    const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
-    if (!formalSession?.session_id) throw new Error("缺少正式考试 session_id，无法填写项目共享大表");
-    const trialSession = (task.sessions || []).find((session) => session.sessionType === "trial");
-    const sessions = [formalSession];
-    logs.push(`[项目共享大表] 开始填写正式考试信息，session_id=${formalSession.session_id}`);
-    if (trialSession?.session_id) {
-      sessions.push(trialSession);
-      logs.push(`[项目共享大表] 检测到试考场次，开始填写试考信息，session_id=${trialSession.session_id}`);
-    } else {
+    const sessions = (task.sessions || []).filter((session) => (
+      (session.sessionType === "formal" || session.sessionType === "trial") && session.session_id
+    ));
+    if (!sessions.some((session) => session.sessionType === "formal")) {
+      throw new Error("缺少正式考试 session_id，无法填写项目共享大表");
+    }
+    for (const session of sessions) {
+      const label = session.sessionType === "trial" ? "试考" : "正式考试";
+      const requirementText = Number.isFinite(Number(session.requirementIndex))
+        ? `需求单 ${Number(session.requirementIndex) + 1} `
+        : "";
+      logs.push(`[项目共享大表] 开始填写${requirementText}${label}信息，session_id=${session.session_id}`);
+    }
+    if (!sessions.some((session) => session.sessionType === "trial")) {
       logs.push("[项目共享大表] 当前任务无试考场次，跳过试考填写");
     }
-    const login = getYikaoLoginForRequest(req);
+    const login = getYikaoLoginForTask(task);
     const syncedSessions = await enrichSharedSheetSessions(login, sessions, logs);
 
     const settings = tencentDocsSettingsFromEnv(process.env);
@@ -3925,19 +4730,37 @@ function scoreFeedbackFileName(task, session) {
   return safeExcelFileName(`${task?.projectName || session?.name || "成绩反馈单"}-成绩反馈单`);
 }
 
+function scoreFeedbackDownloadFileName(task, session, format) {
+  const fileName = scoreFeedbackFileName(task, session);
+  return format === "pdf" ? fileName.replace(/\.xlsx$/i, ".pdf") : fileName;
+}
+
+function scoreFeedbackFormalSessions(task = {}) {
+  return (task.sessions || []).filter((session) => session.sessionType === "formal" && session.session_id);
+}
+
+function scoreFeedbackExamTime(sessions = []) {
+  const ranges = [];
+  for (const session of sessions) {
+    const range = [session.start, session.end].filter(Boolean).join(" ~ ");
+    if (range && !ranges.includes(range)) ranges.push(range);
+  }
+  return ranges.join("；");
+}
+
 async function handleScoreProcess(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
-  const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
-  if (!formalSession?.session_id) return badRequest(res, "缺少正式考试 session_id，无法处理成绩");
+  const formalSessions = scoreFeedbackFormalSessions(task);
+  if (!formalSessions.length) return badRequest(res, "缺少正式考试 session_id，无法处理成绩");
 
   await updateTaskStep(taskId, "score_process", "running", {
-    message: "开始成绩处理：读取正式考试成绩并生成成绩反馈单",
+    message: "开始成绩处理：读取全部正式考试成绩并生成一张成绩反馈单",
   });
 
-  const login = getYikaoLoginForRequest(req);
-  const examName = task.projectName || formalSession.name || "正式考试";
-  const examTime = [formalSession.start, formalSession.end].filter(Boolean).join(" ~ ");
+  const login = getYikaoLoginForTask(task);
+  const examName = task.projectName || formalSessions[0]?.name || "正式考试";
+  const examTime = scoreFeedbackExamTime(formalSessions);
   const processedDate = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
@@ -3946,52 +4769,114 @@ async function handleScoreProcess(taskId, req, res) {
   }).format(new Date());
   const exportId = randomUUID();
   const payloadPath = path.join(generatedDir, `${exportId}-score-feedback.json`);
+  const pdfPayloadPath = path.join(generatedDir, `${exportId}-score-feedback-pdf.json`);
   const outputPath = path.join(generatedDir, `${exportId}-score-feedback.xlsx`);
-  const fileName = scoreFeedbackFileName(task, formalSession);
+  const pdfSourcePath = path.join(generatedDir, `${exportId}-score-feedback-pdf-source.xlsx`);
+  const pdfOutputPath = path.join(generatedDir, `${exportId}-score-feedback.pdf`);
+  const fileName = scoreFeedbackFileName(task, formalSessions[0]);
+  const pdfFileName = fileName.replace(/\.xlsx$/i, ".pdf");
   const logs = [];
 
   try {
-    logs.push(`[成绩处理] 开始处理正式考试成绩，session_id=${formalSession.session_id}`);
-    const tenantEntries = await fetchAllSessionEntries(login, formalSession.session_id, logs);
-    const tenantScores = await fetchAllSessionScores(login, formalSession.session_id, logs);
-    const storedCandidates = await runTaskState("list_candidates", {
-      taskId,
-      sessionId: formalSession.session_id,
-    }).catch(() => []);
-    const localCandidates = attachCourseNamesToCandidates(storedCandidates, task?.config?.courses || []);
-    const rows = await mergeEntryAndScoreRows({
-      login,
-      sessionId: formalSession.session_id,
-      entries: tenantEntries,
-      scores: tenantScores,
-      localCandidates,
-      examName,
-      logs,
-    });
+    const rowsWithReports = [];
+    let totalTenantEntries = 0;
+    let totalTenantScores = 0;
+    let totalLocalCandidates = 0;
+    for (const [index, formalSession] of formalSessions.entries()) {
+      const requirementIndex = Number(formalSession.requirementIndex || 0);
+      const sessionConfig = taskRequirementConfig(task, requirementIndex);
+      const courses = Array.isArray(sessionConfig.courses) && sessionConfig.courses.length
+        ? sessionConfig.courses
+        : task?.config?.courses || [];
+      const defaultCourse = scoreCourseFallback(courses, formalSession.name || examName);
+      logs.push(`[成绩处理] 开始处理正式考试 ${index + 1}/${formalSessions.length}，session_id=${formalSession.session_id}`);
+      const tenantEntries = await fetchAllSessionEntries(login, formalSession.session_id, logs);
+      const tenantScores = await fetchAllSessionScores(login, formalSession.session_id, logs);
+      const storedCandidates = await runTaskState("list_candidates", {
+        taskId,
+        sessionId: formalSession.session_id,
+      }).catch(() => []);
+      const localCandidates = attachCourseNamesToCandidates(storedCandidates, courses);
+      const sessionRows = await mergeEntryAndScoreRows({
+        login,
+        sessionId: formalSession.session_id,
+        entries: tenantEntries,
+        scores: tenantScores,
+        localCandidates,
+        examName: defaultCourse,
+        logs,
+      });
+      const sessionRowsWithReports = await attachAssessmentReportsToRows({
+        login,
+        sessionId: formalSession.session_id,
+        rows: sessionRows,
+        logs,
+      });
+      rowsWithReports.push(...sessionRowsWithReports);
+      totalTenantEntries += tenantEntries.length;
+      totalTenantScores += tenantScores.length;
+      totalLocalCandidates += localCandidates.length;
+      logs.push(`[成绩处理] 正式考试 ${index + 1}/${formalSessions.length} 汇总完成：输出 ${sessionRows.length} 条`);
+    }
+    const rows = rowsWithReports;
     const missingScores = rows.filter((row) => String(row.score ?? "").trim() === "").length;
     const unknownStatuses = [...new Set(rows.map((row) => normalizeScoreStatusForLog(row.exam_status)).filter(Boolean))];
-    logs.push(`成绩数据：状态 ${tenantEntries.length} 条，成绩 ${tenantScores.length} 条，本地补充 ${localCandidates.length} 条，输出 ${rows.length} 条。`);
+    logs.push(`成绩数据：正式考试 ${formalSessions.length} 场，状态 ${totalTenantEntries} 条，成绩 ${totalTenantScores} 条，本地补充 ${totalLocalCandidates} 条，输出 ${rows.length} 条。`);
     if (missingScores) logs.push(`有 ${missingScores} 名考生未读取到得分字段，得分列保留空白。`);
     if (unknownStatuses.length) logs.push(`发现未转换考试状态，已保留原值：${unknownStatuses.join("、")}`);
+    const reportLinkCount = countAssessmentReportLinks(rowsWithReports);
     logs.push("[成绩处理] 开始写入成绩单模板");
-    await fs.writeFile(
-      payloadPath,
-      JSON.stringify({ examName, examTime, processedDate, rows }, null, 2),
-      "utf8",
-    );
-    const result = await runPythonJson([scoreFeedbackExporterScript, scoreFeedbackTemplatePath, payloadPath, outputPath]);
-    if (!result.ok) {
-      throw new Error((result.errors || []).join("；") || "成绩反馈单生成失败");
+    if (reportLinkCount) {
+      logs.push("[成绩处理] PDF 保持原成绩单格式，不写入测评报告链接");
+      await fs.writeFile(
+        pdfPayloadPath,
+        JSON.stringify({ examName, examTime, processedDate, rows: stripAssessmentReports(rowsWithReports) }, null, 2),
+        "utf8",
+      );
+      const pdfSourceResult = await runPythonJson([scoreFeedbackExporterScript, scoreFeedbackTemplatePath, pdfPayloadPath, pdfSourcePath]);
+      if (!pdfSourceResult.ok) {
+        throw new Error((pdfSourceResult.errors || []).join("；") || "成绩单 PDF 源文件生成失败");
+      }
+      await convertScoreFeedbackToPdf({ inputPath: pdfSourcePath, outputPath: pdfOutputPath });
+      logs.push(`[成绩处理] 成绩单 PDF 生成成功：${pdfFileName}`);
+      await fs.writeFile(
+        payloadPath,
+        JSON.stringify({ examName, examTime, processedDate, rows: rowsWithReports }, null, 2),
+        "utf8",
+      );
+      const result = await runPythonJson([scoreFeedbackExporterScript, scoreFeedbackTemplatePath, payloadPath, outputPath]);
+      if (!result.ok) {
+        throw new Error((result.errors || []).join("；") || "成绩反馈单生成失败");
+      }
+      logs.push(`[成绩处理] 成绩反馈单生成成功：${fileName}，已追加 ${reportLinkCount} 个测评报告链接`);
+    } else {
+      await fs.writeFile(
+        payloadPath,
+        JSON.stringify({ examName, examTime, processedDate, rows: rowsWithReports }, null, 2),
+        "utf8",
+      );
+      const result = await runPythonJson([scoreFeedbackExporterScript, scoreFeedbackTemplatePath, payloadPath, outputPath]);
+      if (!result.ok) {
+        throw new Error((result.errors || []).join("；") || "成绩反馈单生成失败");
+      }
+      logs.push(`[成绩处理] 成绩反馈单生成成功：${fileName}`);
+      await convertScoreFeedbackToPdf({ inputPath: outputPath, outputPath: pdfOutputPath });
+      logs.push(`[成绩处理] 成绩单 PDF 生成成功：${pdfFileName}`);
     }
-    logs.push(`[成绩处理] 成绩反馈单生成成功：${fileName}`);
     const updated = await updateTaskStep(taskId, "score_process", "success", {
       message: logs.join("\n"),
       result: {
-        sessionId: formalSession.session_id,
+        sessionId: formalSessions[0].session_id,
+        sessionIds: formalSessions.map((session) => String(session.session_id)),
         fileName,
         filePath: outputPath,
+        payloadPath,
+        pdfFileName,
+        pdfFilePath: pdfOutputPath,
         rowCount: rows.length,
+        sessionCount: formalSessions.length,
         missingScores,
+        reportLinkCount,
       },
     });
     return json(res, 200, updated);
@@ -4010,27 +4895,114 @@ async function handleScoreDownload(taskId, req, res) {
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
   const step = (task.steps || []).find((item) => item.stepKey === "score_process");
   const result = step?.result || {};
-  const filePath = path.resolve(String(result.filePath || ""));
+  const requestUrl = new URL(req.url, "http://localhost");
+  const format = requestUrl.searchParams.get("format") === "pdf" ? "pdf" : "xlsx";
+  const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
+  const workbookStoredPath = String(result.filePath || "").trim();
+  const legacyPdfFilePath = workbookStoredPath.replace(/\.xlsx$/i, ".pdf");
+  const storedFilePath = String(format === "pdf" ? result.pdfFilePath || legacyPdfFilePath : workbookStoredPath).trim();
+  const filePath = storedFilePath ? path.resolve(storedFilePath) : "";
   const generatedRoot = path.resolve(generatedDir);
   if (!filePath || !filePath.startsWith(`${generatedRoot}${path.sep}`)) {
     return badRequest(res, "成绩反馈单文件不存在，请先触发成绩处理");
   }
-  try {
-    await fs.access(filePath);
-  } catch {
-    return badRequest(res, "成绩反馈单文件不存在，请重新处理");
+  if (format === "pdf" && !result.pdfFilePath) {
+    try {
+      await fs.access(filePath);
+    } catch {
+      const workbookFilePath = workbookStoredPath ? path.resolve(workbookStoredPath) : "";
+      if (!workbookFilePath || !workbookFilePath.startsWith(`${generatedRoot}${path.sep}`)) {
+        return badRequest(res, "成绩反馈单 Excel 文件不存在，请重新处理");
+      }
+      try {
+        await fs.access(workbookFilePath);
+        await convertScoreFeedbackToPdf({ inputPath: workbookFilePath, outputPath: filePath });
+      } catch {
+        return badRequest(res, "成绩单 PDF 生成失败，请重新处理");
+      }
+    }
+  } else {
+    try {
+      await fs.access(filePath);
+    } catch {
+      return badRequest(res, "成绩反馈单文件不存在，请重新处理");
+    }
   }
   res.writeHead(200, {
-    "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(result.fileName || "成绩反馈单.xlsx")}`,
+    "Content-Type": format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(scoreFeedbackDownloadFileName(task, formalSession, format))}`,
   });
   createReadStream(filePath).pipe(res);
+}
+
+async function handleScoreReportDownload(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const step = (task.steps || []).find((item) => item.stepKey === "score_process");
+  const result = step?.result || {};
+  if (step?.status !== "success") {
+    return badRequest(res, "请先完成成绩处理后再下载测评文档");
+  }
+  const storedPayloadPath = String(scoreFeedbackPayloadPathFromResult(result) || "").trim();
+  const payloadPath = storedPayloadPath ? path.resolve(storedPayloadPath) : "";
+  const generatedRoot = path.resolve(generatedDir);
+  if (!payloadPath || !payloadPath.startsWith(`${generatedRoot}${path.sep}`)) {
+    return badRequest(res, "成绩处理数据不存在，请重新处理");
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(await fs.readFile(payloadPath, "utf8"));
+  } catch {
+    return badRequest(res, "成绩处理数据读取失败，请重新处理");
+  }
+
+  const reportItems = assessmentReportsFromScoreRows(payload.rows || []);
+  if (!reportItems.length) {
+    return badRequest(res, "当前成绩处理结果没有测评文档，请先重新处理成绩");
+  }
+
+  const login = getYikaoLoginForTask(task);
+  const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
+  const tempDir = await fs.mkdtemp(path.join(generatedDir, "score-reports-"));
+  const zipPath = `${tempDir}.zip`;
+  try {
+    const downloaded = await downloadAssessmentReportFiles({ login, reportItems, outputDir: tempDir });
+    if (!downloaded) {
+      throw new Error("未下载到测评文档");
+    }
+    await zipDirectory(tempDir, zipPath);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  } catch (error) {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(zipPath, { force: true }).catch(() => {});
+    const message = error instanceof Error ? error.message : String(error);
+    return json(res, 500, { error: message || "测评文档打包失败" });
+  }
+
+  const cleanupZip = () => {
+    fs.rm(zipPath, { force: true }).catch(() => {});
+  };
+  res.on("finish", cleanupZip);
+  res.on("close", cleanupZip);
+  res.writeHead(200, {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(scoreReportArchiveFileName(task, formalSession))}`,
+  });
+  createReadStream(zipPath).pipe(res);
 }
 
 async function handleTaskHide(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
-  const login = getYikaoLoginForRequest(req);
+  const requestUrl = new URL(req.url, "http://127.0.0.1");
+  if (requestUrl.searchParams.get("archive") === "1") {
+    const result = await runTaskState("hide", { taskId });
+    if (!result?.hidden) return notFound(res);
+    const archivedTask = await runTaskState("get", { taskId });
+    return json(res, 200, { ok: true, archived: true, task: archivedTask });
+  }
+  const login = getYikaoLoginForTask(task);
   const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
   const logs = [];
   const deletion = await deleteTaskSessionsFromTenant({
@@ -4238,6 +5210,24 @@ async function handleContentRequirementEmail(taskId, req, res) {
   }
 }
 
+async function handleContentTaskRemark(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const key = String(payload.key || "").trim();
+  if (!/^(formal|trial):\d+$/.test(key)) return badRequest(res, "备注对应的考试标识不合法。");
+  const value = String(payload.value || "").trim().slice(0, 1000);
+  const contentTaskRemarks = {
+    ...(task.config?.contentTaskRemarks || {}),
+    [key]: value,
+  };
+  const updated = await runTaskState("update_config", {
+    taskId,
+    config: { contentTaskRemarks },
+  });
+  return json(res, 200, { ok: true, task: updated });
+}
+
 async function handleOperationConsoleEnvironment(req, res) {
   const environment = await checkOperationConsoleAutomationEnvironment({ cwd: rootDir });
   return json(res, 200, { ok: true, environment });
@@ -4270,15 +5260,44 @@ async function handleOperationConsoleEnvironmentEnable(req, res) {
   }
 }
 
-async function updatePaperFormBindState(taskId, status, patch = {}) {
+function taskRequirementConfig(task = {}, requirementIndex = 0) {
+  return taskExamRequirements(task)[Number(requirementIndex || 0)]?.config || task.config || {};
+}
+
+function taskRequirementIndexes(task = {}) {
+  const requirementCount = taskExamRequirements(task).length;
+  const sessionCount = (task.sessions || []).reduce(
+    (count, session) => Math.max(count, Number(session.requirementIndex || 0) + 1),
+    0,
+  );
+  return Array.from({ length: Math.max(requirementCount, sessionCount, 1) }, (_, index) => index);
+}
+
+function taskFormalSession(task = {}, requirementIndex = 0) {
+  const normalizedIndex = Number(requirementIndex || 0);
+  return (task.sessions || []).find((session) => (
+    session.sessionType === "formal" && Number(session.requirementIndex || 0) === normalizedIndex
+  ));
+}
+
+function paperFormBindState(task = {}, requirementIndex = 0) {
+  const normalizedIndex = Number(requirementIndex || 0);
+  return task.config?.paperFormBinds?.[normalizedIndex]
+    || (normalizedIndex === 0 ? task.config?.paperFormBind : null)
+    || {};
+}
+
+async function updatePaperFormBindState(taskId, requirementIndex, status, patch = {}) {
   const now = new Date().toISOString();
   const currentTask = await runTaskState("get", { taskId });
-  const current = currentTask?.config?.paperFormBind || {};
+  const normalizedIndex = Math.max(Number(requirementIndex || 0), 0);
+  const current = paperFormBindState(currentTask, normalizedIndex);
   const logs = Array.isArray(current.logs) ? current.logs.slice() : [];
   const message = String(patch.message || "").trim();
   if (message) logs.push({ time: now, message });
   const next = {
     ...current,
+    requirementIndex: normalizedIndex,
     stepKey: "paper_form_bind",
     stepName: "试卷绑定",
     status,
@@ -4292,16 +5311,27 @@ async function updatePaperFormBindState(taskId, status, patch = {}) {
   if (next.startedAt && next.completedAt) {
     next.durationMs = Math.max(0, Date.parse(next.completedAt) - Date.parse(next.startedAt));
   }
-  await runTaskState("update_config", { taskId, config: { paperFormBind: next } });
+  const paperFormBinds = Array.isArray(currentTask?.config?.paperFormBinds)
+    ? [...currentTask.config.paperFormBinds]
+    : [];
+  paperFormBinds[normalizedIndex] = next;
+  await runTaskState("update_config", {
+    taskId,
+    config: {
+      paperFormBinds,
+      ...(normalizedIndex === 0 ? { paperFormBind: next } : {}),
+    },
+  });
   return await runTaskState("get", { taskId });
 }
 
-function parseTaskStartTime(task = {}) {
+function parseTaskStartTime(task = {}, requirementIndex = 0) {
+  const requirementConfig = taskRequirementConfig(task, requirementIndex);
   const values = [
-    task.config?.startTimeIso,
-    task.config?.startTimeDisplay,
-    task.config?.startTime,
-    (task.sessions || []).find((session) => session.sessionType === "formal")?.start,
+    requirementConfig.startTimeIso,
+    requirementConfig.startTimeDisplay,
+    requirementConfig.startTime,
+    taskFormalSession(task, requirementIndex)?.start,
   ];
   for (const value of values) {
     if (!value) continue;
@@ -4312,28 +5342,30 @@ function parseTaskStartTime(task = {}) {
   return null;
 }
 
-function shouldAttemptScheduledPaperBind(task = {}, now = new Date()) {
-  const current = task.config?.paperFormBind || {};
+function shouldAttemptScheduledPaperBind(task = {}, requirementIndex = 0, now = new Date()) {
+  const current = paperFormBindState(task, requirementIndex);
   if (current.status === "success" || current.status === "running") return false;
   if (shouldSkipRecentFailedPaperBindCheck(current, now, PAPER_BIND_FAILURE_COOLDOWN_MS)) return false;
-  const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
+  const formalSession = taskFormalSession(task, requirementIndex);
   if (!formalSession?.session_id) return false;
-  const courses = normalizeCourseRecords(task.config || {});
+  const courses = normalizeCourseRecords(taskRequirementConfig(task, requirementIndex));
   if (!courses.length) return false;
-  const start = parseTaskStartTime(task);
+  const start = parseTaskStartTime(task, requirementIndex);
   if (!start) return false;
   const msUntilStart = start.getTime() - now.getTime();
   return msUntilStart > 0 && msUntilStart <= PAPER_BIND_SCHEDULER_WINDOW_MS;
 }
 
-async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) {
-  const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
-  const courses = normalizeCourseRecords(task.config || {});
+async function runPaperFormBindForTask(task, login, { scheduled = false, requirementIndex = 0 } = {}) {
+  const formalSession = taskFormalSession(task, requirementIndex);
+  const courses = normalizeCourseRecords(taskRequirementConfig(task, requirementIndex));
   const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
   const paperLogs = [];
   const emitLog = (message) => paperLogs.push(message);
-  await updatePaperFormBindState(task.taskId, "running", {
-    message: scheduled ? "定时检查到试卷绑定窗口，开始自动绑定试卷" : "开始试卷绑定，不修改场次科目绑定结果",
+  await updatePaperFormBindState(task.taskId, requirementIndex, "running", {
+    message: scheduled
+      ? `需求单 ${Number(requirementIndex) + 1} 进入试卷绑定窗口，开始自动绑定试卷`
+      : `开始绑定需求单 ${Number(requirementIndex) + 1} 的试卷，不修改其他场次`,
   });
   try {
     if (!courses.length) {
@@ -4349,7 +5381,7 @@ async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) 
         return {
           ok: true,
           status: 200,
-          task: await updatePaperFormBindState(task.taskId, "success", {
+          task: await updatePaperFormBindState(task.taskId, requirementIndex, "success", {
             message: paperLogs.join("\n") || "人工绑定回查确认正式场次已有试卷",
             result: {
               sessionId: formalSession?.session_id,
@@ -4364,7 +5396,7 @@ async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) 
       return {
         ok: false,
         status: 409,
-        task: await updatePaperFormBindState(task.taskId, "failed", {
+        task: await updatePaperFormBindState(task.taskId, requirementIndex, "failed", {
           errorMessage,
           message: [...paperLogs, errorMessage].filter(Boolean).join("\n"),
           result: { sessionId: formalSession?.session_id, courseCount: 0, bindResult: manualBindResult, missingCourseCodes: [] },
@@ -4393,7 +5425,7 @@ async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) 
         return {
           ok: true,
           status: 200,
-          task: await updatePaperFormBindState(task.taskId, "success", {
+          task: await updatePaperFormBindState(task.taskId, requirementIndex, "success", {
             message: paperLogs.join("\n") || "人工绑定回查确认正式场次已有试卷",
             result: {
               sessionId: formalSession?.session_id,
@@ -4415,7 +5447,7 @@ async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) 
       return {
         ok: false,
         status: 409,
-        task: await updatePaperFormBindState(task.taskId, "failed", {
+        task: await updatePaperFormBindState(task.taskId, requirementIndex, "failed", {
           errorMessage,
           message: [...paperLogs, errorMessage].filter(Boolean).join("\n"),
           result: { sessionId: formalSession?.session_id, courseCount: courses.length, bindResult, missingCourseCodes, duplicatePaperMatches },
@@ -4425,7 +5457,7 @@ async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) 
     return {
       ok: true,
       status: 200,
-      task: await updatePaperFormBindState(task.taskId, "success", {
+      task: await updatePaperFormBindState(task.taskId, requirementIndex, "success", {
         message: paperLogs.join("\n") || "试卷绑定成功",
         result: { sessionId: formalSession?.session_id, courseCount: courses.length, bindResult },
       }),
@@ -4435,7 +5467,7 @@ async function runPaperFormBindForTask(task, login, { scheduled = false } = {}) 
     return {
       ok: false,
       status: error?.status && Number(error.status) >= 400 ? Number(error.status) : 500,
-      task: await updatePaperFormBindState(task.taskId, "failed", {
+      task: await updatePaperFormBindState(task.taskId, requirementIndex, "failed", {
         errorMessage: error instanceof Error ? error.message : String(error),
         message,
       }),
@@ -4448,13 +5480,25 @@ async function runScheduledPaperBindingOnce(now = new Date()) {
   const results = [];
   for (const summary of summaries || []) {
     const task = await runTaskState("get", { taskId: summary.taskId });
-    if (!task || !shouldAttemptScheduledPaperBind(task, now)) continue;
-    try {
-      const login = getYikaoLoginForTask(task);
-      const result = await runPaperFormBindForTask(task, login, { scheduled: true });
-      results.push({ taskId: task.taskId, status: result.task?.config?.paperFormBind?.status || "unknown" });
-    } catch (error) {
-      results.push({ taskId: task.taskId, status: "failed", error: error instanceof Error ? error.message : String(error) });
+    if (!task) continue;
+    for (const requirementIndex of taskRequirementIndexes(task)) {
+      if (!shouldAttemptScheduledPaperBind(task, requirementIndex, now)) continue;
+      try {
+        const login = getYikaoLoginForTask(task);
+        const result = await runPaperFormBindForTask(task, login, { scheduled: true, requirementIndex });
+        results.push({
+          taskId: task.taskId,
+          requirementIndex,
+          status: paperFormBindState(result.task, requirementIndex).status || "unknown",
+        });
+      } catch (error) {
+        results.push({
+          taskId: task.taskId,
+          requirementIndex,
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
   if (results.length) console.log(`[试卷绑定定时] 本轮处理 ${results.length} 个任务：${JSON.stringify(results)}`);
@@ -4464,20 +5508,26 @@ async function runScheduledPaperBindingOnce(now = new Date()) {
 async function handleTaskStepRetry(taskId, stepKey, req, res) {
   const visibleTask = await runTaskState("get", { taskId });
   if (!visibleTask || !visibleByOwner(auth, req, visibleTask)) return notFound(res);
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  const requestedRequirementIndex = Number(payload.requirementIndex ?? 0);
+  const requirementIndexes = taskRequirementIndexes(visibleTask);
+  const requirementIndex = Number.isInteger(requestedRequirementIndex) && requirementIndexes.includes(requestedRequirementIndex)
+    ? requestedRequirementIndex
+    : 0;
   if (stepKey === "paper_bind") {
     const task = visibleTask;
 
-    const formalSession = (task.sessions || []).find((session) => session.sessionType === "formal");
-    const courses = normalizeCourseRecords(task.config || {});
-    const login = getYikaoLoginForRequest(req);
+    const formalSession = taskFormalSession(task, requirementIndex);
+    const courses = normalizeCourseRecords(taskRequirementConfig(task, requirementIndex));
+    const login = getYikaoLoginForTask(task);
     const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
     const retryLogs = [];
     const emitLog = (message) => retryLogs.push(message);
 
     await updateTaskStep(taskId, stepKey, "running", {
       incrementRetry: true,
-      message: "开始单独重试正式场次绑定科目，不重新创建场次或科目",
-    });
+      message: `开始单独重试需求单 ${requirementIndex + 1} 的正式场次绑定科目，不重新创建场次或科目`,
+    }, requirementIndex);
     try {
       const bindResult = await bindCoursesToFormalSession({
         login,
@@ -4490,36 +5540,38 @@ async function handleTaskStepRetry(taskId, stepKey, req, res) {
       const updated = await updateTaskStep(taskId, stepKey, "success", {
         message: retryLogs.join("\n") || "正式场次绑定科目重试成功",
         result: { sessionId: formalSession?.session_id, courseCount: courses.length, bindResult },
-      });
+      }, requirementIndex);
       return json(res, 200, updated);
     } catch (error) {
       await updateTaskStep(taskId, stepKey, "failed", {
         errorMessage: error instanceof Error ? error.message : String(error),
         message: [...retryLogs, error instanceof Error ? error.message : String(error)].filter(Boolean).join("\n"),
-      });
+      }, requirementIndex);
       throw error;
     }
   }
 
   if (stepKey === "paper_form_bind") {
     const task = visibleTask;
-    const login = getYikaoLoginForRequest(req);
-    const result = await runPaperFormBindForTask(task, login);
+    const login = getYikaoLoginForTask(task);
+    const result = await runPaperFormBindForTask(task, login, { requirementIndex });
     return json(res, result.status, result.task);
   }
 
   if (stepKey === "trial_paper_bind") {
     const task = visibleTask;
-    const trialSession = (task.sessions || []).find((session) => session.sessionType === "trial");
-    const login = getYikaoLoginForRequest(req);
+    const trialSession = (task.sessions || []).find((session) => (
+      session.sessionType === "trial" && Number(session.requirementIndex || 0) === requirementIndex
+    ));
+    const login = getYikaoLoginForTask(task);
     const apiBase = normalizeApiBase(process.env.YIKAO_API_BASE || login.apiBase || "https://eztest.cn");
     const trialPaperLogs = [];
     const emitLog = (message) => trialPaperLogs.push(message);
 
     await updateTaskStep(taskId, stepKey, "running", {
       incrementRetry: true,
-      message: "开始重试试考默认试卷绑定",
-    });
+      message: `开始重试需求单 ${requirementIndex + 1} 的试考默认试卷绑定`,
+    }, requirementIndex);
     try {
       const bindResult = await bindDefaultTrialPaperToSession({
         login,
@@ -4532,19 +5584,19 @@ async function handleTaskStepRetry(taskId, stepKey, req, res) {
         const updated = await updateTaskStep(taskId, stepKey, "waiting_manual", {
           message: trialPaperLogs.join("\n") || "默认试考科目未关联试卷，请在租户后台关联后重试",
           result: { sessionId: trialSession?.session_id, bindResult },
-        });
+        }, requirementIndex);
         return json(res, 409, updated);
       }
       const updated = await updateTaskStep(taskId, stepKey, "success", {
         message: trialPaperLogs.join("\n") || "试考默认试卷绑定重试成功",
         result: { sessionId: trialSession?.session_id, bindResult },
-      });
+      }, requirementIndex);
       return json(res, 200, updated);
     } catch (error) {
       await updateTaskStep(taskId, stepKey, "failed", {
         errorMessage: error instanceof Error ? error.message : String(error),
         message: [...trialPaperLogs, error instanceof Error ? error.message : String(error)].filter(Boolean).join("\n"),
-      });
+      }, requirementIndex);
       throw error;
     }
   }
@@ -4675,6 +5727,9 @@ async function requestHandler(req, res) {
     if (req.method === "POST" && url.pathname === "/api/fanwei/requirement-import") {
       return await handleFanweiRequirementImport(req, res);
     }
+    if (req.method === "POST" && url.pathname === "/api/fanwei/project-card") {
+      return await handleFanweiRequirementImport(req, res);
+    }
     if (req.method === "GET" && url.pathname === "/api/fanwei/auto-read/status") {
       return await handleFanweiAutoReadStatus(req, res);
     }
@@ -4730,6 +5785,14 @@ async function requestHandler(req, res) {
     if ((req.method === "GET" || req.method === "POST") && operationBatchDraftMatch) {
       return await handleOperationBatchDraft(decodeURIComponent(operationBatchDraftMatch[1]), req, res);
     }
+    const projectWorkflowMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-workflow$/);
+    if (req.method === "GET" && projectWorkflowMatch) {
+      return await handleProjectWorkflow(decodeURIComponent(projectWorkflowMatch[1]), req, res);
+    }
+    const projectSourceSnapshotMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/source-snapshot$/);
+    if (req.method === "PATCH" && projectSourceSnapshotMatch) {
+      return await handleProjectSourceSnapshotUpdate(decodeURIComponent(projectSourceSnapshotMatch[1]), req, res);
+    }
     const operationBatchCreateMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/create$/);
     if (req.method === "POST" && operationBatchCreateMatch) {
       return await handleOperationBatchCreate(decodeURIComponent(operationBatchCreateMatch[1]), req, res);
@@ -4742,6 +5805,10 @@ async function requestHandler(req, res) {
     if (req.method === "POST" && contentRequirementEmailMatch) {
       return await handleContentRequirementEmail(decodeURIComponent(contentRequirementEmailMatch[1]), req, res);
     }
+    const contentTaskRemarksMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/content-task-remarks$/);
+    if (req.method === "PATCH" && contentTaskRemarksMatch) {
+      return await handleContentTaskRemark(decodeURIComponent(contentTaskRemarksMatch[1]), req, res);
+    }
     const sharedSheetFillMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/shared-sheet\/fill$/);
     if (req.method === "POST" && sharedSheetFillMatch) {
       return await handleProjectSharedSheetFill(decodeURIComponent(sharedSheetFillMatch[1]), req, res);
@@ -4753,6 +5820,10 @@ async function requestHandler(req, res) {
     const scoreDownloadMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/scores\/download$/);
     if (req.method === "GET" && scoreDownloadMatch) {
       return await handleScoreDownload(decodeURIComponent(scoreDownloadMatch[1]), req, res);
+    }
+    const scoreReportDownloadMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/scores\/reports\/download$/);
+    if (req.method === "GET" && scoreReportDownloadMatch) {
+      return await handleScoreReportDownload(decodeURIComponent(scoreReportDownloadMatch[1]), req, res);
     }
     const sessionChangePreviewMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/sessions\/([^/]+)\/change-preview$/);
     if (req.method === "GET" && sessionChangePreviewMatch) {

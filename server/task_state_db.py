@@ -66,6 +66,38 @@ def row_dict(row):
     return dict(row) if row else None
 
 
+def status_from_sub_status(step_key, status, sub_status):
+    if step_key not in {"sessions_auto_rooms", "sessions_invigilator_export"} or not sub_status:
+        return status
+    child_values = [sub_status.get("formalExamStatus"), sub_status.get("trialExamStatus")]
+    if all(value == "success" for value in child_values):
+        return "success"
+    if any(value == "failed" for value in child_values):
+        return "failed"
+    if any(value == "running" for value in child_values):
+        return "running"
+    if any(value == "waiting_manual" for value in child_values):
+        return "waiting_manual"
+    return status
+
+
+def aggregate_requirement_status(statuses):
+    values = list(statuses or [])
+    if not values:
+        return "pending"
+    if "failed" in values:
+        return "failed"
+    if "running" in values:
+        return "running"
+    if "waiting_manual" in values:
+        return "waiting_manual"
+    if all(value in {"success", "skipped"} for value in values):
+        return "skipped" if all(value == "skipped" for value in values) else "success"
+    if any(value in {"success", "skipped"} for value in values):
+        return "running"
+    return "pending"
+
+
 class TaskStore:
     def __init__(self, db_path):
         self.db_path = str(db_path)
@@ -96,6 +128,7 @@ class TaskStore:
                 );
                 CREATE TABLE IF NOT EXISTS exam_sessions (
                     task_id TEXT NOT NULL,
+                    requirement_index INTEGER NOT NULL DEFAULT 0,
                     session_type TEXT NOT NULL,
                     session_id TEXT NOT NULL DEFAULT '',
                     name TEXT NOT NULL DEFAULT '',
@@ -106,7 +139,7 @@ class TaskStore:
                     status TEXT NOT NULL DEFAULT 'pending',
                     url TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL,
-                    PRIMARY KEY(task_id, session_type),
+                    PRIMARY KEY(task_id, requirement_index, session_type),
                     FOREIGN KEY(task_id) REFERENCES exam_tasks(task_id)
                 );
                 CREATE TABLE IF NOT EXISTS exam_task_steps (
@@ -122,6 +155,7 @@ class TaskStore:
                     result_json TEXT NOT NULL DEFAULT '{}',
                     sub_status_json TEXT NOT NULL DEFAULT '{}',
                     logs_json TEXT NOT NULL DEFAULT '[]',
+                    requirement_progress_json TEXT NOT NULL DEFAULT '{}',
                     PRIMARY KEY(task_id, step_key),
                     FOREIGN KEY(task_id) REFERENCES exam_tasks(task_id)
                 );
@@ -164,6 +198,47 @@ class TaskStore:
                 db.execute("ALTER TABLE exam_tasks ADD COLUMN owner_email TEXT NOT NULL DEFAULT ''")
             if "hidden_at" not in columns:
                 db.execute("ALTER TABLE exam_tasks ADD COLUMN hidden_at TEXT")
+            self._ensure_exam_sessions_schema(db)
+            step_columns = {row["name"] for row in db.execute("PRAGMA table_info(exam_task_steps)").fetchall()}
+            if "requirement_progress_json" not in step_columns:
+                db.execute("ALTER TABLE exam_task_steps ADD COLUMN requirement_progress_json TEXT NOT NULL DEFAULT '{}'")
+
+    def _ensure_exam_sessions_schema(self, db):
+        columns = db.execute("PRAGMA table_info(exam_sessions)").fetchall()
+        column_names = {row["name"] for row in columns}
+        primary_key = [row["name"] for row in sorted(columns, key=lambda row: row["pk"]) if row["pk"]]
+        if "requirement_index" in column_names and primary_key == ["task_id", "requirement_index", "session_type"]:
+            return
+
+        db.execute("ALTER TABLE exam_sessions RENAME TO exam_sessions_legacy")
+        db.execute(
+            """CREATE TABLE exam_sessions (
+                task_id TEXT NOT NULL,
+                requirement_index INTEGER NOT NULL DEFAULT 0,
+                session_type TEXT NOT NULL,
+                session_id TEXT NOT NULL DEFAULT '',
+                name TEXT NOT NULL DEFAULT '',
+                start_time TEXT NOT NULL DEFAULT '',
+                end_time TEXT NOT NULL DEFAULT '',
+                candidate_count INTEGER NOT NULL DEFAULT 0,
+                room_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                url TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(task_id, requirement_index, session_type),
+                FOREIGN KEY(task_id) REFERENCES exam_tasks(task_id)
+            )"""
+        )
+        requirement_index = "COALESCE(requirement_index, 0)" if "requirement_index" in column_names else "0"
+        db.execute(
+            f"""INSERT INTO exam_sessions
+                (task_id, requirement_index, session_type, session_id, name, start_time, end_time,
+                 candidate_count, room_count, status, url, updated_at)
+                SELECT task_id, {requirement_index}, session_type, session_id, name, start_time, end_time,
+                       candidate_count, room_count, status, url, updated_at
+                FROM exam_sessions_legacy"""
+        )
+        db.execute("DROP TABLE exam_sessions_legacy")
 
     def _ensure_steps(self, db, task_id):
         for step_key, step_name in STEP_DEFS:
@@ -186,21 +261,25 @@ class TaskStore:
             self._ensure_steps(db, task_id)
         return self.get_task(task_id)
 
-    def upsert_session(self, task_id, session_type, session):
+    def upsert_session(self, task_id, session_type, session, requirement_index=0):
         now = utc_now()
+        try:
+            requirement_index = max(int(requirement_index or 0), 0)
+        except (TypeError, ValueError):
+            requirement_index = 0
         with self.connect() as db:
             db.execute(
                 """INSERT INTO exam_sessions
-                (task_id, session_type, session_id, name, start_time, end_time,
+                (task_id, requirement_index, session_type, session_id, name, start_time, end_time,
                  candidate_count, room_count, status, url, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(task_id, session_type) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id, requirement_index, session_type) DO UPDATE SET
                   session_id=excluded.session_id, name=excluded.name,
                   start_time=excluded.start_time, end_time=excluded.end_time,
                   candidate_count=excluded.candidate_count, room_count=excluded.room_count,
                   status=excluded.status, url=excluded.url, updated_at=excluded.updated_at""",
                 (
-                    task_id, session_type, str(session.get("session_id") or session.get("id") or ""),
+                    task_id, requirement_index, session_type, str(session.get("session_id") or session.get("id") or ""),
                     str(session.get("name") or ""), str(session.get("start") or session.get("start_time") or ""),
                     str(session.get("end") or session.get("end_time") or ""),
                     int(session.get("candidate_count") or 0), int(session.get("room_count") or 0),
@@ -210,7 +289,7 @@ class TaskStore:
             db.execute("UPDATE exam_tasks SET updated_at=? WHERE task_id=?", (now, task_id))
         return self.get_task(task_id)
 
-    def update_config(self, task_id, config):
+    def update_config(self, task_id, config, project_name=None, source_account=None):
         now = utc_now()
         with self.connect() as db:
             current = db.execute("SELECT * FROM exam_tasks WHERE task_id=?", (task_id,)).fetchone()
@@ -221,9 +300,13 @@ class TaskStore:
                 **current_config,
                 **(config or {}),
             }
+            next_project_name = str(project_name or current["project_name"] or "").strip() or current["project_name"]
+            next_source_account = str(
+                current["source_account"] if source_account is None else source_account
+            ).strip()
             db.execute(
-                "UPDATE exam_tasks SET config_json=?, updated_at=? WHERE task_id=?",
-                (json.dumps(next_config, ensure_ascii=False), now, task_id),
+                "UPDATE exam_tasks SET project_name=?, source_account=?, config_json=?, updated_at=? WHERE task_id=?",
+                (next_project_name, next_source_account, json.dumps(next_config, ensure_ascii=False), now, task_id),
             )
         return self.get_task(task_id)
 
@@ -345,7 +428,7 @@ class TaskStore:
                 ).fetchall()
         return [self._candidate(row) for row in rows]
 
-    def update_step(self, task_id, step_key, status, result=None):
+    def update_step(self, task_id, step_key, status, result=None, requirement_index=None):
         if status not in VALID_STATUSES:
             raise ValueError("Invalid step status: %s" % status)
         if step_key not in {key for key, _ in STEP_DEFS}:
@@ -360,20 +443,60 @@ class TaskStore:
             if not current:
                 raise ValueError("Task step not found")
 
-            sub_status = result.get("subStatus") or loads(current["sub_status_json"], {})
-            if step_key in {"sessions_auto_rooms", "sessions_invigilator_export"} and sub_status:
-                child_values = [sub_status.get("formalExamStatus"), sub_status.get("trialExamStatus")]
-                if all(value == "success" for value in child_values):
-                    status = "success"
-                elif any(value == "failed" for value in child_values):
-                    status = "failed"
-                elif any(value == "running" for value in child_values):
-                    status = "running"
-                elif any(value == "waiting_manual" for value in child_values):
-                    status = "waiting_manual"
+            requirement_progress = loads(current["requirement_progress_json"], {})
+            normalized_requirement_index = None
+            if requirement_index is not None:
+                try:
+                    normalized_requirement_index = max(int(requirement_index), 0)
+                except (TypeError, ValueError):
+                    normalized_requirement_index = 0
 
-            started_at = current["started_at"] or (now if status != "pending" else None)
-            completed_at = now if status in {"success", "failed", "skipped"} else None
+            sub_status = result.get("subStatus") or loads(current["sub_status_json"], {})
+            if normalized_requirement_index is not None:
+                requirement_key = str(normalized_requirement_index)
+                current_requirement = requirement_progress.get(requirement_key) or {}
+                requirement_sub_status = result.get("subStatus") or current_requirement.get("subStatus") or {}
+                requirement_status = status_from_sub_status(step_key, status, requirement_sub_status)
+                requirement_started_at = current_requirement.get("startedAt") or (now if requirement_status != "pending" else None)
+                requirement_completed_at = now if requirement_status in {"success", "failed", "skipped"} else None
+                requirement_duration_ms = None
+                if requirement_started_at and requirement_completed_at:
+                    start_dt = datetime.fromisoformat(requirement_started_at.replace("Z", "+00:00"))
+                    end_dt = datetime.fromisoformat(requirement_completed_at.replace("Z", "+00:00"))
+                    requirement_duration_ms = max(0, int((end_dt - start_dt).total_seconds() * 1000))
+                requirement_logs = list(current_requirement.get("logs") or [])
+                message = str(result.get("message") or "").strip()
+                if message:
+                    requirement_logs.append({"time": now, "message": message})
+                requirement_progress[requirement_key] = {
+                    "status": requirement_status,
+                    "startedAt": requirement_started_at,
+                    "completedAt": requirement_completed_at,
+                    "durationMs": requirement_duration_ms,
+                    "errorMessage": str(result.get("errorMessage") or "") or None,
+                    "result": result.get("result") or {},
+                    "subStatus": requirement_sub_status,
+                    "logs": requirement_logs,
+                }
+                task_row = db.execute("SELECT config_json FROM exam_tasks WHERE task_id=?", (task_id,)).fetchone()
+                task_config = loads(task_row["config_json"], {}) if task_row else {}
+                requirements = task_config.get("examRequirements")
+                expected_count = len(requirements) if isinstance(requirements, list) and requirements else normalized_requirement_index + 1
+                expected_count = max(expected_count, normalized_requirement_index + 1, 1)
+                requirement_statuses = [
+                    (requirement_progress.get(str(index)) or {}).get("status", "pending")
+                    for index in range(expected_count)
+                ]
+                status = aggregate_requirement_status(requirement_statuses)
+                started_values = [item.get("startedAt") for item in requirement_progress.values() if item.get("startedAt")]
+                completed_values = [item.get("completedAt") for item in requirement_progress.values() if item.get("completedAt")]
+                started_at = min(started_values) if started_values else None
+                completed_at = max(completed_values) if completed_values and status in {"success", "failed", "skipped"} else None
+                sub_status = requirement_sub_status
+            else:
+                status = status_from_sub_status(step_key, status, sub_status)
+                started_at = current["started_at"] or (now if status != "pending" else None)
+                completed_at = now if status in {"success", "failed", "skipped"} else None
             duration_ms = None
             if started_at and completed_at:
                 start_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
@@ -386,13 +509,14 @@ class TaskStore:
             retry_count = current["retry_count"] + (1 if result.get("incrementRetry") else 0)
             db.execute(
                 """UPDATE exam_task_steps SET status=?, started_at=?, completed_at=?, duration_ms=?,
-                error_message=?, retry_count=?, result_json=?, sub_status_json=?, logs_json=?
+                error_message=?, retry_count=?, result_json=?, sub_status_json=?, logs_json=?, requirement_progress_json=?
                 WHERE task_id=? AND step_key=?""",
                 (
                     status, started_at, completed_at, duration_ms,
                     str(result.get("errorMessage") or "") or None, retry_count,
                     json.dumps(result.get("result") or {}, ensure_ascii=False),
                     json.dumps(sub_status, ensure_ascii=False), json.dumps(logs, ensure_ascii=False),
+                    json.dumps(requirement_progress, ensure_ascii=False),
                     task_id, step_key,
                 ),
             )
@@ -463,7 +587,10 @@ class TaskStore:
             if not task:
                 return None
             self._ensure_steps(db, task_id)
-            sessions = db.execute("SELECT * FROM exam_sessions WHERE task_id=? ORDER BY session_type", (task_id,)).fetchall()
+            sessions = db.execute(
+                "SELECT * FROM exam_sessions WHERE task_id=? ORDER BY requirement_index, session_type",
+                (task_id,),
+            ).fetchall()
             steps = db.execute("SELECT * FROM exam_task_steps WHERE task_id=?", (task_id,)).fetchall()
             steps = sorted(steps, key=lambda row: STEP_ORDER.get(row["step_key"], len(STEP_ORDER)))
         result = self._task_summary(task)
@@ -474,11 +601,22 @@ class TaskStore:
         return result
 
     def _task_summary(self, row):
+        config = loads(row["config_json"], {})
+        project_card = config.get("projectCard") if isinstance(config.get("projectCard"), dict) else {}
         return {
             "taskId": row["task_id"], "projectName": row["project_name"],
             "sourceAccount": row["source_account"], "status": row["status"],
             "ownerEmail": row["owner_email"],
             "hiddenAt": row["hidden_at"] if "hidden_at" in row.keys() else None,
+            "customerName": str(config.get("customerName") or ""),
+            "projectCode": str(config.get("projectCode") or ""),
+            "projectCard": {
+                "createdAt": str(project_card.get("createdAt") or ""),
+                "updatedAt": str(project_card.get("updatedAt") or ""),
+                "status": str(project_card.get("status") or ""),
+                "sourceType": str(project_card.get("sourceType") or ""),
+                "sourceKey": str(project_card.get("sourceKey") or ""),
+            } if project_card else {},
             "currentStage": row["current_stage"], "progress": row["progress"],
             "createdAt": row["created_at"], "updatedAt": row["updated_at"],
         }
@@ -487,6 +625,7 @@ class TaskStore:
         data = row_dict(row)
         return {
             "taskId": data["task_id"], "sessionType": data["session_type"],
+            "requirementIndex": int(data.get("requirement_index") or 0),
             "session_id": data["session_id"], "name": data["name"],
             "start": data["start_time"], "end": data["end_time"],
             "candidateCount": data["candidate_count"], "roomCount": data["room_count"],
@@ -505,6 +644,7 @@ class TaskStore:
             "durationMs": row["duration_ms"], "errorMessage": row["error_message"],
             "retryCount": row["retry_count"], "result": loads(row["result_json"], {}),
             "subStatus": loads(row["sub_status_json"], {}), "logs": loads(row["logs_json"], []),
+            "requirementProgress": loads(row["requirement_progress_json"], {}),
         }
 
     def _candidate(self, row):
@@ -550,15 +690,24 @@ def main():
     elif action == "get":
         result = store.get_task(payload.get("taskId"))
     elif action == "update_step":
-        result = store.update_step(payload.get("taskId"), payload.get("stepKey"), payload.get("status"), payload.get("result"))
+        result = store.update_step(
+            payload.get("taskId"), payload.get("stepKey"), payload.get("status"), payload.get("result"),
+            payload.get("requirementIndex"),
+        )
     elif action == "update_config":
-        result = store.update_config(payload.get("taskId"), payload.get("config") or {})
+        result = store.update_config(
+            payload.get("taskId"), payload.get("config") or {}, payload.get("projectName"),
+            payload.get("sourceAccount") if "sourceAccount" in payload else None,
+        )
     elif action == "hide":
         result = {"hidden": store.hide_task(payload.get("taskId"))}
     elif action == "delete":
         result = {"deleted": store.delete_task(payload.get("taskId"))}
     elif action == "upsert_session":
-        result = store.upsert_session(payload.get("taskId"), payload.get("sessionType"), payload.get("session") or {})
+        result = store.upsert_session(
+            payload.get("taskId"), payload.get("sessionType"), payload.get("session") or {},
+            payload.get("requirementIndex", 0),
+        )
     elif action == "upsert_candidates":
         result = store.upsert_candidates(payload.get("taskId"), payload.get("sessionId"), payload.get("candidates") or [])
     elif action == "list_candidates":
