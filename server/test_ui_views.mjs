@@ -1160,6 +1160,52 @@ test("successful operation batch reconciliation refreshes the complete server wo
   assert.deepEqual(loadedTasks, [reconciledTask]);
 });
 
+test("operation batch reconciliation does not overwrite a newly selected project after workflow refresh", async () => {
+  const originalTask = {
+    taskId: "project-a",
+    config: { operationBatch: { status: "reconciliation_required" } },
+  };
+  const reconciledTask = {
+    taskId: "project-a",
+    config: { operationBatchCode: "EZT260003", operationBatch: { code: "EZT260003" } },
+  };
+  const projectB = { taskId: "project-b", config: {} };
+  const taskViewState = { currentProjectId: "project-a", currentProject: originalTask };
+  const loaderStarted = Promise.withResolvers();
+  const releaseLoader = Promise.withResolvers();
+  const projectOperationBatchState = { textContent: "" };
+  const reconcileProjectOperationBatch = compileInlineFunction(
+    "      async function reconcileProjectOperationBatch() {",
+    "\n      async function recordProjectOperationBatchCode() {",
+    {
+      taskViewState,
+      fetchJson: async () => ({ task: reconciledTask, operationBatchCode: "EZT260003" }),
+      isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+      renderOperationBatchFromTask: () => {},
+      renderProjectWorkflow: () => {},
+      operationBatchWorkflowAfterTask: () => ({ steps: { batch: { status: "success" } } }),
+      loadProjectOperationBatchDraft: async () => {
+        loaderStarted.resolve();
+        await releaseLoader.promise;
+      },
+      projectOperationBatchState,
+      operationBatchReconcileBtn: { disabled: false },
+      updateOperationBatchActions: () => {},
+    },
+  );
+
+  const reconcileA = reconcileProjectOperationBatch();
+  await loaderStarted.promise;
+  taskViewState.currentProjectId = "project-b";
+  taskViewState.currentProject = projectB;
+  projectOperationBatchState.textContent = "project-b-state";
+  releaseLoader.resolve();
+  await reconcileA;
+
+  assert.strictEqual(taskViewState.currentProject, projectB);
+  assert.equal(projectOperationBatchState.textContent, "project-b-state");
+});
+
 test("operation batch completion checks use strict codes in create, render, and workflow loading", () => {
   const createHandler = sourceBetween(
     "      async function createProjectOperationBatch() {",
