@@ -2200,6 +2200,76 @@ test("project auto configuration action lives in the upper requirement source ca
   assert.ok(html.includes('projectAutoConfigBtn.addEventListener("click"'));
 });
 
+test("platform source edits are auto confirmed across operation collaboration", () => {
+  const projectSourceRequirementChangeHistory = compileInlineFunction(
+    "      function projectSourceRequirementChangeHistory(task = {}) {",
+    "\n      function projectSourceChangeNeedsReview(record = {}) {",
+  );
+  const projectSourceChangeNeedsReview = compileInlineFunction(
+    "      function projectSourceChangeNeedsReview(record = {}) {",
+    "\n      function projectWorkflowSourceChangeNotice(task = {}, stepKey = \"\") {",
+  );
+  const projectWorkflowSourceChangeNotice = compileInlineFunction(
+    "      function projectWorkflowSourceChangeNotice(task = {}, stepKey = \"\") {",
+    "\n      function renderProjectSourceRequirementChangeLog(task = {}) {",
+    { projectSourceRequirementChangeHistory, projectSourceChangeNeedsReview },
+  );
+  const renderProjectSourceRequirementChangeLog = compileInlineFunction(
+    "      function renderProjectSourceRequirementChangeLog(task = {}) {",
+    "\n      function renderProjectRequirementInline(task, detail = null) {",
+    {
+      projectSourceRequirementChangeHistory,
+      projectSourceChangeNeedsReview,
+      safeText: (value) => String(value),
+      formatTaskTime: (value) => String(value || ""),
+    },
+  );
+
+  assert.equal(projectSourceChangeNeedsReview({ reviewStatus: "pending_review" }), true);
+  assert.equal(projectSourceChangeNeedsReview({ reviewStatus: "future_status" }), true);
+  assert.equal(projectSourceChangeNeedsReview({ reviewStatus: "auto_confirmed" }), false);
+  assert.equal(projectSourceChangeNeedsReview({}), false);
+
+  for (const stepKey of ["batch", "personnel", "content", "archive"]) {
+    const source = stepKey === "content" ? "examRequirement" : "fanwei";
+    for (const reviewStatus of ["auto_confirmed", undefined]) {
+      assert.equal(projectWorkflowSourceChangeNotice({
+        config: { projectSourceChangeHistory: [{ source, reviewStatus }] },
+      }, stepKey), "");
+    }
+  }
+
+  for (const stepKey of ["batch", "personnel", "archive"]) {
+    assert.equal(projectWorkflowSourceChangeNotice({
+      config: { projectSourceChangeHistory: [{ source: "fanwei", reviewStatus: "pending_review" }] },
+    }, stepKey), "有变更请确认");
+  }
+  assert.equal(projectWorkflowSourceChangeNotice({
+    config: { projectSourceChangeHistory: [{ source: "examRequirement", reviewStatus: "pending_review" }] },
+  }, "content"), "有变更请确认");
+
+  const autoConfirmedHtml = renderProjectSourceRequirementChangeLog({
+    config: { projectSourceChangeHistory: [{
+      source: "fanwei",
+      reviewStatus: "auto_confirmed",
+      versionBefore: 1,
+      versionAfter: 2,
+      changes: [{ field: "字段甲", before: "旧值", after: "新值" }],
+    }] },
+  });
+  const pendingHtml = renderProjectSourceRequirementChangeLog({
+    config: { projectSourceChangeHistory: [{
+      source: "examRequirement",
+      reviewStatus: "pending_review",
+      changes: [],
+    }] },
+  });
+  assert.match(autoConfirmedHtml, /平台内部修改 · 已自动确认/);
+  assert.match(autoConfirmedHtml, /字段甲/);
+  assert.match(pendingHtml, /待审核/);
+  assert.doesNotMatch(autoConfirmedHtml, /button/i);
+});
+
 test("exam detail progress cards include paper binding and grouped candidate flows", () => {
   assert.ok(html.includes("buildTaskDisplaySteps(task)"));
   assert.ok(html.includes('if (taskHasAnyTrial(task) && stepMap.has("trial_session_create"))'));

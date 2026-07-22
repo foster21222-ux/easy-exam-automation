@@ -10056,10 +10056,17 @@
         return Array.isArray(task.config?.examRequirementChangeHistory) ? task.config.examRequirementChangeHistory : [];
       }
 
+      function projectSourceChangeNeedsReview(record = {}) {
+        const reviewStatus = String(record.reviewStatus || "").trim();
+        if (!reviewStatus) return false;
+        return reviewStatus !== "auto_confirmed";
+      }
+
       function projectWorkflowSourceChangeNotice(task = {}, stepKey = "") {
-        const history = projectSourceRequirementChangeHistory(task);
-        const fanweiChanged = history.some((record) => record.source === "fanwei");
-        const examRequirementChanged = history.some((record) => record.source === "examRequirement" || record.source === "project_requirement_editor");
+        const pendingHistory = projectSourceRequirementChangeHistory(task)
+          .filter(projectSourceChangeNeedsReview);
+        const fanweiChanged = pendingHistory.some((record) => record.source === "fanwei");
+        const examRequirementChanged = pendingHistory.some((record) => record.source === "examRequirement" || record.source === "project_requirement_editor");
         if (["batch", "personnel", "archive"].includes(stepKey) && fanweiChanged) return "有变更请确认";
         if (stepKey === "content" && examRequirementChanged) return "有变更请确认";
         return "";
@@ -10072,8 +10079,11 @@
           const sourceTitle = record.source === "fanwei"
             ? "泛微业务需求"
             : `易考需求单 ${Number(record.requirementIndex || 0) + 1}`;
+          const reviewLabel = projectSourceChangeNeedsReview(record)
+            ? "待审核"
+            : "平台内部修改 · 已自动确认";
           const changeRows = changes.map((change) => `<div class="task-meta"><strong>${safeText(change.field || "字段")}</strong>：${safeText(change.before || "（空）")} → ${safeText(change.after || "（空）")}</div>`).join("");
-          return `<div class="log project-requirement-change-card"><div><div class="change-message">${safeText(sourceTitle)}已修改</div><div class="task-meta">版本 ${Number(record.versionBefore || 0)} → ${Number(record.versionAfter || 0)}</div>${changeRows}</div><div class="log-time">${formatTaskTime(record.changedAt)}</div></div>`;
+          return `<div class="log project-requirement-change-card"><div><div class="change-message">${safeText(sourceTitle)}已修改</div><div class="task-meta">版本 ${Number(record.versionBefore || 0)} → ${Number(record.versionAfter || 0)} · ${safeText(reviewLabel)}</div>${changeRows}</div><div class="log-time">${formatTaskTime(record.changedAt)}</div></div>`;
         }).join("");
       }
 
