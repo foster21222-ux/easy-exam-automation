@@ -860,12 +860,12 @@ test("project navigation clears stale state and disables actions until current r
   }
 });
 
-test("operation batch automation stays locked on same-project reload and clears on project switch", async () => {
+test("operation batch automation lock survives A to B to A navigation", async () => {
   const taskViewState = {
     currentProjectId: "project-a",
     currentProject: { taskId: "project-a" },
     currentProjectWorkflow: null,
-    operationBatchAutomationRunning: true,
+    operationBatchAutomationTaskIds: new Set(["project-a"]),
   };
   const dependencies = {
     taskViewState,
@@ -888,16 +888,25 @@ test("operation batch automation stays locked on same-project reload and clears 
   );
 
   await loadProjectDetail("project-a");
-  assert.equal(taskViewState.operationBatchAutomationRunning, true);
+  assert.equal(taskViewState.operationBatchAutomationTaskIds.has("project-a"), true);
 
   await loadProjectDetail("project-b");
-  assert.equal(taskViewState.operationBatchAutomationRunning, false);
+  assert.equal(taskViewState.operationBatchAutomationTaskIds.has("project-a"), true);
+
+  await loadProjectDetail("project-a");
+  assert.equal(taskViewState.operationBatchAutomationTaskIds.has("project-a"), true);
 
   const renderProjectDetail = sourceBetween(
     "      function renderProjectDetail(task) {",
     "\n      async function loadProjectDetail(projectId) {",
   );
-  assert.equal(renderProjectDetail.includes("taskViewState.operationBatchAutomationRunning = false"), false);
+  const loadProjectDetailSource = sourceBetween(
+    "      async function loadProjectDetail(projectId) {",
+    "\n      function requirementNextAction(item = {}) {",
+  );
+  assert.equal(renderProjectDetail.includes("operationBatchAutomationTaskIds.clear"), false);
+  assert.equal(loadProjectDetailSource.includes("operationBatchAutomationTaskIds.clear"), false);
+  assert.equal(loadProjectDetailSource.includes("operationBatchAutomationRunning"), false);
 });
 
 test("each asynchronous project panel loader guards shared state by task id", () => {
@@ -987,29 +996,50 @@ test("recipient status text uses raw text and manual batch recording preserves i
   assert.ok(recordBatch.includes("projectOperationBatchDraft.innerHTML = draftHtml;"));
 });
 
-test("operation batch create and reconcile restore unified actions in finally", () => {
-  const handlers = [
-    sourceBetween(
+test("operation batch create and reconcile release the originating task after navigation", async () => {
+  const handlerBounds = [
+    [
       "      async function createProjectOperationBatch() {",
       "\n      async function reconcileProjectOperationBatch() {",
-    ),
-    sourceBetween(
+    ],
+    [
       "      async function reconcileProjectOperationBatch() {",
       "\n      async function recordProjectOperationBatchCode() {",
-    ),
+    ],
   ];
-  for (const handler of handlers) {
-    assert.ok(handler.includes("setOperationBatchAutomationRunning(true)"));
-    assert.ok(handler.includes("try {"));
-    assert.ok(handler.includes("finally"));
-    assert.ok(handler.includes("setOperationBatchAutomationRunning(false)"));
+  for (const [start, end] of handlerBounds) {
+    const taskA = { taskId: "project-a", config: {} };
+    const taskViewState = { currentProjectId: "project-a", currentProject: taskA };
+    const requestStarted = Promise.withResolvers();
+    const requestFinished = Promise.withResolvers();
+    const transitions = [];
+    const handler = compileInlineFunction(start, end, {
+      taskViewState,
+      operationBatchCodeIsValid: () => false,
+      projectOperationBatchState: { textContent: "" },
+      setOperationBatchAutomationRunning: (taskId, running) => transitions.push([taskId, running]),
+      fetchJson: async () => {
+        requestStarted.resolve();
+        return await requestFinished.promise;
+      },
+      isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+    });
+
+    const request = handler();
+    await requestStarted.promise;
+    taskViewState.currentProjectId = "project-b";
+    taskViewState.currentProject = { taskId: "project-b", config: {} };
+    requestFinished.resolve({ task: taskA, operationBatchCode: "EZT260003" });
+    await request;
+
+    assert.deepEqual(transitions, [["project-a", true], ["project-a", false]]);
   }
 });
 
 test("operation batch automation disables manual recording and restores unified actions", () => {
   const taskViewState = {
     currentProject: { taskId: "project-a", config: {} },
-    operationBatchAutomationRunning: false,
+    operationBatchAutomationTaskIds: new Set(),
   };
   const operationBatchCreateBtn = { disabled: false, hidden: false, textContent: "" };
   const operationBatchReconcileBtn = { disabled: false, hidden: false };
@@ -1027,20 +1057,40 @@ test("operation batch automation disables manual recording and restores unified 
     },
   );
   const setOperationBatchAutomationRunning = compileInlineFunction(
-    "      function setOperationBatchAutomationRunning(running) {",
+    "      function setOperationBatchAutomationRunning(taskId, running) {",
     "\n      function renderOperationBatchFromTask",
     { taskViewState, updateOperationBatchActions },
   );
 
-  setOperationBatchAutomationRunning(true);
+  setOperationBatchAutomationRunning("project-a", true);
   assert.equal(operationBatchCreateBtn.disabled, true);
   assert.equal(operationBatchReconcileBtn.disabled, true);
   assert.equal(operationBatchRecordBtn.disabled, true);
 
-  setOperationBatchAutomationRunning(false);
+  taskViewState.currentProject = { taskId: "project-b", config: {} };
+  updateOperationBatchActions(taskViewState.currentProject);
+  assert.equal(operationBatchCreateBtn.disabled, false);
+  assert.equal(operationBatchRecordBtn.disabled, false);
+
+  taskViewState.currentProject = { taskId: "project-a", config: {} };
+  updateOperationBatchActions(taskViewState.currentProject);
+  assert.equal(operationBatchCreateBtn.disabled, true);
+  assert.equal(operationBatchRecordBtn.disabled, true);
+
+  setOperationBatchAutomationRunning("project-a", false);
   assert.equal(operationBatchCreateBtn.disabled, false);
   assert.equal(operationBatchReconcileBtn.disabled, true);
   assert.equal(operationBatchRecordBtn.disabled, false);
+
+  setOperationBatchAutomationRunning("project-a", true);
+  taskViewState.currentProject = null;
+  operationBatchCreateBtn.disabled = true;
+  operationBatchReconcileBtn.disabled = true;
+  operationBatchRecordBtn.disabled = true;
+  setOperationBatchAutomationRunning("project-a", false);
+  assert.equal(operationBatchCreateBtn.disabled, true);
+  assert.equal(operationBatchReconcileBtn.disabled, true);
+  assert.equal(operationBatchRecordBtn.disabled, true);
 });
 
 test("operation batch actions switch legacy unresolved creation into reconciliation without a refresh", () => {
@@ -1051,7 +1101,7 @@ test("operation batch actions switch legacy unresolved creation into reconciliat
     "      function updateOperationBatchActions(task = taskViewState.currentProject) {",
     "\n      function setOperationBatchAutomationRunning",
     {
-      taskViewState: { currentProject: null },
+      taskViewState: { currentProject: null, operationBatchAutomationTaskIds: new Set() },
       operationBatchCreateBtn,
       operationBatchReconcileBtn,
       operationBatchRecordBtn,
@@ -1136,7 +1186,7 @@ test("operation batch create applies a persisted reconciliation task from a 409 
       projectOperationBatchState: { textContent: "" },
       operationBatchCreateBtn,
       operationBatchCodeIsValid: (code) => /^[A-Z]{3}\d{6}$/.test(String(code || "")),
-      setOperationBatchAutomationRunning: (running) => {
+      setOperationBatchAutomationRunning: (_taskId, running) => {
         if (!running) operationBatchCreateBtn.disabled = true;
       },
       updateOperationBatchActions: (task) => {
