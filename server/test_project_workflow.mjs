@@ -118,6 +118,17 @@ test("workflow does not mark an unresolved external batch as creatable", () => {
   assert.equal(workflow.steps.batch.status, "reconciliation_required");
 });
 
+test("workflow keeps an interrupted reconciliation pending until a valid batch code is saved", () => {
+  const workflow = buildProjectWorkflow({
+    config: { operationBatch: { status: "reconciling" } },
+    sessions: [],
+  }, { warnings: [] });
+
+  assert.equal(workflow.steps.batch.status, "reconciliation_required");
+  assert.equal(workflow.steps.personnel.status, "waiting_batch");
+  assert.equal(workflow.steps.content.status, "waiting_batch");
+});
+
 test("workflow keeps malformed non-empty batch codes pending and downstream steps locked", () => {
   const workflow = buildProjectWorkflow({
     config: {

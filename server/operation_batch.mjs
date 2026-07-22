@@ -202,6 +202,7 @@ export function operationBatchNeedsReconciliation(task = {}) {
   if (operationBatchCodeIsValid(code)) return false;
   if (code) return true;
   return current.status === "creating"
+    || current.status === "reconciling"
     || current.status === "reconciliation_required"
     || current.errorCode === OPERATION_BATCH_RECONCILIATION_REQUIRED
     || current.errorMessage === "创建完成，但未能从详情页读取批次代码";

@@ -339,6 +339,9 @@ test("operation batch reconciliation state treats interrupted creating without a
     config: { operationBatch: { status: "creating" } },
   }), true);
   assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatch: { status: "reconciling" } },
+  }), true);
+  assert.equal(operationBatchNeedsReconciliation({
     config: {
       operationBatchCode: "EZT260003",
       operationBatch: { status: "creating" },

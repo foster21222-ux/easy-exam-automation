@@ -9683,6 +9683,7 @@
         if (operationBatchCodeIsValid(code)) return false;
         if (code) return true;
         return batch.status === "creating"
+          || batch.status === "reconciling"
           || batch.status === "reconciliation_required"
           || batch.errorCode === "OPERATION_BATCH_RECONCILIATION_REQUIRED"
           || batch.errorMessage === "创建完成，但未能从详情页读取批次代码";

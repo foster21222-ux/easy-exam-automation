@@ -1156,6 +1156,43 @@ test("operation batch reconciliation helper recognizes the stable server error c
       },
     },
   }), true);
+  assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatch: { status: "reconciling" } },
+  }), true);
+});
+
+test("operation batch UI only offers reconciliation after an interrupted reconciliation", () => {
+  const operationBatchCreateBtn = { disabled: false, hidden: false, textContent: "" };
+  const operationBatchReconcileBtn = { disabled: true, hidden: true };
+  const operationBatchRecordBtn = { disabled: false };
+  const operationBatchCodeIsValid = compileInlineFunction(
+    "      function operationBatchCodeIsValid(value) {",
+    "\n      function operationBatchNeedsReconciliation(task = {}) {",
+  );
+  const operationBatchNeedsReconciliation = compileInlineFunction(
+    "      function operationBatchNeedsReconciliation(task = {}) {",
+    "\n      function operationBatchWorkflowAfterTask(task = {}) {",
+    { operationBatchCodeIsValid },
+  );
+  const updateOperationBatchActions = compileInlineFunction(
+    "      function updateOperationBatchActions(task = taskViewState.currentProject) {",
+    "\n      function setOperationBatchAutomationRunning",
+    {
+      taskViewState: { currentProject: null, operationBatchAutomationTaskIds: new Set() },
+      operationBatchCreateBtn,
+      operationBatchReconcileBtn,
+      operationBatchRecordBtn,
+      operationBatchCodeIsValid,
+      operationBatchNeedsReconciliation,
+    },
+  );
+
+  updateOperationBatchActions({ config: { operationBatch: { status: "reconciling" } } });
+
+  assert.equal(operationBatchCreateBtn.disabled, true);
+  assert.equal(operationBatchCreateBtn.hidden, true);
+  assert.equal(operationBatchReconcileBtn.disabled, false);
+  assert.equal(operationBatchReconcileBtn.hidden, false);
 });
 
 test("operation batch create applies a persisted reconciliation task from a 409 response", async () => {
