@@ -2,8 +2,10 @@
 import {
   cpSync,
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
 } from "node:fs";
@@ -52,17 +54,49 @@ const runtimeDir = path.join(targetDir, "runtime");
 
 mkdirSync(targetDir, { recursive: true });
 mkdirSync(runtimeDir, { recursive: true });
-rmSync(appDir, { recursive: true, force: true });
-mkdirSync(appDir, { recursive: true });
-
+const preservedDir = mkdtempSync(path.join(targetDir, ".deploy-preserved-"));
+const preservedNames = [];
 const copied = [];
-for (const name of ["server", "scripts", "outputs", "web", "deploy", "template", "package.json", "requirements.txt", ".env"]) {
-  if (copyIfPresent(path.join(sourceDir, name), path.join(appDir, name))) copied.push(name);
+let migratedRuntime = [];
+let deploymentComplete = false;
+try {
+  for (const name of [".env", "node_modules"]) {
+    const currentPath = path.join(appDir, name);
+    if (!existsSync(currentPath)) continue;
+    renameSync(currentPath, path.join(preservedDir, name));
+    preservedNames.push(name);
+  }
+
+  rmSync(appDir, { recursive: true, force: true });
+  mkdirSync(appDir, { recursive: true });
+  for (const name of ["server", "scripts", "outputs", "web", "deploy", "template", "package.json", "requirements.txt", ".env"]) {
+    if (copyIfPresent(path.join(sourceDir, name), path.join(appDir, name))) copied.push(name);
+  }
+  symlinkSync("../runtime", path.join(appDir, ".easy_exam_runtime"), "dir");
+  migratedRuntime = args.migrateRuntime
+    ? migrateRuntime(path.join(sourceDir, ".easy_exam_runtime"), runtimeDir)
+    : [];
+
+  for (const name of preservedNames) {
+    const currentPath = path.join(appDir, name);
+    if (!existsSync(currentPath)) renameSync(path.join(preservedDir, name), currentPath);
+  }
+  deploymentComplete = true;
+} catch (error) {
+  try {
+    mkdirSync(appDir, { recursive: true });
+    for (const name of preservedNames) {
+      const preservedPath = path.join(preservedDir, name);
+      const currentPath = path.join(appDir, name);
+      if (existsSync(preservedPath) && !existsSync(currentPath)) renameSync(preservedPath, currentPath);
+    }
+  } catch {
+    // Leave any remaining preserved entries in place for manual recovery.
+  }
+  throw error;
+} finally {
+  if (deploymentComplete) rmSync(preservedDir, { recursive: true, force: true });
 }
-symlinkSync("../runtime", path.join(appDir, ".easy_exam_runtime"), "dir");
-const migratedRuntime = args.migrateRuntime
-  ? migrateRuntime(path.join(sourceDir, ".easy_exam_runtime"), runtimeDir)
-  : [];
 
 process.stdout.write(`${JSON.stringify({
   ok: true,
