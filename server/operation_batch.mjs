@@ -143,6 +143,7 @@ export function buildOperationBatchDraft(task = {}, overrides = {}) {
 export function applyOperationBatchResult(task = {}, result = {}) {
   const code = text(result.operationBatchCode || result.code);
   if (!code) throw new Error("缺少运营批次代码");
+  if (!operationBatchCodeIsValid(code)) throw new Error("运营批次代码格式不合法");
   const current = task.config?.operationBatch || {};
   const events = Array.isArray(current.events) ? current.events.slice() : [];
   events.push({
@@ -167,14 +168,37 @@ export function applyOperationBatchResult(task = {}, result = {}) {
   };
 }
 
+export function operationBatchCodeIsValid(value) {
+  return /^[A-Z]{3}\d{6}$/.test(text(value));
+}
+
 export function operationBatchNeedsReconciliation(task = {}) {
   const current = task.config?.operationBatch || {};
   const code = firstNonEmpty(task.config?.operationBatchCode, current.code);
-  if (/^[A-Z]{3}\d{6}$/.test(code)) return false;
+  if (operationBatchCodeIsValid(code)) return false;
+  if (code) return true;
   return current.status === "creating"
     || current.status === "reconciliation_required"
     || current.errorCode === OPERATION_BATCH_RECONCILIATION_REQUIRED
     || current.errorMessage === "创建完成，但未能从详情页读取批次代码";
+}
+
+export function operationBatchDraftForReconciliation(task = {}) {
+  const savedDraft = task.config?.operationBatch?.draft;
+  if (savedDraft && typeof savedDraft === "object" && !Array.isArray(savedDraft)) {
+    return savedDraft;
+  }
+  return buildOperationBatchDraft(task);
+}
+
+export function operationBatchFailureState(error, externalBatchConfirmed = false) {
+  const reconciliationRequired = externalBatchConfirmed
+    || error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED;
+  return {
+    status: reconciliationRequired ? "reconciliation_required" : "failed",
+    errorCode: reconciliationRequired ? OPERATION_BATCH_RECONCILIATION_REQUIRED : "",
+    errorMessage: error instanceof Error ? error.message : String(error),
+  };
 }
 
 export function operationBatchDisplayId(task = {}) {

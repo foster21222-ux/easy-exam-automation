@@ -4,7 +4,10 @@ import test from "node:test";
 import {
   applyOperationBatchResult,
   buildOperationBatchDraft,
+  operationBatchCodeIsValid,
   operationBatchDisplayId,
+  operationBatchDraftForReconciliation,
+  operationBatchFailureState,
   operationBatchNeedsReconciliation,
 } from "./operation_batch.mjs";
 import {
@@ -245,6 +248,24 @@ test("applyOperationBatchResult records the requested reconciliation audit event
   assert.equal(patch.operationBatch.events[0].type, "operation_batch_reconciled");
 });
 
+test("operation batch codes require three uppercase letters and six digits", () => {
+  assert.equal(operationBatchCodeIsValid("EZT260003"), true);
+  assert.equal(operationBatchCodeIsValid("foo"), false);
+  assert.equal(operationBatchCodeIsValid(""), false);
+  assert.equal(operationBatchCodeIsValid("ezt260003"), false);
+});
+
+test("applyOperationBatchResult rejects empty and malformed batch codes", () => {
+  assert.throws(
+    () => applyOperationBatchResult({}, { operationBatchCode: "" }),
+    /运营批次代码/,
+  );
+  assert.throws(
+    () => applyOperationBatchResult({}, { operationBatchCode: "foo" }),
+    /运营批次代码/,
+  );
+});
+
 test("operation batch reconciliation state includes stable and legacy submitted errors", () => {
   assert.equal(operationBatchNeedsReconciliation({
     config: { operationBatch: { status: "reconciliation_required" } },
@@ -270,6 +291,48 @@ test("operation batch reconciliation state treats interrupted creating without a
       operationBatch: { status: "creating" },
     },
   }), false);
+});
+
+test("operation batch reconciliation state treats malformed non-empty codes as pending", () => {
+  assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatchCode: "foo", operationBatch: { status: "created_unpublished" } },
+  }), true);
+});
+
+test("operation batch reconciliation reuses the saved creation draft", () => {
+  const savedDraft = {
+    fields: {
+      batchName: { value: "创建时批次名", source: "manual" },
+    },
+  };
+  const task = {
+    projectName: "当前项目名",
+    config: {
+      operationBatch: { draft: savedDraft },
+      businessRequirement: { project_name: "已变化项目名" },
+    },
+  };
+
+  assert.strictEqual(operationBatchDraftForReconciliation(task), savedDraft);
+  assert.notStrictEqual(
+    operationBatchDraftForReconciliation({ projectName: "当前项目名" }),
+    savedDraft,
+  );
+});
+
+test("operation batch failure state stays pending after the external runner returns", () => {
+  assert.deepEqual(
+    operationBatchFailureState(new Error("本地数据库写入失败"), true),
+    {
+      status: "reconciliation_required",
+      errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
+      errorMessage: "本地数据库写入失败",
+    },
+  );
+  assert.deepEqual(
+    operationBatchFailureState(new Error("登录失败"), false),
+    { status: "failed", errorCode: "", errorMessage: "登录失败" },
+  );
 });
 
 test("operationBatchDisplayId prefers batch code over internal requirement id", () => {

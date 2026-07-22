@@ -78,8 +78,13 @@ test("operation batch creation blocks tasks that require reconciliation", () => 
     serverSource.indexOf("async function handleOperationBatchReconcile"),
   );
   assert.ok(createHandler.includes("operationBatchNeedsReconciliation"));
-  assert.ok(createHandler.includes("error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED"));
-  assert.ok(createHandler.includes('status: reconciliationRequired ? "reconciliation_required" : "failed"'));
+  assert.ok(createHandler.includes("operationBatchCodeIsValid(existingOperationBatchCode)"));
+  assert.ok(createHandler.includes("operationBatchFailureState(error, externalBatchConfirmed)"));
+  const runnerIndex = createHandler.indexOf("await runOperationBatchCreation");
+  const confirmedIndex = createHandler.indexOf("externalBatchConfirmed = true");
+  const freshTaskIndex = createHandler.indexOf('await runTaskState("get", { taskId })', runnerIndex);
+  assert.ok(runnerIndex >= 0 && confirmedIndex > runnerIndex && freshTaskIndex > confirmedIndex);
+  assert.ok(createHandler.includes('eventType: "operation_batch_created"'));
 });
 
 test("operation batch reconciliation persists its stable state and audit event", () => {
@@ -88,9 +93,23 @@ test("operation batch reconciliation persists its stable state and audit event",
     serverSource.indexOf("async function handleOperationBatchResult"),
   );
   assert.ok(reconcileHandler.includes("runOperationBatchReconciliation"));
+  assert.ok(reconcileHandler.includes("operationBatchCodeIsValid(existingOperationBatchCode)"));
+  assert.ok(reconcileHandler.includes("operationBatchDraftForReconciliation(task)"));
+  assert.equal(reconcileHandler.includes("readBody(req)"), false);
   assert.ok(reconcileHandler.includes('eventType: "operation_batch_reconciled"'));
   assert.ok(reconcileHandler.includes('status: "reconciliation_required"'));
   assert.ok(reconcileHandler.includes("OPERATION_BATCH_RECONCILIATION_REQUIRED"));
+});
+
+test("manual operation batch results force a recorded audit event", () => {
+  const resultHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchResult"),
+    serverSource.indexOf("async function readEmailSettings"),
+  );
+  assert.ok(resultHandler.includes("...payload"));
+  assert.ok(resultHandler.includes('eventType: "operation_batch_recorded"'));
+  assert.ok(resultHandler.indexOf("...payload") < resultHandler.indexOf('eventType: "operation_batch_recorded"'));
+  assert.ok(resultHandler.includes("return badRequest"));
 });
 
 test("server listen host can be configured for LAN deployment", () => {

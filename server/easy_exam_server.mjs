@@ -54,6 +54,9 @@ import {
   acquireOperationBatchCreation,
   applyOperationBatchResult,
   buildOperationBatchDraft,
+  operationBatchCodeIsValid,
+  operationBatchDraftForReconciliation,
+  operationBatchFailureState,
   operationBatchNeedsReconciliation,
   releaseOperationBatchCreation,
 } from "./operation_batch.mjs";
@@ -5366,7 +5369,7 @@ async function handleOperationBatchCreate(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
   const existingOperationBatchCode = task.config?.operationBatchCode || task.config?.operationBatch?.code || "";
-  if (existingOperationBatchCode) {
+  if (operationBatchCodeIsValid(existingOperationBatchCode)) {
     return json(res, 200, {
       ok: true,
       task,
@@ -5394,6 +5397,7 @@ async function handleOperationBatchCreate(taskId, req, res) {
     return badRequest(res, `批次草稿仍有缺失字段：${missing.join("；")}`);
   }
   acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+  let externalBatchConfirmed = false;
   try {
     const current = task.config?.operationBatch || {};
     await runTaskState("update_config", {
@@ -5412,22 +5416,27 @@ async function handleOperationBatchCreate(taskId, req, res) {
       userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
       allowTaskMismatch: process.env.OPERATION_CONSOLE_ALLOW_TEST_TASK_MISMATCH === "1",
     });
+    externalBatchConfirmed = true;
     const freshTask = await runTaskState("get", { taskId });
-    const patch = applyOperationBatchResult(freshTask, created);
+    const patch = applyOperationBatchResult(freshTask, {
+      ...created,
+      eventType: "operation_batch_created",
+    });
     const updated = await runTaskState("update_config", { taskId, config: patch });
     return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
   } catch (error) {
-    const failedTask = await runTaskState("get", { taskId });
+    let failedTask = task;
+    try {
+      failedTask = await runTaskState("get", { taskId }) || task;
+    } catch {}
     const failedCurrent = failedTask.config?.operationBatch || {};
-    const reconciliationRequired = error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED;
+    const failure = operationBatchFailureState(error, externalBatchConfirmed);
     const updated = await runTaskState("update_config", {
       taskId,
       config: {
         operationBatch: {
           ...failedCurrent,
-          status: reconciliationRequired ? "reconciliation_required" : "failed",
-          errorCode: reconciliationRequired ? OPERATION_BATCH_RECONCILIATION_REQUIRED : "",
-          errorMessage: error instanceof Error ? error.message : String(error),
+          ...failure,
           updatedAt: new Date().toISOString(),
         },
       },
@@ -5442,7 +5451,7 @@ async function handleOperationBatchReconcile(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
   const existingOperationBatchCode = task.config?.operationBatchCode || task.config?.operationBatch?.code || "";
-  if (existingOperationBatchCode) {
+  if (operationBatchCodeIsValid(existingOperationBatchCode)) {
     return json(res, 200, {
       ok: true,
       task,
@@ -5456,8 +5465,7 @@ async function handleOperationBatchReconcile(taskId, req, res) {
       error: "运营控制台浏览器自动化未启用。请先确认测试环境已登录，并设置 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 后重启服务。",
     });
   }
-  const payload = parseJsonSafe(await readBody(req)) || operationBatchDraftOverridesFromTask(task);
-  const draft = buildOperationBatchDraft(task, payload);
+  const draft = operationBatchDraftForReconciliation(task);
   acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
   try {
     const reconciled = await runOperationBatchReconciliation(draft, {
@@ -5505,7 +5513,10 @@ async function handleOperationBatchResult(taskId, req, res) {
   const payload = parseJsonSafe(await readBody(req)) || {};
   let patch;
   try {
-    patch = applyOperationBatchResult(task, payload);
+    patch = applyOperationBatchResult(task, {
+      ...payload,
+      eventType: "operation_batch_recorded",
+    });
   } catch (error) {
     return badRequest(res, error instanceof Error ? error.message : String(error));
   }
