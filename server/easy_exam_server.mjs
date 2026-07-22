@@ -5436,6 +5436,7 @@ async function handleOperationBatchCreate(taskId, req, res) {
       config: {
         operationBatch: {
           ...failedCurrent,
+          draft,
           ...failure,
           updatedAt: new Date().toISOString(),
         },
@@ -5483,7 +5484,10 @@ async function handleOperationBatchReconcile(taskId, req, res) {
     const updated = await runTaskState("update_config", { taskId, config: patch });
     return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
   } catch (error) {
-    const pendingTask = await runTaskState("get", { taskId });
+    let pendingTask = task;
+    try {
+      pendingTask = await runTaskState("get", { taskId }) || task;
+    } catch {}
     const pendingCurrent = pendingTask.config?.operationBatch || {};
     const updated = await runTaskState("update_config", {
       taskId,

@@ -85,6 +85,10 @@ test("operation batch creation blocks tasks that require reconciliation", () => 
   const freshTaskIndex = createHandler.indexOf('await runTaskState("get", { taskId })', runnerIndex);
   assert.ok(runnerIndex >= 0 && confirmedIndex > runnerIndex && freshTaskIndex > confirmedIndex);
   assert.ok(createHandler.includes('eventType: "operation_batch_created"'));
+  assert.match(
+    createHandler,
+    /operationBatch:\s*{\s*\.\.\.failedCurrent,\s*draft,\s*\.\.\.failure,/s,
+  );
 });
 
 test("operation batch reconciliation persists its stable state and audit event", () => {
@@ -99,6 +103,11 @@ test("operation batch reconciliation persists its stable state and audit event",
   assert.ok(reconcileHandler.includes('eventType: "operation_batch_reconciled"'));
   assert.ok(reconcileHandler.includes('status: "reconciliation_required"'));
   assert.ok(reconcileHandler.includes("OPERATION_BATCH_RECONCILIATION_REQUIRED"));
+  const fallbackIndex = reconcileHandler.indexOf("let pendingTask = task");
+  const guardedReadIndex = reconcileHandler.indexOf('pendingTask = await runTaskState("get", { taskId }) || task');
+  const pendingWriteIndex = reconcileHandler.indexOf('await runTaskState("update_config"', guardedReadIndex);
+  assert.ok(fallbackIndex >= 0 && guardedReadIndex > fallbackIndex && pendingWriteIndex > guardedReadIndex);
+  assert.ok(reconcileHandler.slice(fallbackIndex, pendingWriteIndex).includes("catch {}"));
 });
 
 test("manual operation batch results force a recorded audit event", () => {
