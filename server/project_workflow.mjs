@@ -1,3 +1,5 @@
+import { operationBatchCodeIsValid, operationBatchNeedsReconciliation } from "./operation_batch.mjs";
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -195,6 +197,7 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
   const examRequirements = projectExamRequirements(task.config || {});
   const examRequirement = examRequirements[0] || {};
   const batchCode = first(task.config?.operationBatchCode, task.config?.operationBatch?.code);
+  const hasBatchCode = operationBatchCodeIsValid(batchCode);
   const personnelDraft = buildPersonnelTaskDraft(task);
   const archiveDraft = buildOperationArchiveDraft(task);
   const personnelNotRequired = text(business.ata_invigilator_arrangement).includes("不需要");
@@ -207,10 +210,17 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
       actualResult: { ready: hasActualSession },
     },
     steps: {
-      batch: { status: batchCode ? "success" : (batchDraft?.warnings?.length ? "needs_review" : "ready"), code: batchCode },
-      personnel: { status: personnelNotRequired ? "skipped" : (batchCode ? (personnelDraft.warnings.length ? "needs_review" : "ready") : "waiting_batch") },
-      content: { status: batchCode ? (contentReady ? "ready" : "needs_review") : "waiting_batch" },
-      archive: { status: batchCode && hasActualSession ? (archiveDraft.warnings.length ? "needs_review" : "ready") : "waiting_execution" },
+      batch: {
+        status: hasBatchCode
+          ? "success"
+          : operationBatchNeedsReconciliation(task)
+            ? "reconciliation_required"
+            : (batchDraft?.warnings?.length ? "needs_review" : "ready"),
+        code: batchCode,
+      },
+      personnel: { status: personnelNotRequired ? "skipped" : (hasBatchCode ? (personnelDraft.warnings.length ? "needs_review" : "ready") : "waiting_batch") },
+      content: { status: hasBatchCode ? (contentReady ? "ready" : "needs_review") : "waiting_batch" },
+      archive: { status: hasBatchCode && hasActualSession ? (archiveDraft.warnings.length ? "needs_review" : "ready") : "waiting_execution" },
     },
     personnelDraft,
     archiveDraft,

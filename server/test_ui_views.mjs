@@ -604,7 +604,10 @@ test("requirement center remains present while exam views change", () => {
 test("project and system views expose the selective PR 5 collaboration controls", () => {
   assert.ok(html.includes('id="projectOperationBatchState"'));
   assert.ok(html.includes('id="operationBatchCreateBtn"'));
+  assert.ok(html.includes('id="operationBatchReconcileBtn"'));
   assert.ok(html.includes('id="operationBatchRecordBtn"'));
+  assert.ok(html.includes('reconciliation_required: "待同步"'));
+  assert.ok(html.includes('/operation-batch/reconcile'));
   assert.ok(html.includes('id="contentRequirementEmailRecipients"'));
   assert.ok(html.includes('id="contentRequirementEmailSendBtn"'));
   assert.ok(html.includes('id="emailSettingsPanel"'));
@@ -772,7 +775,8 @@ test("stale project mutation responses do not overwrite the active project or DO
 
 test("every project mutation guards each response before updating shared state", () => {
   const handlers = [
-    ["createProjectOperationBatch", "      async function createProjectOperationBatch() {", "\n      async function recordProjectOperationBatchCode() {"],
+    ["createProjectOperationBatch", "      async function createProjectOperationBatch() {", "\n      async function reconcileProjectOperationBatch() {"],
+    ["reconcileProjectOperationBatch", "      async function reconcileProjectOperationBatch() {", "\n      async function recordProjectOperationBatchCode() {"],
     ["recordProjectOperationBatchCode", "      async function recordProjectOperationBatchCode() {", "\n      const projectRequirementConfigFields = ["],
     ["handleProjectRequirementStaffEdit", "      async function handleProjectRequirementStaffEdit() {", "\n      async function handleProjectRequirementChangeAction(button) {"],
     ["handleProjectRequirementChangeAction", "      async function handleProjectRequirementChangeAction(button) {", "\n      async function handleProjectRequirementSubmitAction(button) {"],
@@ -797,7 +801,11 @@ test("every project mutation guards each response before updating shared state",
 test("project navigation clears stale state and disables actions until current render", async () => {
   const deferred = Promise.withResolvers();
   const disabledStates = [];
-  const taskViewState = { currentProjectId: "project-a", currentProject: { taskId: "project-a" } };
+  const taskViewState = {
+    currentProjectId: "project-a",
+    currentProject: { taskId: "project-a" },
+    currentProjectWorkflow: { steps: { batch: { status: "ready" } } },
+  };
   const dependencies = {
     taskViewState,
     fetchJson: async () => deferred.promise,
@@ -823,6 +831,7 @@ test("project navigation clears stale state and disables actions until current r
 
   const loadB = loadProjectDetail("project-b");
   assert.equal(taskViewState.currentProject, null);
+  assert.equal(taskViewState.currentProjectWorkflow, null);
   assert.deepEqual(disabledStates, [true]);
   deferred.resolve({ taskId: "project-b" });
   await loadB;
@@ -841,6 +850,7 @@ test("project navigation clears stale state and disables actions until current r
     "projectAutoConfigBtn",
     "operationBatchRefreshBtn",
     "operationBatchCreateBtn",
+    "operationBatchReconcileBtn",
     "operationBatchRecordBtn",
     "contentRequirementEmailSendBtn",
     "projectWechatBindingRefreshBtn",
@@ -940,12 +950,233 @@ test("recipient status text uses raw text and manual batch recording preserves i
 test("operation batch create locks its action while the request is in flight", () => {
   const handler = sourceBetween(
     "      async function createProjectOperationBatch() {",
-    "\n      async function recordProjectOperationBatchCode() {",
+    "\n      async function reconcileProjectOperationBatch() {",
   );
   assert.ok(handler.includes("operationBatchCreateBtn.disabled = true"));
   assert.ok(handler.includes("try {"));
   assert.ok(handler.includes("finally"));
   assert.ok(handler.includes("updateOperationBatchActions(taskViewState.currentProject)"));
+});
+
+test("operation batch actions switch legacy unresolved creation into reconciliation without a refresh", () => {
+  const operationBatchCreateBtn = { disabled: false, hidden: false, textContent: "" };
+  const operationBatchReconcileBtn = { disabled: true, hidden: true };
+  const operationBatchRecordBtn = { disabled: false };
+  const updateOperationBatchActions = compileInlineFunction(
+    "      function updateOperationBatchActions(task = taskViewState.currentProject) {",
+    "\n      function renderOperationBatchFromTask(task = {}) {",
+    {
+      taskViewState: { currentProject: null },
+      operationBatchCreateBtn,
+      operationBatchReconcileBtn,
+      operationBatchRecordBtn,
+      operationBatchCodeIsValid: (code) => /^[A-Z]{3}\d{6}$/.test(String(code || "")),
+      operationBatchNeedsReconciliation: (task) => (
+        task?.config?.operationBatch?.status === "failed"
+        && task?.config?.operationBatch?.errorMessage === "创建完成，但未能从详情页读取批次代码"
+      ),
+    },
+  );
+
+  updateOperationBatchActions({
+    config: {
+      operationBatch: {
+        status: "failed",
+        errorMessage: "创建完成，但未能从详情页读取批次代码",
+      },
+    },
+  });
+
+  assert.equal(operationBatchCreateBtn.disabled, true);
+  assert.equal(operationBatchCreateBtn.hidden, true);
+  assert.equal(operationBatchReconcileBtn.disabled, false);
+  assert.equal(operationBatchReconcileBtn.hidden, false);
+  assert.equal(operationBatchRecordBtn.disabled, false);
+});
+
+test("operation batch reconciliation helper recognizes the stable server error code", () => {
+  const operationBatchCodeIsValid = compileInlineFunction(
+    "      function operationBatchCodeIsValid(value) {",
+    "\n      function operationBatchNeedsReconciliation(task = {}) {",
+  );
+  const operationBatchNeedsReconciliation = compileInlineFunction(
+    "      function operationBatchNeedsReconciliation(task = {}) {",
+    "\n      function operationBatchWorkflowAfterTask(task = {}) {",
+    { operationBatchCodeIsValid },
+  );
+
+  assert.equal(operationBatchNeedsReconciliation({
+    config: {
+      operationBatch: {
+        status: "failed",
+        errorCode: "OPERATION_BATCH_RECONCILIATION_REQUIRED",
+      },
+    },
+  }), true);
+  assert.equal(operationBatchNeedsReconciliation({
+    config: {
+      operationBatch: {
+        status: "failed",
+        errorMessage: "创建完成，但未能从详情页读取批次代码",
+      },
+    },
+  }), true);
+});
+
+test("operation batch create applies a persisted reconciliation task from a 409 response", async () => {
+  const originalTask = { taskId: "project-a", config: { operationBatchCode: "foo" } };
+  const persistedTask = {
+    taskId: "project-a",
+    config: { operationBatch: { status: "reconciliation_required" } },
+  };
+  const taskViewState = { currentProjectId: "project-a", currentProject: originalTask };
+  const renderedTasks = [];
+  const renderedWorkflows = [];
+  const operationBatchCreateBtn = { disabled: false };
+  const error = Object.assign(new Error("运营批次创建结果待同步，请先执行批次对账。"), {
+    status: 409,
+    response: { task: persistedTask },
+  });
+  const createProjectOperationBatch = compileInlineFunction(
+    "      async function createProjectOperationBatch() {",
+    "\n      async function reconcileProjectOperationBatch() {",
+    {
+      taskViewState,
+      fetchJson: async () => { throw error; },
+      isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+      renderOperationBatchFromTask: (task) => renderedTasks.push(task),
+      renderProjectWorkflow: (task, workflow) => renderedWorkflows.push({ task, workflow }),
+      operationBatchWorkflowAfterTask: () => ({ steps: { batch: { status: "reconciliation_required" } } }),
+      loadProjectOperationBatchDraft: async () => {},
+      projectOperationBatchState: { textContent: "" },
+      operationBatchCreateBtn,
+      operationBatchCodeIsValid: (code) => /^[A-Z]{3}\d{6}$/.test(String(code || "")),
+      updateOperationBatchActions: (task) => {
+        operationBatchCreateBtn.disabled = task?.config?.operationBatch?.status === "reconciliation_required";
+      },
+    },
+  );
+
+  await assert.rejects(createProjectOperationBatch(), /待同步/);
+  assert.strictEqual(taskViewState.currentProject, persistedTask);
+  assert.deepEqual(renderedTasks, [persistedTask]);
+  assert.equal(renderedWorkflows.at(-1).workflow.steps.batch.status, "reconciliation_required");
+  assert.equal(operationBatchCreateBtn.disabled, true);
+});
+
+test("operation batch create and reconcile directly consume persisted tasks from 409 responses", () => {
+  const createHandler = sourceBetween(
+    "      async function createProjectOperationBatch() {",
+    "\n      async function reconcileProjectOperationBatch() {",
+  );
+  const reconcileHandler = sourceBetween(
+    "      async function reconcileProjectOperationBatch() {",
+    "\n      async function recordProjectOperationBatchCode() {",
+  );
+
+  for (const handler of [createHandler, reconcileHandler]) {
+    assert.ok(handler.includes("error?.status === 409"));
+    assert.ok(handler.includes("error.response?.task"));
+    assert.ok(handler.includes("taskViewState.currentProject = error.response.task"));
+    assert.ok(handler.includes("renderOperationBatchFromTask(taskViewState.currentProject)"));
+    assert.ok(handler.includes("renderProjectWorkflow("));
+  }
+});
+
+test("operation batch reconciliation only calls its API and applies a persisted task from 409", async () => {
+  const originalTask = {
+    taskId: "project-a",
+    config: { operationBatch: { status: "reconciliation_required" } },
+  };
+  const persistedTask = {
+    taskId: "project-a",
+    config: { operationBatch: { status: "reconciliation_required", errorMessage: "未找到唯一批次" } },
+  };
+  const taskViewState = { currentProjectId: "project-a", currentProject: originalTask };
+  const requestedUrls = [];
+  const renderedTasks = [];
+  const renderedWorkflows = [];
+  const operationBatchReconcileBtn = { disabled: false };
+  const error = Object.assign(new Error("未找到唯一批次"), {
+    status: 409,
+    response: { task: persistedTask },
+  });
+  const reconcileProjectOperationBatch = compileInlineFunction(
+    "      async function reconcileProjectOperationBatch() {",
+    "\n      async function recordProjectOperationBatchCode() {",
+    {
+      taskViewState,
+      fetchJson: async (url) => {
+        requestedUrls.push(url);
+        throw error;
+      },
+      isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+      renderOperationBatchFromTask: (task) => renderedTasks.push(task),
+      renderProjectWorkflow: (task, workflow) => renderedWorkflows.push({ task, workflow }),
+      operationBatchWorkflowAfterTask: () => ({ steps: { batch: { status: "reconciliation_required" } } }),
+      projectOperationBatchState: { textContent: "" },
+      operationBatchReconcileBtn,
+      updateOperationBatchActions: () => {},
+    },
+  );
+
+  await assert.rejects(reconcileProjectOperationBatch(), /未找到唯一批次/);
+  assert.deepEqual(requestedUrls, ["/api/tasks/project-a/operation-batch/reconcile"]);
+  assert.strictEqual(taskViewState.currentProject, persistedTask);
+  assert.deepEqual(renderedTasks, [persistedTask]);
+  assert.equal(renderedWorkflows.at(-1).workflow.steps.batch.status, "reconciliation_required");
+});
+
+test("successful operation batch reconciliation refreshes the complete server workflow", async () => {
+  const originalTask = {
+    taskId: "project-a",
+    config: { operationBatch: { status: "reconciliation_required" } },
+  };
+  const reconciledTask = {
+    taskId: "project-a",
+    config: { operationBatchCode: "EZT260003", operationBatch: { code: "EZT260003" } },
+  };
+  const taskViewState = { currentProjectId: "project-a", currentProject: originalTask };
+  const loadedTasks = [];
+  const reconcileProjectOperationBatch = compileInlineFunction(
+    "      async function reconcileProjectOperationBatch() {",
+    "\n      async function recordProjectOperationBatchCode() {",
+    {
+      taskViewState,
+      fetchJson: async () => ({ task: reconciledTask, operationBatchCode: "EZT260003" }),
+      isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+      renderOperationBatchFromTask: () => {},
+      renderProjectWorkflow: () => {},
+      operationBatchWorkflowAfterTask: () => ({ steps: { batch: { status: "success" } } }),
+      loadProjectOperationBatchDraft: async (task) => loadedTasks.push(task),
+      projectOperationBatchState: { textContent: "" },
+      operationBatchReconcileBtn: { disabled: false },
+      updateOperationBatchActions: () => {},
+    },
+  );
+
+  await reconcileProjectOperationBatch();
+
+  assert.deepEqual(loadedTasks, [reconciledTask]);
+});
+
+test("operation batch completion checks use strict codes in create, render, and workflow loading", () => {
+  const createHandler = sourceBetween(
+    "      async function createProjectOperationBatch() {",
+    "\n      async function reconcileProjectOperationBatch() {",
+  );
+  const renderHandler = sourceBetween(
+    "      function renderOperationBatchFromTask(task = {}) {",
+    "\n      function isCurrentProject(taskId) {",
+  );
+  const loadHandler = sourceBetween(
+    "      async function loadProjectOperationBatchDraft(task = taskViewState.currentProject) {",
+    "\n      async function createProjectOperationBatch() {",
+  );
+
+  assert.ok(createHandler.includes("operationBatchCodeIsValid"));
+  assert.ok(renderHandler.includes("operationBatchCodeIsValid"));
+  assert.ok(loadHandler.includes("operationBatchCodeIsValid"));
 });
 
 test("candidate page loads and preselects task-scoped sessions", () => {

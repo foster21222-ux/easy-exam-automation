@@ -6207,7 +6207,7 @@
           <dialog class="account-editor-modal operation-detail-modal" id="operationDetailModal" aria-labelledby="operationDetailTitle" aria-describedby="operationDetailNote">
             <div class="account-editor-head"><div><h2 class="account-editor-title" id="operationDetailTitle">运控任务详情</h2><div class="settings-note" id="operationDetailNote">查看当前任务的数据来源和执行参数。</div></div><button class="account-editor-close" id="operationDetailCloseBtn" type="button" aria-label="关闭运控任务详情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
             <div class="account-editor-body">
-              <div class="operation-detail-panel" data-operation-detail="batch" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>建批次信息</h3><p class="subtitle">创建参数来自泛微业务需求，创建结果回填项目卡。</p></div><span class="workflow-source-badge fanwei">泛微</span></div><div id="projectOperationBatchDraft"></div><div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="operationBatchCreateBtn" type="button">创建未发布批次</button></div><details style="margin-top:14px;"><summary>手动补录批次代码</summary><div class="settings-grid" style="margin-top:12px;"><label class="field"><span class="field-label">运营批次代码</span><input class="field-input" id="operationBatchCodeInput" placeholder="例如 EZT260003" /><span class="task-meta">仅在自动创建失败、或已在运营控制台手工创建批次时补录。</span></label><label class="field"><span class="field-label">批次详情地址</span><input class="field-input" id="operationBatchDetailUrlInput" placeholder="可选，粘贴运营控制台详情页 URL" /></label></div><div class="view-actions" style="margin-top:12px;"><button class="btn" id="operationBatchRecordBtn" type="button">手动补录批次代码</button></div></details><div class="task-meta" style="margin-top:12px;">当前批次：<span id="projectOperationBatchDisplay">--</span></div></section></div>
+              <div class="operation-detail-panel" data-operation-detail="batch" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>建批次信息</h3><p class="subtitle">创建参数来自泛微业务需求，创建结果回填项目卡。</p></div><span class="workflow-source-badge fanwei">泛微</span></div><div id="projectOperationBatchDraft"></div><div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="operationBatchCreateBtn" type="button">创建未发布批次</button><button class="btn primary" id="operationBatchReconcileBtn" type="button" hidden>查询并同步已有批次</button></div><details style="margin-top:14px;"><summary>手动补录批次代码</summary><div class="settings-grid" style="margin-top:12px;"><label class="field"><span class="field-label">运营批次代码</span><input class="field-input" id="operationBatchCodeInput" placeholder="例如 EZT260003" /><span class="task-meta">仅在自动创建失败、或已在运营控制台手工创建批次时补录。</span></label><label class="field"><span class="field-label">批次详情地址</span><input class="field-input" id="operationBatchDetailUrlInput" placeholder="可选，粘贴运营控制台详情页 URL" /></label></div><div class="view-actions" style="margin-top:12px;"><button class="btn" id="operationBatchRecordBtn" type="button">手动补录批次代码</button></div></details><div class="task-meta" style="margin-top:12px;">当前批次：<span id="projectOperationBatchDisplay">--</span></div></section></div>
               <div class="operation-detail-panel" data-operation-detail="personnel" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>人员任务信息</h3><p class="subtitle">人员服务字段来自泛微，批次代码来自建批次结果。</p></div><span class="workflow-source-badge fanwei">泛微</span></div><div id="projectPersonnelTaskDraft"></div><div class="view-actions" style="margin-top:12px;"><button class="btn" type="button" disabled>人员任务接口待接入</button></div></section></div>
               <div class="operation-detail-panel" data-operation-detail="content" hidden><section class="operation-task-section"><div id="projectContentTaskDraft"></div><label class="field" style="margin-top:14px;"><span class="field-label">内容任务单收件人</span><input class="field-input" id="contentRequirementEmailRecipients" placeholder="收件人邮箱，多个用分号分隔" /></label><div class="view-actions" style="margin-top:10px;"><button class="btn primary" id="contentRequirementEmailSendBtn" type="button">发送内容任务单</button></div><div class="task-meta" id="contentRequirementEmailState" style="margin-top:8px;">等待发送。</div></section></div>
               <div class="operation-detail-panel" data-operation-detail="archive" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>运控归档信息</h3><p class="subtitle">泛微业务字段与项目实际执行结果合并预览。</p></div><span class="workflow-source-badge actual_result">实际执行</span></div><div id="projectOperationArchiveDraft"></div><div class="view-actions" style="margin-top:12px;"><button class="btn" type="button" disabled>运控归档接口待接入</button></div><div class="operation-task-note">运控归档是向运控系统回填执行结果；项目列表中的“归档”仅隐藏本地项目卡，两者互不替代。</div><div class="operation-detail-subsection"><h4>执行门槛</h4><p class="subtitle">字段缺失会停在待补充，不自动跨阶段提交。</p><div id="projectWorkflowGates" style="margin-top:10px;"></div></div></section></div>
@@ -6663,6 +6663,7 @@
       const projectOperationBatchDisplay = document.querySelector("#projectOperationBatchDisplay");
       const operationBatchRefreshBtn = document.querySelector("#operationBatchRefreshBtn");
       const operationBatchCreateBtn = document.querySelector("#operationBatchCreateBtn");
+      const operationBatchReconcileBtn = document.querySelector("#operationBatchReconcileBtn");
       const operationBatchRecordBtn = document.querySelector("#operationBatchRecordBtn");
       const operationBatchCodeInput = document.querySelector("#operationBatchCodeInput");
       const operationBatchDetailUrlInput = document.querySelector("#operationBatchDetailUrlInput");
@@ -6896,6 +6897,7 @@
         currentTaskId: "",
         currentProjectId: "",
         currentProject: null,
+        currentProjectWorkflow: null,
         activeProjectRequirementIndex: 0,
         projectRequirementSwitching: false,
         currentRequirementId: "",
@@ -9162,7 +9164,8 @@
       }
 
       function operationBatchDisplayId(task = {}) {
-        return task.config?.operationBatchCode || task.config?.operationBatch?.code || projectRequirementRequestId(task);
+        const code = task.config?.operationBatchCode || task.config?.operationBatch?.code || "";
+        return operationBatchCodeIsValid(code) ? code : projectRequirementRequestId(task);
       }
 
       const operationBatchFieldLabels = [
@@ -9210,6 +9213,7 @@
         ready: "可执行",
         success: "已完成",
         needs_review: "待补充",
+        reconciliation_required: "待同步",
         waiting_batch: "等待批次",
         waiting_execution: "等待执行数据",
         skipped: "无需执行",
@@ -9277,12 +9281,13 @@
       }
 
       function renderProjectWorkflow(task = {}, workflow = {}, batchDraft = {}) {
+        taskViewState.currentProjectWorkflow = workflow;
         renderProjectSources(task, workflow);
         projectWorkflowSteps.innerHTML = projectWorkflowStepMeta.map(([key, title, source, description], index) => {
           const status = workflow.steps?.[key]?.status || "waiting_batch";
           const changeNotice = projectWorkflowSourceChangeNotice(task, key);
           const connector = index < projectWorkflowStepMeta.length - 1 ? `<span class="operation-workflow-connector" aria-hidden="true"></span>` : "";
-          return `<button class="operation-workflow-step ${safeText(status)}" type="button" data-workflow-step="${safeText(key)}" aria-selected="false"><span class="operation-workflow-index">${index + 1}</span><div class="operation-workflow-step-head"><span class="operation-workflow-step-title">${safeText(title)}</span><span class="operation-workflow-step-tags">${changeNotice ? `<span class="tag amber">${safeText(changeNotice)}</span>` : ""}<span class="tag ${status === "needs_review" ? "amber" : status === "ready" || status === "success" ? "green" : ""}">${safeText(projectWorkflowStatusLabels[status] || status)}</span></span></div><p>${safeText(description)}<br>来源：${safeText(source)} · 点击查看</p>${connector}</button>`;
+          return `<button class="operation-workflow-step ${safeText(status)}" type="button" data-workflow-step="${safeText(key)}" aria-selected="false"><span class="operation-workflow-index">${index + 1}</span><div class="operation-workflow-step-head"><span class="operation-workflow-step-title">${safeText(title)}</span><span class="operation-workflow-step-tags">${changeNotice ? `<span class="tag amber">${safeText(changeNotice)}</span>` : ""}<span class="tag ${status === "needs_review" || status === "reconciliation_required" ? "amber" : status === "ready" || status === "success" ? "green" : ""}">${safeText(projectWorkflowStatusLabels[status] || status)}</span></span></div><p>${safeText(description)}<br>来源：${safeText(source)} · 点击查看</p>${connector}</button>`;
         }).join("");
         projectOperationBatchDraft.innerHTML = renderOperationBatchDraft(batchDraft);
         projectPersonnelTaskDraft.innerHTML = renderWorkflowDraft(workflow.personnelDraft);
@@ -9667,16 +9672,54 @@
         return `<div class="operation-param-list">${rows}</div>${warningHtml}`;
       }
 
+      function operationBatchCodeIsValid(value) {
+        return /^[A-Z]{3}\d{6}$/.test(String(value || "").trim());
+      }
+
+      function operationBatchNeedsReconciliation(task = {}) {
+        const batch = task?.config?.operationBatch || {};
+        const code = String(task?.config?.operationBatchCode || batch.code || "").trim();
+        if (operationBatchCodeIsValid(code)) return false;
+        if (code) return true;
+        return batch.status === "creating"
+          || batch.status === "reconciliation_required"
+          || batch.errorCode === "OPERATION_BATCH_RECONCILIATION_REQUIRED"
+          || batch.errorMessage === "创建完成，但未能从详情页读取批次代码";
+      }
+
+      function operationBatchWorkflowAfterTask(task = {}) {
+        const previous = taskViewState.currentProjectWorkflow || {};
+        const code = task?.config?.operationBatchCode || task?.config?.operationBatch?.code || "";
+        const status = operationBatchCodeIsValid(code)
+          ? "success"
+          : operationBatchNeedsReconciliation(task)
+            ? "reconciliation_required"
+            : (previous.steps?.batch?.status || "ready");
+        return {
+          ...previous,
+          steps: {
+            ...(previous.steps || {}),
+            batch: { ...(previous.steps?.batch || {}), status, code },
+          },
+        };
+      }
+
       function updateOperationBatchActions(task = taskViewState.currentProject) {
         const code = task?.config?.operationBatchCode || task?.config?.operationBatch?.code || "";
-        operationBatchCreateBtn.disabled = Boolean(code);
-        operationBatchRecordBtn.disabled = Boolean(code);
-        operationBatchCreateBtn.textContent = code ? "已创建批次" : "创建未发布批次";
+        const hasBatch = operationBatchCodeIsValid(code);
+        const needsReconciliation = operationBatchNeedsReconciliation(task);
+        operationBatchCreateBtn.disabled = hasBatch || needsReconciliation;
+        operationBatchCreateBtn.hidden = needsReconciliation;
+        operationBatchReconcileBtn.disabled = !needsReconciliation;
+        operationBatchReconcileBtn.hidden = !needsReconciliation;
+        operationBatchRecordBtn.disabled = hasBatch;
+        operationBatchCreateBtn.textContent = hasBatch ? "已创建批次" : "创建未发布批次";
       }
 
       function renderOperationBatchFromTask(task = {}) {
         const batch = task.config?.operationBatch || {};
         const code = task.config?.operationBatchCode || batch.code || "";
+        const hasBatchCode = operationBatchCodeIsValid(code);
         const contentMail = task.config?.contentRequirementEmail || {};
         projectOperationBatchDisplay.textContent = operationBatchDisplayId(task) || "--";
         operationBatchCodeInput.value = code;
@@ -9687,7 +9730,7 @@
         updateOperationBatchActions(task);
         if (batch.draft) {
           projectOperationBatchDraft.innerHTML = renderOperationBatchDraft(batch.draft);
-          projectOperationBatchState.textContent = code ? `已记录运营批次代码：${code}` : "已加载运营批次创建参数。";
+          projectOperationBatchState.textContent = hasBatchCode ? `已记录运营批次代码：${code}` : "已加载运营批次创建参数。";
         } else {
           projectOperationBatchDraft.innerHTML = `<div class="empty-state">正在生成创建参数。</div>`;
           projectOperationBatchState.textContent = "正在生成运营批次创建参数。";
@@ -9703,6 +9746,7 @@
           projectAutoConfigBtn,
           operationBatchRefreshBtn,
           operationBatchCreateBtn,
+          operationBatchReconcileBtn,
           operationBatchRecordBtn,
           contentRequirementEmailSendBtn,
           projectWechatBindingRefreshBtn,
@@ -9724,8 +9768,12 @@
         updateOperationBatchActions(taskViewState.currentProject);
         const warnings = result.batchDraft?.warnings || [];
         const batchCode = taskViewState.currentProject.config?.operationBatchCode || taskViewState.currentProject.config?.operationBatch?.code;
-        projectOperationBatchState.textContent = batchCode
+        const hasBatchCode = operationBatchCodeIsValid(batchCode);
+        const needsReconciliation = operationBatchNeedsReconciliation(taskViewState.currentProject);
+        projectOperationBatchState.textContent = hasBatchCode
           ? `已记录运营批次代码：${batchCode}；后续任务已按来源规则解锁。`
+          : needsReconciliation
+            ? "运营批次已在外部创建但结果待同步，请查询并同步已有批次，或人工补录批次代码。"
           : warnings.length
             ? "建批次参数仍有字段需要补充，人员和内容任务会等待批次完成。"
             : "建批次参数已就绪；创建批次后将解锁人员任务和内容任务。";
@@ -9735,7 +9783,7 @@
         const task = taskViewState.currentProject || {};
         const taskId = task?.taskId;
         if (!taskId) throw new Error("缺少当前项目编号");
-        if (task.config?.operationBatchCode || task.config?.operationBatch?.code) {
+        if (operationBatchCodeIsValid(task.config?.operationBatchCode || task.config?.operationBatch?.code)) {
           renderOperationBatchFromTask(task);
           projectOperationBatchState.textContent = `运营批次已创建：${task.config.operationBatchCode || task.config.operationBatch.code}`;
           return;
@@ -9753,6 +9801,53 @@
           renderOperationBatchFromTask(taskViewState.currentProject);
           projectOperationBatchState.textContent = `运营批次已创建：${result.operationBatchCode || taskViewState.currentProject.config?.operationBatchCode || "--"}`;
           await loadProjectOperationBatchDraft(taskViewState.currentProject);
+        } catch (error) {
+          if (isCurrentProject(taskId) && error?.status === 409 && error.response?.task) {
+            taskViewState.currentProject = error.response.task;
+            renderOperationBatchFromTask(taskViewState.currentProject);
+            renderProjectWorkflow(
+              taskViewState.currentProject,
+              operationBatchWorkflowAfterTask(taskViewState.currentProject),
+              taskViewState.currentProject.config?.operationBatch?.draft || {},
+            );
+          }
+          throw error;
+        } finally {
+          if (isCurrentProject(taskId)) updateOperationBatchActions(taskViewState.currentProject);
+        }
+      }
+
+      async function reconcileProjectOperationBatch() {
+        const task = taskViewState.currentProject || {};
+        const taskId = task?.taskId;
+        if (!taskId) throw new Error("缺少当前项目编号");
+        projectOperationBatchState.textContent = "正在查询并同步已有批次...";
+        operationBatchReconcileBtn.disabled = true;
+        try {
+          const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/reconcile`, {
+            method: "POST",
+          });
+          if (!isCurrentProject(taskId)) return;
+          taskViewState.currentProject = result.task || task;
+          renderOperationBatchFromTask(taskViewState.currentProject);
+          renderProjectWorkflow(
+            taskViewState.currentProject,
+            operationBatchWorkflowAfterTask(taskViewState.currentProject),
+            taskViewState.currentProject.config?.operationBatch?.draft || {},
+          );
+          await loadProjectOperationBatchDraft(taskViewState.currentProject);
+          projectOperationBatchState.textContent = `运营批次已同步：${result.operationBatchCode || taskViewState.currentProject.config?.operationBatchCode || "--"}`;
+        } catch (error) {
+          if (isCurrentProject(taskId) && error?.status === 409 && error.response?.task) {
+            taskViewState.currentProject = error.response.task;
+            renderOperationBatchFromTask(taskViewState.currentProject);
+            renderProjectWorkflow(
+              taskViewState.currentProject,
+              operationBatchWorkflowAfterTask(taskViewState.currentProject),
+              taskViewState.currentProject.config?.operationBatch?.draft || {},
+            );
+          }
+          throw error;
         } finally {
           if (isCurrentProject(taskId)) updateOperationBatchActions(taskViewState.currentProject);
         }
@@ -10241,6 +10336,7 @@
         setProjectOverviewExpanded(false);
         taskViewState.currentProjectId = projectId;
         taskViewState.currentProject = null;
+        taskViewState.currentProjectWorkflow = null;
         taskViewState.activeProjectRequirementIndex = 0;
         taskViewState.projectRequirementSwitching = false;
         setProjectActionControlsDisabled(true);
@@ -14693,6 +14789,7 @@
       });
       operationBatchRefreshBtn.addEventListener("click", () => loadProjectOperationBatchDraft().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
       operationBatchCreateBtn.addEventListener("click", () => createProjectOperationBatch().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
+      operationBatchReconcileBtn.addEventListener("click", () => reconcileProjectOperationBatch().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
       operationBatchRecordBtn.addEventListener("click", () => recordProjectOperationBatchCode().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
       contentRequirementEmailSendBtn.addEventListener("click", () => sendContentRequirementEmailFromProject().catch((error) => { contentRequirementEmailState.textContent = error.message || String(error); }));
       projectContentTaskDraft.addEventListener("change", (event) => {

@@ -108,3 +108,27 @@ test("workflow opens personnel and content after batch and archive after actual 
   assert.equal(ready.steps.content.status, "ready");
   assert.equal(ready.steps.archive.status, "ready");
 });
+
+test("workflow does not mark an unresolved external batch as creatable", () => {
+  const workflow = buildProjectWorkflow({
+    config: { operationBatch: { status: "reconciliation_required" } },
+    sessions: [],
+  }, { warnings: [] });
+
+  assert.equal(workflow.steps.batch.status, "reconciliation_required");
+});
+
+test("workflow keeps malformed non-empty batch codes pending and downstream steps locked", () => {
+  const workflow = buildProjectWorkflow({
+    config: {
+      operationBatchCode: "foo",
+      operationBatch: { status: "created_unpublished" },
+    },
+    sessions: [{ session_id: "1001" }],
+  }, { warnings: [] });
+
+  assert.equal(workflow.steps.batch.status, "reconciliation_required");
+  assert.equal(workflow.steps.personnel.status, "waiting_batch");
+  assert.equal(workflow.steps.content.status, "waiting_batch");
+  assert.equal(workflow.steps.archive.status, "waiting_execution");
+});
