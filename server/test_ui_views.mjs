@@ -860,6 +860,46 @@ test("project navigation clears stale state and disables actions until current r
   }
 });
 
+test("operation batch automation stays locked on same-project reload and clears on project switch", async () => {
+  const taskViewState = {
+    currentProjectId: "project-a",
+    currentProject: { taskId: "project-a" },
+    currentProjectWorkflow: null,
+    operationBatchAutomationRunning: true,
+  };
+  const dependencies = {
+    taskViewState,
+    fetchJson: async (url) => ({ taskId: url.includes("project-b") ? "project-b" : "project-a" }),
+    isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+    setProjectOverviewExpanded: () => {},
+    setProjectActionControlsDisabled: () => {},
+    renderProjectDetail: (task) => { taskViewState.currentProject = task; },
+    loadProjectOperationBatchDraft: async () => {},
+    loadProjectRequirementForDetail: async () => {},
+    loadProjectWechatBinding: async () => {},
+    projectOperationBatchState: { textContent: "" },
+    projectRequirementInlineState: { textContent: "" },
+    projectWechatBindingState: { textContent: "" },
+  };
+  const loadProjectDetail = compileInlineFunction(
+    "      async function loadProjectDetail(projectId) {",
+    "\n      function requirementNextAction(item = {}) {",
+    dependencies,
+  );
+
+  await loadProjectDetail("project-a");
+  assert.equal(taskViewState.operationBatchAutomationRunning, true);
+
+  await loadProjectDetail("project-b");
+  assert.equal(taskViewState.operationBatchAutomationRunning, false);
+
+  const renderProjectDetail = sourceBetween(
+    "      function renderProjectDetail(task) {",
+    "\n      async function loadProjectDetail(projectId) {",
+  );
+  assert.equal(renderProjectDetail.includes("taskViewState.operationBatchAutomationRunning = false"), false);
+});
+
 test("each asynchronous project panel loader guards shared state by task id", () => {
   const draftLoader = sourceBetween(
     "      async function loadProjectOperationBatchDraft(task = taskViewState.currentProject) {",
@@ -947,15 +987,60 @@ test("recipient status text uses raw text and manual batch recording preserves i
   assert.ok(recordBatch.includes("projectOperationBatchDraft.innerHTML = draftHtml;"));
 });
 
-test("operation batch create locks its action while the request is in flight", () => {
-  const handler = sourceBetween(
-    "      async function createProjectOperationBatch() {",
-    "\n      async function reconcileProjectOperationBatch() {",
+test("operation batch create and reconcile restore unified actions in finally", () => {
+  const handlers = [
+    sourceBetween(
+      "      async function createProjectOperationBatch() {",
+      "\n      async function reconcileProjectOperationBatch() {",
+    ),
+    sourceBetween(
+      "      async function reconcileProjectOperationBatch() {",
+      "\n      async function recordProjectOperationBatchCode() {",
+    ),
+  ];
+  for (const handler of handlers) {
+    assert.ok(handler.includes("setOperationBatchAutomationRunning(true)"));
+    assert.ok(handler.includes("try {"));
+    assert.ok(handler.includes("finally"));
+    assert.ok(handler.includes("setOperationBatchAutomationRunning(false)"));
+  }
+});
+
+test("operation batch automation disables manual recording and restores unified actions", () => {
+  const taskViewState = {
+    currentProject: { taskId: "project-a", config: {} },
+    operationBatchAutomationRunning: false,
+  };
+  const operationBatchCreateBtn = { disabled: false, hidden: false, textContent: "" };
+  const operationBatchReconcileBtn = { disabled: false, hidden: false };
+  const operationBatchRecordBtn = { disabled: false };
+  const updateOperationBatchActions = compileInlineFunction(
+    "      function updateOperationBatchActions(task = taskViewState.currentProject) {",
+    "\n      function setOperationBatchAutomationRunning",
+    {
+      taskViewState,
+      operationBatchCreateBtn,
+      operationBatchReconcileBtn,
+      operationBatchRecordBtn,
+      operationBatchCodeIsValid: () => false,
+      operationBatchNeedsReconciliation: () => false,
+    },
   );
-  assert.ok(handler.includes("operationBatchCreateBtn.disabled = true"));
-  assert.ok(handler.includes("try {"));
-  assert.ok(handler.includes("finally"));
-  assert.ok(handler.includes("updateOperationBatchActions(taskViewState.currentProject)"));
+  const setOperationBatchAutomationRunning = compileInlineFunction(
+    "      function setOperationBatchAutomationRunning(running) {",
+    "\n      function renderOperationBatchFromTask",
+    { taskViewState, updateOperationBatchActions },
+  );
+
+  setOperationBatchAutomationRunning(true);
+  assert.equal(operationBatchCreateBtn.disabled, true);
+  assert.equal(operationBatchReconcileBtn.disabled, true);
+  assert.equal(operationBatchRecordBtn.disabled, true);
+
+  setOperationBatchAutomationRunning(false);
+  assert.equal(operationBatchCreateBtn.disabled, false);
+  assert.equal(operationBatchReconcileBtn.disabled, true);
+  assert.equal(operationBatchRecordBtn.disabled, false);
 });
 
 test("operation batch actions switch legacy unresolved creation into reconciliation without a refresh", () => {
@@ -964,7 +1049,7 @@ test("operation batch actions switch legacy unresolved creation into reconciliat
   const operationBatchRecordBtn = { disabled: false };
   const updateOperationBatchActions = compileInlineFunction(
     "      function updateOperationBatchActions(task = taskViewState.currentProject) {",
-    "\n      function renderOperationBatchFromTask(task = {}) {",
+    "\n      function setOperationBatchAutomationRunning",
     {
       taskViewState: { currentProject: null },
       operationBatchCreateBtn,
@@ -1051,6 +1136,9 @@ test("operation batch create applies a persisted reconciliation task from a 409 
       projectOperationBatchState: { textContent: "" },
       operationBatchCreateBtn,
       operationBatchCodeIsValid: (code) => /^[A-Z]{3}\d{6}$/.test(String(code || "")),
+      setOperationBatchAutomationRunning: (running) => {
+        if (!running) operationBatchCreateBtn.disabled = true;
+      },
       updateOperationBatchActions: (task) => {
         operationBatchCreateBtn.disabled = task?.config?.operationBatch?.status === "reconciliation_required";
       },
@@ -1116,6 +1204,7 @@ test("operation batch reconciliation only calls its API and applies a persisted 
       operationBatchWorkflowAfterTask: () => ({ steps: { batch: { status: "reconciliation_required" } } }),
       projectOperationBatchState: { textContent: "" },
       operationBatchReconcileBtn,
+      setOperationBatchAutomationRunning: () => {},
       updateOperationBatchActions: () => {},
     },
   );
@@ -1151,6 +1240,7 @@ test("successful operation batch reconciliation refreshes the complete server wo
       loadProjectOperationBatchDraft: async (task) => loadedTasks.push(task),
       projectOperationBatchState: { textContent: "" },
       operationBatchReconcileBtn: { disabled: false },
+      setOperationBatchAutomationRunning: () => {},
       updateOperationBatchActions: () => {},
     },
   );
@@ -1190,6 +1280,7 @@ test("operation batch reconciliation does not overwrite a newly selected project
       },
       projectOperationBatchState,
       operationBatchReconcileBtn: { disabled: false },
+      setOperationBatchAutomationRunning: () => {},
       updateOperationBatchActions: () => {},
     },
   );

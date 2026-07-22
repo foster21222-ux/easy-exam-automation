@@ -54,7 +54,11 @@ test("global email and operation environment mutations require administrators", 
   assert.ok(requireAdminBlock.includes('role: "admin"'));
 });
 
-test("operation batch creation and reconciliation share a global persistent-profile guard", () => {
+test("operation batch writes use fixed-order profile and per-task guards", () => {
+  const lockHelper = serverSource.slice(
+    serverSource.indexOf("function acquireOperationBatchAutomationLocks"),
+    serverSource.indexOf("async function handleOperationBatchDraft"),
+  );
   const createHandler = serverSource.slice(
     serverSource.indexOf("async function handleOperationBatchCreate"),
     serverSource.indexOf("async function handleOperationBatchReconcile"),
@@ -63,13 +67,30 @@ test("operation batch creation and reconciliation share a global persistent-prof
     serverSource.indexOf("async function handleOperationBatchReconcile"),
     serverSource.indexOf("async function handleOperationBatchResult"),
   );
+  const resultHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchResult"),
+    serverSource.indexOf("async function readEmailSettings"),
+  );
   assert.ok(serverSource.includes("const operationBatchAutomationInFlight = new Set()"));
+  assert.ok(serverSource.includes("const operationBatchResultInFlight = new Set()"));
   assert.ok(serverSource.includes('const operationBatchAutomationLockKey = "persistent-profile"'));
+  const acquireProfile = lockHelper.indexOf("acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey)");
+  const acquireTask = lockHelper.indexOf("acquireOperationBatchCreation(operationBatchResultInFlight, taskId)");
+  const releaseBlock = lockHelper.slice(lockHelper.indexOf("return () =>"));
+  const releaseTask = releaseBlock.indexOf("releaseOperationBatchCreation(operationBatchResultInFlight, taskId)");
+  const releaseProfile = releaseBlock.indexOf("releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey)");
+  assert.ok(acquireProfile >= 0 && acquireTask > acquireProfile);
+  assert.ok(releaseTask >= 0 && releaseProfile > releaseTask);
   for (const handler of [createHandler, reconcileHandler]) {
-    assert.ok(handler.includes("acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey)"));
+    assert.ok(handler.includes("acquireOperationBatchAutomationLocks(taskId)"));
     assert.ok(handler.includes("finally"));
-    assert.ok(handler.includes("releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey)"));
+    assert.ok(handler.includes("releaseLocks()"));
+    assert.ok(handler.includes("operationBatchLockConflictResponse"));
   }
+  assert.ok(resultHandler.includes("acquireOperationBatchCreation(operationBatchResultInFlight, taskId)"));
+  assert.ok(resultHandler.includes("releaseOperationBatchCreation(operationBatchResultInFlight, taskId)"));
+  assert.equal(resultHandler.includes("operationBatchAutomationInFlight"), false);
+  assert.ok(resultHandler.includes("operationBatchLockConflictResponse"));
 });
 
 test("operation batch creation blocks tasks that require reconciliation", () => {
@@ -103,8 +124,13 @@ test("operation batch reconciliation persists its stable state and audit event",
   assert.ok(reconcileHandler.includes('eventType: "operation_batch_reconciled"'));
   assert.ok(reconcileHandler.includes('status: "reconciliation_required"'));
   assert.ok(reconcileHandler.includes("OPERATION_BATCH_RECONCILIATION_REQUIRED"));
-  const fallbackIndex = reconcileHandler.indexOf("let pendingTask = task");
-  const guardedReadIndex = reconcileHandler.indexOf('pendingTask = await runTaskState("get", { taskId }) || task');
+  const startWriteIndex = reconcileHandler.indexOf('await runTaskState("update_config"');
+  const runnerIndex = reconcileHandler.indexOf("await runOperationBatchReconciliation");
+  assert.ok(startWriteIndex >= 0 && startWriteIndex < runnerIndex);
+  assert.match(reconcileHandler.slice(startWriteIndex, runnerIndex), /operationBatch:\s*{[\s\S]*draft,[\s\S]*status:\s*"reconciling"/);
+  assert.match(reconcileHandler, /operationBatch:\s*{\s*\.\.\.pendingCurrent,\s*draft,\s*status:\s*"reconciliation_required"/s);
+  const fallbackIndex = reconcileHandler.indexOf("let pendingTask = lockedTask");
+  const guardedReadIndex = reconcileHandler.indexOf('pendingTask = await runTaskState("get", { taskId }) || lockedTask');
   const pendingWriteIndex = reconcileHandler.indexOf('await runTaskState("update_config"', guardedReadIndex);
   assert.ok(fallbackIndex >= 0 && guardedReadIndex > fallbackIndex && pendingWriteIndex > guardedReadIndex);
   assert.ok(reconcileHandler.slice(fallbackIndex, pendingWriteIndex).includes("catch {}"));
@@ -119,6 +145,41 @@ test("manual operation batch results force a recorded audit event", () => {
   assert.ok(resultHandler.includes('eventType: "operation_batch_recorded"'));
   assert.ok(resultHandler.indexOf("...payload") < resultHandler.indexOf('eventType: "operation_batch_recorded"'));
   assert.ok(resultHandler.includes("return badRequest"));
+  assert.ok(resultHandler.includes("persistOperationBatchResult"));
+});
+
+test("all operation batch result paths resolve against a fresh task without last-writer overwrite", () => {
+  const persistenceHelper = serverSource.slice(
+    serverSource.indexOf("async function persistOperationBatchResult"),
+    serverSource.indexOf("async function handleOperationBatchDraft"),
+  );
+  assert.ok(persistenceHelper.includes("resolveOperationBatchResultWrite(task, result)"));
+  assert.ok(persistenceHelper.includes('resolution.status === "conflict"'));
+  assert.ok(persistenceHelper.includes('resolution.status === "idempotent"'));
+  assert.ok(persistenceHelper.includes('await runTaskState("update_config"'));
+
+  for (const [start, end, lockCall] of [
+    ["async function handleOperationBatchCreate", "async function handleOperationBatchReconcile", "acquireOperationBatchAutomationLocks(taskId)"],
+    ["async function handleOperationBatchReconcile", "async function handleOperationBatchResult", "acquireOperationBatchAutomationLocks(taskId)"],
+    ["async function handleOperationBatchResult", "async function readEmailSettings", "acquireOperationBatchCreation(operationBatchResultInFlight, taskId)"],
+  ]) {
+    const handler = serverSource.slice(serverSource.indexOf(start), serverSource.indexOf(end));
+    const lockIndex = handler.indexOf(lockCall);
+    const freshIndex = handler.indexOf('await runTaskState("get", { taskId })', lockIndex);
+    assert.ok(lockIndex >= 0 && freshIndex > lockIndex);
+    assert.ok(handler.includes("persistOperationBatchResult"));
+    assert.ok(handler.includes("saved.status === \"conflict\""));
+    assert.ok(handler.includes("task: saved.task"));
+  }
+
+  const reconcileHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchReconcile"),
+    serverSource.indexOf("async function handleOperationBatchResult"),
+  );
+  const reconcileFreshIndex = reconcileHandler.indexOf('lockedTask = await runTaskState("get", { taskId })');
+  const pendingDecisionIndex = reconcileHandler.indexOf("if (!operationBatchNeedsReconciliation(lockedTask))");
+  const runnerIndex = reconcileHandler.indexOf("await runOperationBatchReconciliation");
+  assert.ok(reconcileFreshIndex >= 0 && pendingDecisionIndex > reconcileFreshIndex && runnerIndex > pendingDecisionIndex);
 });
 
 test("server listen host can be configured for LAN deployment", () => {

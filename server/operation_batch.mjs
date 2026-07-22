@@ -168,6 +168,30 @@ export function applyOperationBatchResult(task = {}, result = {}) {
   };
 }
 
+export function resolveOperationBatchResultWrite(task = {}, result = {}) {
+  const operationBatchCode = text(result.operationBatchCode || result.code);
+  if (!operationBatchCode) throw new Error("缺少运营批次代码");
+  if (!operationBatchCodeIsValid(operationBatchCode)) throw new Error("运营批次代码格式不合法");
+  const existingCodes = [
+    text(task.config?.operationBatchCode),
+    text(task.config?.operationBatch?.code),
+  ];
+  const existingOperationBatchCode = existingCodes.find(operationBatchCodeIsValid)
+    || firstNonEmpty(...existingCodes);
+  if (operationBatchCodeIsValid(existingOperationBatchCode)) {
+    return {
+      status: existingOperationBatchCode === operationBatchCode ? "idempotent" : "conflict",
+      operationBatchCode,
+      existingOperationBatchCode,
+    };
+  }
+  return {
+    status: "apply",
+    operationBatchCode,
+    patch: applyOperationBatchResult(task, result),
+  };
+}
+
 export function operationBatchCodeIsValid(value) {
   return /^[A-Z]{3}\d{6}$/.test(text(value));
 }

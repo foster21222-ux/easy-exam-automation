@@ -9,6 +9,7 @@ import {
   operationBatchDraftForReconciliation,
   operationBatchFailureState,
   operationBatchNeedsReconciliation,
+  resolveOperationBatchResultWrite,
 } from "./operation_batch.mjs";
 import {
   OPERATION_BATCH_RECONCILIATION_REQUIRED,
@@ -246,6 +247,58 @@ test("applyOperationBatchResult records the requested reconciliation audit event
   });
 
   assert.equal(patch.operationBatch.events[0].type, "operation_batch_reconciled");
+});
+
+test("operation batch result writes apply once, return same-code idempotency, and reject different codes", () => {
+  const task = {
+    config: {
+      operationBatchCode: "EZT260003",
+      operationBatch: {
+        code: "EZT260003",
+        events: [{ type: "operation_batch_recorded", code: "EZT260003" }],
+      },
+    },
+  };
+
+  const same = resolveOperationBatchResultWrite(task, {
+    operationBatchCode: "EZT260003",
+    eventType: "operation_batch_reconciled",
+  });
+  assert.deepEqual(same, {
+    status: "idempotent",
+    operationBatchCode: "EZT260003",
+    existingOperationBatchCode: "EZT260003",
+  });
+  assert.equal(task.config.operationBatch.events.length, 1);
+
+  const conflict = resolveOperationBatchResultWrite(task, {
+    operationBatchCode: "QTT260007",
+    eventType: "operation_batch_reconciled",
+  });
+  assert.deepEqual(conflict, {
+    status: "conflict",
+    operationBatchCode: "QTT260007",
+    existingOperationBatchCode: "EZT260003",
+  });
+  assert.equal(task.config.operationBatch.events.length, 1);
+
+  const nestedConflict = resolveOperationBatchResultWrite({
+    config: {
+      operationBatchCode: "legacy-invalid",
+      operationBatch: { code: "EZT260003", events: [] },
+    },
+  }, { operationBatchCode: "QTT260007" });
+  assert.equal(nestedConflict.status, "conflict");
+  assert.equal(nestedConflict.existingOperationBatchCode, "EZT260003");
+
+  const fresh = resolveOperationBatchResultWrite({ config: {} }, {
+    operationBatchCode: "QTT260007",
+    eventType: "operation_batch_reconciled",
+  });
+  assert.equal(fresh.status, "apply");
+  assert.equal(fresh.operationBatchCode, "QTT260007");
+  assert.equal(fresh.patch.operationBatch.events.length, 1);
+  assert.equal(fresh.patch.operationBatch.events[0].type, "operation_batch_reconciled");
 });
 
 test("operation batch codes require three uppercase letters and six digits", () => {

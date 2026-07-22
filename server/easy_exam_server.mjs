@@ -52,13 +52,13 @@ import {
 import { handleRequirementRequest } from "./requirement_request_api.mjs";
 import {
   acquireOperationBatchCreation,
-  applyOperationBatchResult,
   buildOperationBatchDraft,
   operationBatchCodeIsValid,
   operationBatchDraftForReconciliation,
   operationBatchFailureState,
   operationBatchNeedsReconciliation,
   releaseOperationBatchCreation,
+  resolveOperationBatchResultWrite,
 } from "./operation_batch.mjs";
 import {
   checkOperationConsoleAutomationEnvironment,
@@ -5344,7 +5344,42 @@ function operationBatchDraftOverridesFromTask(task = {}) {
 }
 
 const operationBatchAutomationInFlight = new Set();
+const operationBatchResultInFlight = new Set();
 const operationBatchAutomationLockKey = "persistent-profile";
+
+function acquireOperationBatchAutomationLocks(taskId) {
+  acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+  try {
+    acquireOperationBatchCreation(operationBatchResultInFlight, taskId);
+  } catch (error) {
+    releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+    throw error;
+  }
+  return () => {
+    releaseOperationBatchCreation(operationBatchResultInFlight, taskId);
+    releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+  };
+}
+
+async function operationBatchLockConflictResponse(taskId, task, res, error) {
+  let currentTask = task;
+  try {
+    currentTask = await runTaskState("get", { taskId }) || task;
+  } catch {}
+  return json(res, error?.status || 409, {
+    error: error instanceof Error ? error.message : String(error),
+    task: currentTask,
+  });
+}
+
+async function persistOperationBatchResult(taskId, task, result) {
+  const resolution = resolveOperationBatchResultWrite(task, result);
+  if (resolution.status === "conflict" || resolution.status === "idempotent") {
+    return { ...resolution, task };
+  }
+  const updated = await runTaskState("update_config", { taskId, config: resolution.patch });
+  return { ...resolution, task: updated };
+}
 
 async function handleOperationBatchDraft(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
@@ -5396,10 +5431,34 @@ async function handleOperationBatchCreate(taskId, req, res) {
   if (missing.length) {
     return badRequest(res, `批次草稿仍有缺失字段：${missing.join("；")}`);
   }
-  acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
-  let externalBatchConfirmed = false;
+  let releaseLocks;
   try {
-    const current = task.config?.operationBatch || {};
+    releaseLocks = acquireOperationBatchAutomationLocks(taskId);
+  } catch (error) {
+    return await operationBatchLockConflictResponse(taskId, task, res, error);
+  }
+  let externalBatchConfirmed = false;
+  let lockedTask = task;
+  try {
+    lockedTask = await runTaskState("get", { taskId }) || task;
+    const lockedCode = lockedTask.config?.operationBatchCode || lockedTask.config?.operationBatch?.code || "";
+    if (operationBatchCodeIsValid(lockedCode)) {
+      return json(res, 200, {
+        ok: true,
+        task: lockedTask,
+        operationBatch: lockedTask.config?.operationBatch || {},
+        operationBatchCode: lockedCode,
+        skipped: "operation_batch_already_created",
+      });
+    }
+    if (operationBatchNeedsReconciliation(lockedTask)) {
+      return json(res, 409, {
+        error: "运营批次创建结果待同步，请先执行批次对账。",
+        errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
+        task: lockedTask,
+      });
+    }
+    const current = lockedTask.config?.operationBatch || {};
     await runTaskState("update_config", {
       taskId,
       config: {
@@ -5417,17 +5476,28 @@ async function handleOperationBatchCreate(taskId, req, res) {
       allowTaskMismatch: process.env.OPERATION_CONSOLE_ALLOW_TEST_TASK_MISMATCH === "1",
     });
     externalBatchConfirmed = true;
-    const freshTask = await runTaskState("get", { taskId });
-    const patch = applyOperationBatchResult(freshTask, {
+    const freshTask = await runTaskState("get", { taskId }) || lockedTask;
+    const saved = await persistOperationBatchResult(taskId, freshTask, {
       ...created,
       eventType: "operation_batch_created",
     });
-    const updated = await runTaskState("update_config", { taskId, config: patch });
-    return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
+    if (saved.status === "conflict") {
+      return json(res, 409, {
+        error: `运营批次代码冲突：当前为 ${saved.existingOperationBatchCode}，本次为 ${saved.operationBatchCode}`,
+        task: saved.task,
+      });
+    }
+    return json(res, 200, {
+      ok: true,
+      task: saved.task,
+      operationBatch: saved.task.config?.operationBatch || {},
+      operationBatchCode: saved.operationBatchCode,
+      ...(saved.status === "idempotent" ? { skipped: "operation_batch_result_already_recorded" } : {}),
+    });
   } catch (error) {
-    let failedTask = task;
+    let failedTask = lockedTask;
     try {
-      failedTask = await runTaskState("get", { taskId }) || task;
+      failedTask = await runTaskState("get", { taskId }) || lockedTask;
     } catch {}
     const failedCurrent = failedTask.config?.operationBatch || {};
     const failure = operationBatchFailureState(error, externalBatchConfirmed);
@@ -5444,7 +5514,7 @@ async function handleOperationBatchCreate(taskId, req, res) {
     });
     return json(res, error?.status || 500, { error: error instanceof Error ? error.message : String(error), task: updated });
   } finally {
-    releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+    releaseLocks();
   }
 }
 
@@ -5466,9 +5536,45 @@ async function handleOperationBatchReconcile(taskId, req, res) {
       error: "运营控制台浏览器自动化未启用。请先确认测试环境已登录，并设置 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 后重启服务。",
     });
   }
-  const draft = operationBatchDraftForReconciliation(task);
-  acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+  let draft = operationBatchDraftForReconciliation(task);
+  let releaseLocks;
   try {
+    releaseLocks = acquireOperationBatchAutomationLocks(taskId);
+  } catch (error) {
+    return await operationBatchLockConflictResponse(taskId, task, res, error);
+  }
+  let lockedTask = task;
+  try {
+    lockedTask = await runTaskState("get", { taskId }) || task;
+    const lockedCode = lockedTask.config?.operationBatchCode || lockedTask.config?.operationBatch?.code || "";
+    if (operationBatchCodeIsValid(lockedCode)) {
+      return json(res, 200, {
+        ok: true,
+        task: lockedTask,
+        operationBatch: lockedTask.config?.operationBatch || {},
+        operationBatchCode: lockedCode,
+        skipped: "operation_batch_already_created",
+      });
+    }
+    if (!operationBatchNeedsReconciliation(lockedTask)) {
+      return json(res, 409, {
+        error: "当前运营批次没有待同步结果，请先创建批次。",
+        task: lockedTask,
+      });
+    }
+    draft = operationBatchDraftForReconciliation(lockedTask);
+    const current = lockedTask.config?.operationBatch || {};
+    await runTaskState("update_config", {
+      taskId,
+      config: {
+        operationBatch: {
+          ...current,
+          draft,
+          status: "reconciling",
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
     const reconciled = await runOperationBatchReconciliation(draft, {
       baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
       userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
@@ -5476,17 +5582,28 @@ async function handleOperationBatchReconcile(taskId, req, res) {
     if (!reconciled) {
       throw new Error("批次列表未找到唯一匹配的运营批次代码");
     }
-    const freshTask = await runTaskState("get", { taskId });
-    const patch = applyOperationBatchResult(freshTask, {
+    const freshTask = await runTaskState("get", { taskId }) || lockedTask;
+    const saved = await persistOperationBatchResult(taskId, freshTask, {
       ...reconciled,
       eventType: "operation_batch_reconciled",
     });
-    const updated = await runTaskState("update_config", { taskId, config: patch });
-    return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
+    if (saved.status === "conflict") {
+      return json(res, 409, {
+        error: `运营批次代码冲突：当前为 ${saved.existingOperationBatchCode}，本次为 ${saved.operationBatchCode}`,
+        task: saved.task,
+      });
+    }
+    return json(res, 200, {
+      ok: true,
+      task: saved.task,
+      operationBatch: saved.task.config?.operationBatch || {},
+      operationBatchCode: saved.operationBatchCode,
+      ...(saved.status === "idempotent" ? { skipped: "operation_batch_result_already_recorded" } : {}),
+    });
   } catch (error) {
-    let pendingTask = task;
+    let pendingTask = lockedTask;
     try {
-      pendingTask = await runTaskState("get", { taskId }) || task;
+      pendingTask = await runTaskState("get", { taskId }) || lockedTask;
     } catch {}
     const pendingCurrent = pendingTask.config?.operationBatch || {};
     const updated = await runTaskState("update_config", {
@@ -5494,6 +5611,7 @@ async function handleOperationBatchReconcile(taskId, req, res) {
       config: {
         operationBatch: {
           ...pendingCurrent,
+          draft,
           status: "reconciliation_required",
           errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
           errorMessage: error instanceof Error ? error.message : String(error),
@@ -5507,7 +5625,7 @@ async function handleOperationBatchReconcile(taskId, req, res) {
       task: updated,
     });
   } finally {
-    releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+    releaseLocks();
   }
 }
 
@@ -5515,17 +5633,38 @@ async function handleOperationBatchResult(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
   const payload = parseJsonSafe(await readBody(req)) || {};
-  let patch;
   try {
-    patch = applyOperationBatchResult(task, {
-      ...payload,
-      eventType: "operation_batch_recorded",
-    });
+    acquireOperationBatchCreation(operationBatchResultInFlight, taskId);
   } catch (error) {
-    return badRequest(res, error instanceof Error ? error.message : String(error));
+    return await operationBatchLockConflictResponse(taskId, task, res, error);
   }
-  const updated = await runTaskState("update_config", { taskId, config: patch });
-  return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
+  try {
+    const freshTask = await runTaskState("get", { taskId }) || task;
+    let saved;
+    try {
+      saved = await persistOperationBatchResult(taskId, freshTask, {
+        ...payload,
+        eventType: "operation_batch_recorded",
+      });
+    } catch (error) {
+      return badRequest(res, error instanceof Error ? error.message : String(error));
+    }
+    if (saved.status === "conflict") {
+      return json(res, 409, {
+        error: `运营批次代码冲突：当前为 ${saved.existingOperationBatchCode}，本次为 ${saved.operationBatchCode}`,
+        task: saved.task,
+      });
+    }
+    return json(res, 200, {
+      ok: true,
+      task: saved.task,
+      operationBatch: saved.task.config?.operationBatch || {},
+      operationBatchCode: saved.operationBatchCode,
+      ...(saved.status === "idempotent" ? { skipped: "operation_batch_result_already_recorded" } : {}),
+    });
+  } finally {
+    releaseOperationBatchCreation(operationBatchResultInFlight, taskId);
+  }
 }
 
 async function readEmailSettings() {

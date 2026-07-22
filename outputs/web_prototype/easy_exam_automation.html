@@ -6898,6 +6898,7 @@
         currentProjectId: "",
         currentProject: null,
         currentProjectWorkflow: null,
+        operationBatchAutomationRunning: false,
         activeProjectRequirementIndex: 0,
         projectRequirementSwitching: false,
         currentRequirementId: "",
@@ -9708,12 +9709,18 @@
         const code = task?.config?.operationBatchCode || task?.config?.operationBatch?.code || "";
         const hasBatch = operationBatchCodeIsValid(code);
         const needsReconciliation = operationBatchNeedsReconciliation(task);
-        operationBatchCreateBtn.disabled = hasBatch || needsReconciliation;
+        const automationRunning = Boolean(taskViewState.operationBatchAutomationRunning);
+        operationBatchCreateBtn.disabled = hasBatch || needsReconciliation || automationRunning;
         operationBatchCreateBtn.hidden = needsReconciliation;
-        operationBatchReconcileBtn.disabled = !needsReconciliation;
+        operationBatchReconcileBtn.disabled = !needsReconciliation || automationRunning;
         operationBatchReconcileBtn.hidden = !needsReconciliation;
-        operationBatchRecordBtn.disabled = hasBatch;
+        operationBatchRecordBtn.disabled = hasBatch || automationRunning;
         operationBatchCreateBtn.textContent = hasBatch ? "已创建批次" : "创建未发布批次";
+      }
+
+      function setOperationBatchAutomationRunning(running) {
+        taskViewState.operationBatchAutomationRunning = Boolean(running);
+        updateOperationBatchActions(taskViewState.currentProject);
       }
 
       function renderOperationBatchFromTask(task = {}) {
@@ -9789,7 +9796,7 @@
           return;
         }
         projectOperationBatchState.textContent = "正在打开运营控制台创建未发布批次...";
-        operationBatchCreateBtn.disabled = true;
+        setOperationBatchAutomationRunning(true);
         try {
           const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/create`, {
             method: "POST",
@@ -9813,7 +9820,7 @@
           }
           throw error;
         } finally {
-          if (isCurrentProject(taskId)) updateOperationBatchActions(taskViewState.currentProject);
+          if (isCurrentProject(taskId)) setOperationBatchAutomationRunning(false);
         }
       }
 
@@ -9822,7 +9829,7 @@
         const taskId = task?.taskId;
         if (!taskId) throw new Error("缺少当前项目编号");
         projectOperationBatchState.textContent = "正在查询并同步已有批次...";
-        operationBatchReconcileBtn.disabled = true;
+        setOperationBatchAutomationRunning(true);
         try {
           const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/reconcile`, {
             method: "POST",
@@ -9850,7 +9857,7 @@
           }
           throw error;
         } finally {
-          if (isCurrentProject(taskId)) updateOperationBatchActions(taskViewState.currentProject);
+          if (isCurrentProject(taskId)) setOperationBatchAutomationRunning(false);
         }
       }
 
@@ -10335,7 +10342,11 @@
 
       async function loadProjectDetail(projectId) {
         setProjectOverviewExpanded(false);
+        const previousProjectId = taskViewState.currentProjectId;
         taskViewState.currentProjectId = projectId;
+        if (String(previousProjectId || "") !== String(projectId || "")) {
+          taskViewState.operationBatchAutomationRunning = false;
+        }
         taskViewState.currentProject = null;
         taskViewState.currentProjectWorkflow = null;
         taskViewState.activeProjectRequirementIndex = 0;
