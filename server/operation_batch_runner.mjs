@@ -28,6 +28,8 @@ const operationFieldIds = new Map([
   ["备注", "memo"],
 ]);
 
+export const OPERATION_BATCH_RECONCILIATION_REQUIRED = "OPERATION_BATCH_RECONCILIATION_REQUIRED";
+
 export function operationFieldId(label) {
   return operationFieldIds.get(text(label)) || "";
 }
@@ -115,6 +117,25 @@ export function operationDropdownValueCandidates(label, value) {
 
 export function operationBatchCodeFromText(value) {
   return text(value).match(/\b[A-Z]{3}\d{6}\b/)?.[0] || "";
+}
+
+export function operationBatchListResultFromRows(rowTexts, batchName, detailUrl) {
+  const normalizedName = text(batchName);
+  if (!normalizedName) return null;
+  const codes = [...new Set((rowTexts || [])
+    .filter((rowText) => String(rowText ?? "").split(/\r?\n/).some((line) => text(line) === normalizedName))
+    .map(operationBatchCodeFromText)
+    .filter(Boolean))];
+  if (codes.length === 0) return null;
+  if (codes.length > 1) {
+    throw new Error(`批次列表中找到多个批次代码：${codes.join("、")}`);
+  }
+  return {
+    operationBatchCode: codes[0],
+    batchGuid: "",
+    detailUrl: text(detailUrl),
+    status: "created_unpublished",
+  };
 }
 
 async function clickByText(page, textValue) {
@@ -289,15 +310,38 @@ async function findCreatedBatchFromList(page, batchListUrl, batchName) {
   await searchInput.fill(normalizedName);
   await searchInput.press("Enter");
   await page.waitForFunction((expectedName) => document.body?.innerText?.includes(expectedName), normalizedName, { timeout: 30000 });
-  const bodyText = await page.locator("body").innerText();
-  const code = operationBatchCodeFromText(bodyText);
-  if (!code) return null;
-  return {
-    operationBatchCode: code,
-    batchGuid: "",
-    detailUrl: page.url(),
-    status: "created_unpublished",
-  };
+  const rowTexts = await page.locator("tbody tr").allInnerTexts();
+  return operationBatchListResultFromRows(rowTexts, normalizedName, page.url());
+}
+
+export async function resolveSubmittedOperationBatch(page, options = {}) {
+  const detailCodeWaitMs = Number(options.detailCodeWaitMs || 60000);
+  try {
+    await page.waitForFunction(
+      () => /\b[A-Z]{3}\d{6}\b/.test(document.body?.innerText || ""),
+      null,
+      { timeout: detailCodeWaitMs },
+    );
+    const code = operationBatchCodeFromText(await page.locator("body").innerText());
+    if (code) {
+      const detailUrl = page.url();
+      return {
+        operationBatchCode: code,
+        batchGuid: new URL(detailUrl).searchParams.get("batch_guid") || "",
+        detailUrl,
+        status: "created_unpublished",
+      };
+    }
+  } catch {}
+  const findFromList = options.findFromList || ((batchListUrl, batchName) => findCreatedBatchFromList(page, batchListUrl, batchName));
+  return await findFromList(options.batchListUrl, options.batchName);
+}
+
+function reconciliationRequiredError(error) {
+  const wrapped = error instanceof Error ? error : new Error(String(error));
+  wrapped.code = OPERATION_BATCH_RECONCILIATION_REQUIRED;
+  wrapped.status = 409;
+  return wrapped;
 }
 
 export async function runOperationBatchCreation(draft, options = {}) {
@@ -315,6 +359,7 @@ export async function runOperationBatchCreation(draft, options = {}) {
     viewport: null,
   });
   const page = context.pages()[0] || await context.newPage();
+  let submissionStarted = false;
   try {
     const batchListUrl = `${baseUrl.replace(/\/$/, "")}/batch/batchList`;
     await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
@@ -348,23 +393,41 @@ export async function runOperationBatchCreation(draft, options = {}) {
     await chooseDropdownValue(page, "结算依据", draftValue(draft, "billingBasis"));
     await fillInputNearLabel(page, "备注", draftValue(draft, "remark"));
     await page.getByRole("button", { name: /下一步/ }).click();
+    submissionStarted = true;
     await page.getByRole("button", { name: /完\s*成/ }).click();
-    await page.waitForURL(/batchDetail/, { timeout: 60000 }).catch(async () => {
-      const found = await findCreatedBatchFromList(page, batchListUrl, draftValue(draft, "batchName"));
-      if (found) return found;
-      throw new Error("创建已提交，但未跳转详情页，也未能在批次列表按批次名称找到新批次");
+    return await resolveSubmittedOperationBatch(page, {
+      ...options,
+      batchListUrl,
+      batchName: draftValue(draft, "batchName"),
     });
-    const bodyText = await page.locator("body").innerText();
-    const code = operationBatchCodeFromText(bodyText);
-    if (!code) throw new Error("创建完成，但未能从详情页读取批次代码");
-    const detailUrl = page.url();
-    const batchGuid = new URL(detailUrl).searchParams.get("batch_guid") || "";
-    return {
-      operationBatchCode: code,
-      batchGuid,
-      detailUrl,
-      status: "created_unpublished",
-    };
+  } catch (error) {
+    if (submissionStarted) throw reconciliationRequiredError(error);
+    throw error;
+  } finally {
+    await context.close();
+  }
+}
+
+export async function runOperationBatchReconciliation(draft, options = {}) {
+  const { chromium } = await import("playwright").catch((error) => {
+    const message = error?.code === "ERR_MODULE_NOT_FOUND"
+      ? "未安装 Playwright，不能启动运营控制台浏览器自动化。请先执行 npm install。"
+      : (error instanceof Error ? error.message : String(error));
+    throw new Error(message);
+  });
+  const baseUrl = text(options.baseUrl || process.env.OPERATION_CONSOLE_BASE_URL || "http://172.16.18.198:8020");
+  const userDataDir = text(options.userDataDir || process.env.OPERATION_CONSOLE_USER_DATA_DIR || path.join(process.cwd(), ".easy_exam_runtime", "operation-console-profile"));
+  const headless = options.headless ?? process.env.OPERATION_CONSOLE_HEADLESS === "1";
+  const context = await chromium.launchPersistentContext(userDataDir, {
+    headless,
+    viewport: null,
+  });
+  const page = context.pages()[0] || await context.newPage();
+  try {
+    const batchListUrl = `${baseUrl.replace(/\/$/, "")}/batch/batchList`;
+    await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
+    await ensureBatchListReady(page, batchListUrl, options);
+    return await findCreatedBatchFromList(page, batchListUrl, draftValue(draft, "batchName"));
   } finally {
     await context.close();
   }

@@ -10,6 +10,7 @@ import {
   operationConsoleNeedsLogin,
   operationConsoleLoginMessage,
   operationBatchCodeFromText,
+  operationBatchListResultFromRows,
   operationConfigServiceSelections,
   operationDateTitle,
   operationDropdownValueCandidates,
@@ -20,7 +21,86 @@ import {
   operationTaskMismatchAllowed,
   operationTaskSearchInputSelector,
   operationSelectControlSelector,
+  resolveSubmittedOperationBatch,
 } from "./operation_batch_runner.mjs";
+
+function fakeDetailPageWithoutCode() {
+  return {
+    locator() {
+      return { innerText: async () => "目标项目_2026年8月" };
+    },
+    url() {
+      return "http://operation/batch/batchDetail?batch_guid=guid-1";
+    },
+    async waitForFunction() {
+      throw new Error("详情批次代码未出现");
+    },
+  };
+}
+
+function fakeDetailPageWithDelayedCode() {
+  let codeVisible = false;
+  return {
+    locator() {
+      return {
+        innerText: async () => (codeVisible ? "QTT260007\n目标项目_2026年8月" : "目标项目_2026年8月"),
+      };
+    },
+    url() {
+      return "http://operation/batch/batchDetail?batch_guid=guid-1";
+    },
+    async waitForFunction() {
+      codeVisible = true;
+    },
+  };
+}
+
+test("operation batch list result only reads the exact batch row", () => {
+  const result = operationBatchListResultFromRows([
+    "QTT260006\n其他项目_2026年8月",
+    "QTT260007\n目标项目_2026年8月",
+  ], "目标项目_2026年8月", "http://operation/batch/batchList");
+  assert.equal(result.operationBatchCode, "QTT260007");
+});
+
+test("operation batch list result rejects ambiguous exact matches", () => {
+  assert.throws(() => operationBatchListResultFromRows([
+    "QTT260007\n目标项目_2026年8月",
+    "QTT260008\n目标项目_2026年8月",
+  ], "目标项目_2026年8月", "http://operation/batch/batchList"), /多个批次代码/);
+});
+
+test("submitted batch falls back to list and preserves the lookup result", async () => {
+  const expected = {
+    operationBatchCode: "QTT260007",
+    batchGuid: "",
+    detailUrl: "http://operation/batch/batchList",
+    status: "created_unpublished",
+  };
+  const result = await resolveSubmittedOperationBatch(fakeDetailPageWithoutCode(), {
+    batchListUrl: expected.detailUrl,
+    batchName: "目标项目_2026年8月",
+    findFromList: async () => expected,
+    detailCodeWaitMs: 1,
+  });
+  assert.deepEqual(result, expected);
+});
+
+test("submitted batch uses the detail code when it appears without list lookup", async () => {
+  let listLookups = 0;
+  const result = await resolveSubmittedOperationBatch(fakeDetailPageWithDelayedCode(), {
+    batchListUrl: "http://operation/batch/batchList",
+    batchName: "目标项目_2026年8月",
+    findFromList: async () => {
+      listLookups += 1;
+      return null;
+    },
+    detailCodeWaitMs: 1,
+  });
+  assert.equal(result.operationBatchCode, "QTT260007");
+  assert.equal(result.batchGuid, "guid-1");
+  assert.equal(listLookups, 0);
+});
 
 test("buildOperationBatchDraft maps business requirement fields with explicit sources", () => {
   const task = {
