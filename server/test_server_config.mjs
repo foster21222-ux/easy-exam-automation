@@ -530,6 +530,23 @@ test("score processing exposes task endpoint and uses template exporter", () => 
   assert.ok(serverSource.includes("await convertScoreFeedbackToPdf({ inputPath: workbookFilePath, outputPath: filePath })"));
 });
 
+test("score processing automatically prepares and uploads encrypted OA seal application archive", () => {
+  assert.ok(serverSource.includes('from "./score_stamp_application.mjs"'));
+  assert.ok(serverSource.includes("createPasswordProtectedScoreArchive"));
+  assert.ok(serverSource.includes("scoreStampArchivePassword"));
+  assert.ok(serverSource.includes('process.env.SCORE_STAMP_ARCHIVE_PASSWORD || "1234"'));
+  assert.ok(serverSource.includes("tryStartScoreStampApplication(task, scoreResult, req)"));
+  assert.ok(serverSource.includes("function parseChromeJsonValue"));
+  assert.ok(serverSource.includes("parseChromeJsonValue(raw)"));
+  assert.ok(serverSource.includes("uploadFilesToChromeDevToolsFileInput"));
+  assert.ok(serverSource.includes("buildScoreStampAttachmentPrepareScript()"));
+  assert.ok(serverSource.includes("buildScoreStampApplicationSaveScript()"));
+  assert.ok(serverSource.includes("OA 成绩盖章申请页保存失败"));
+  assert.ok(serverSource.includes("saved: Boolean(saveResult.saved)"));
+  assert.ok(serverSource.includes("scoreStampApplicationMatch"));
+  assert.ok(serverSource.includes("scoreStampArchiveDownloadMatch"));
+});
+
 test("score processing fetches paged entry and score data before exporting", () => {
   assert.ok(serverSource.includes("async function fetchAllSessionEntries"));
   assert.ok(serverSource.includes("async function fetchAllSessionScores"));

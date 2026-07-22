@@ -140,6 +140,10 @@ export function chromeDevToolsListUrl(port = 9222) {
   return `http://127.0.0.1:${Number(port || 9222)}/json`;
 }
 
+export function chromeDevToolsNewTabUrl(port = 9222, targetUrl = "about:blank") {
+  return `http://127.0.0.1:${Number(port || 9222)}/json/new?${encodeURIComponent(String(targetUrl || "about:blank"))}`;
+}
+
 export function chromeDevToolsWebSocketUrl(url = "") {
   return String(url || "").replace(/^ws:\/\/localhost:/, "ws://127.0.0.1:");
 }
@@ -194,6 +198,37 @@ export async function fetchChromeDevToolsTabs({
   } catch (error) {
     if (controller.signal.aborted) throw timeoutError;
     throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function createChromeDevToolsTab({
+  url = "about:blank",
+  port = 9222,
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 15000,
+} = {}) {
+  if (typeof fetchImpl !== "function") {
+    throw new Error("当前 Node 运行环境不支持 fetch，无法连接 Chrome DevTools。");
+  }
+  const controller = new AbortController();
+  const timeoutError = new Error("Chrome DevTools 打开页面超时，请确认本机 Chrome 可用。");
+  const timer = setTimeout(() => controller.abort(timeoutError), timeoutMs);
+  const endpoint = chromeDevToolsNewTabUrl(port, url);
+  try {
+    let lastError = null;
+    for (const method of ["PUT", "GET"]) {
+      try {
+        const response = await fetchImpl(endpoint, { method, signal: controller.signal });
+        if (response?.ok) return await response.json();
+        lastError = new Error(`Chrome DevTools 打开页面失败：HTTP ${response?.status || ""}`.trim());
+      } catch (error) {
+        if (controller.signal.aborted) throw timeoutError;
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("Chrome DevTools 打开页面失败。");
   } finally {
     clearTimeout(timer);
   }
@@ -272,12 +307,24 @@ function makeWebSocketFactory() {
   return (url) => new WebSocket(url);
 }
 
+function parseChromeDevToolsJsonValue(value, fallback = {}) {
+  if (value && typeof value === "object") return value;
+  const text = String(value ?? "").trim();
+  if (!text) return fallback;
+  return JSON.parse(text);
+}
+
 async function evaluateChromeDevToolsTab({
   tab,
   expression,
   webSocketFactory,
   timeoutMs,
+  parseOutput = (value) => value,
+  port = 9222,
 } = {}) {
+  if (!isAllowedChromeDevToolsWebSocketUrl(tab?.webSocketDebuggerUrl, port)) {
+    throw new Error("Chrome DevTools WebSocket 地址不安全，已拒绝执行页面脚本。");
+  }
   const socketUrl = chromeDevToolsWebSocketUrl(tab.webSocketDebuggerUrl);
   return await new Promise((resolve, reject) => {
     const socket = webSocketFactory(socketUrl);
@@ -347,7 +394,7 @@ async function evaluateChromeDevToolsTab({
         return finish(reject, new Error(`Chrome DevTools 执行失败：${description}`));
       }
       try {
-        return finish(resolve, parseFanweiAutoReadOutput(parsed.result?.result?.value || ""));
+        return finish(resolve, parseOutput(parsed.result?.result?.value));
       } catch (error) {
         return finish(reject, error);
       }
@@ -362,6 +409,217 @@ async function evaluateChromeDevToolsTab({
       reject,
       new Error("Chrome DevTools 自动读取超时，请确认泛微单页已经打开。"),
     ), timeoutMs);
+  });
+}
+
+async function runChromeDevToolsSession({
+  tab,
+  port = 9222,
+  webSocketFactory = makeWebSocketFactory(),
+  timeoutMs = 15000,
+  run,
+} = {}) {
+  if (!isAllowedChromeDevToolsWebSocketUrl(tab?.webSocketDebuggerUrl, port)) {
+    throw new Error("Chrome DevTools WebSocket 地址不安全，已拒绝执行页面脚本。");
+  }
+  const socketUrl = chromeDevToolsWebSocketUrl(tab.webSocketDebuggerUrl);
+  return await new Promise((resolve, reject) => {
+    const socket = webSocketFactory(socketUrl);
+    const removeListeners = [];
+    const pending = new Map();
+    let nextId = 1;
+    let settled = false;
+    let timer;
+    const finish = (fn, value, { closeSocket = true } = {}) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const removeListener of removeListeners.splice(0)) {
+        try { removeListener(); } catch {}
+      }
+      for (const { reject: rejectPending } of pending.values()) {
+        try { rejectPending(new Error("Chrome DevTools 会话已关闭。")); } catch {}
+      }
+      pending.clear();
+      if (closeSocket) {
+        try { socket.close?.(); } catch {}
+      }
+      fn(value);
+    };
+    const onSocketEvent = (event, handler) => {
+      if (typeof socket.on === "function") {
+        socket.on(event, handler);
+        removeListeners.push(() => {
+          if (typeof socket.off === "function") socket.off(event, handler);
+          else socket.removeListener?.(event, handler);
+        });
+        return;
+      }
+      if (typeof socket.addEventListener === "function") {
+        socket.addEventListener(event, handler);
+        removeListeners.push(() => socket.removeEventListener?.(event, handler));
+        return;
+      }
+      const property = `on${event}`;
+      const previous = socket[property];
+      socket[property] = handler;
+      removeListeners.push(() => {
+        if (socket[property] === handler) socket[property] = previous ?? null;
+      });
+    };
+    const sendCommand = (method, params = {}) => new Promise((resolveCommand, rejectCommand) => {
+      const id = nextId++;
+      pending.set(id, { resolve: resolveCommand, reject: rejectCommand });
+      try {
+        socket.send(JSON.stringify({ id, method, params }));
+      } catch (error) {
+        pending.delete(id);
+        rejectCommand(error);
+      }
+    });
+    onSocketEvent("open", () => {
+      Promise.resolve()
+        .then(() => run(sendCommand))
+        .then((value) => finish(resolve, value))
+        .catch((error) => finish(reject, error));
+    });
+    onSocketEvent("message", (message) => {
+      let parsed = {};
+      try {
+        parsed = JSON.parse(String(message?.data ?? message));
+      } catch (error) {
+        return finish(reject, error);
+      }
+      if (!parsed.id || !pending.has(parsed.id)) return;
+      const handlers = pending.get(parsed.id);
+      pending.delete(parsed.id);
+      if (parsed.error) {
+        handlers.reject(new Error(parsed.error.message || "Chrome DevTools 执行失败"));
+      } else if (parsed.result?.exceptionDetails) {
+        const details = parsed.result.exceptionDetails;
+        const description = details.exception?.description || details.text || "页面脚本执行异常";
+        handlers.reject(new Error(`Chrome DevTools 执行失败：${description}`));
+      } else {
+        handlers.resolve(parsed.result || {});
+      }
+    });
+    onSocketEvent("error", (error) => finish(reject, error?.error || error));
+    onSocketEvent("close", () => finish(
+      reject,
+      new Error("Chrome DevTools WebSocket 在操作完成前已关闭。"),
+      { closeSocket: false },
+    ));
+    timer = setTimeout(() => finish(
+      reject,
+      new Error("Chrome DevTools 操作超时，请确认泛微页面已经打开。"),
+    ), timeoutMs);
+  });
+}
+
+export async function evaluateChromeDevToolsExpression({
+  tab,
+  expression,
+  webSocketFactory = makeWebSocketFactory(),
+  timeoutMs = 15000,
+  port = 9222,
+} = {}) {
+  return await evaluateChromeDevToolsTab({
+    tab,
+    expression,
+    webSocketFactory,
+    timeoutMs,
+    port,
+    parseOutput: (value) => value,
+  });
+}
+
+export async function uploadFilesToChromeDevToolsFileInput({
+  tab,
+  filePaths = [],
+  selector = 'input[type="file"]',
+  prepareExpression = "",
+  webSocketFactory = makeWebSocketFactory(),
+  timeoutMs = 15000,
+  port = 9222,
+} = {}) {
+  const files = (Array.isArray(filePaths) ? filePaths : [filePaths]).map((item) => String(item || "").trim()).filter(Boolean);
+  if (!files.length) throw new Error("缺少需要上传的文件路径。");
+  return await runChromeDevToolsSession({
+    tab,
+    port,
+    webSocketFactory,
+    timeoutMs,
+    run: async (send) => {
+      if (prepareExpression) {
+        await send("Runtime.evaluate", {
+          expression: prepareExpression,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+      }
+      const documentResult = await send("DOM.getDocument", { depth: -1, pierce: true });
+      const rootNodeId = documentResult.root?.nodeId;
+      if (!rootNodeId) throw new Error("无法读取 OA 页面的 DOM。");
+      let queryResult = await send("DOM.querySelector", { nodeId: rootNodeId, selector });
+      let nodeId = queryResult.nodeId;
+      if (!nodeId) {
+        const allInputs = await send("DOM.querySelectorAll", { nodeId: rootNodeId, selector: 'input[type="file"]' });
+        nodeId = Array.isArray(allInputs.nodeIds) ? allInputs.nodeIds[0] : 0;
+      }
+      if (!nodeId) {
+        return { ok: false, inputFound: false, uploaded: 0, selector };
+      }
+      await send("DOM.setFileInputFiles", { nodeId, files });
+      const expectedFileNames = files.map((filePath) => path.basename(filePath));
+      const verify = await send("Runtime.evaluate", {
+        expression: `(async () => {
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const clean = (value) => String(value ?? "").replace(/\\u00a0/g, " ").replace(/[\\t\\r\\n ]+/g, " ").trim();
+          const expectedFileNames = ${JSON.stringify(expectedFileNames)};
+          const input = document.querySelector(${JSON.stringify(selector)}) || document.querySelector('input[type="file"]');
+          if (!input) return JSON.stringify({ ok: false, fileNames: [] });
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          for (let i = 0; i < 40; i += 1) {
+            const fileNames = Array.from(input.files || []).map((file) => file.name);
+            const uploadRoot = input.closest(".wea-upload") || input.closest("[data-fieldmark]") || input.closest("td") || document;
+            const hiddenValue = String(uploadRoot.querySelector('input[type="hidden"]')?.value || "");
+            const listText = clean(Array.from(uploadRoot.querySelectorAll(".wea-upload-list, .wea-upload-list *"))
+              .map((element) => element.innerText || element.textContent)
+              .join(" "));
+            const listedFileNames = expectedFileNames.filter((fileName) => listText.includes(fileName));
+            if (fileNames.length || hiddenValue || listedFileNames.length) {
+              return JSON.stringify({
+                ok: true,
+                fileNames: fileNames.length ? fileNames : listedFileNames,
+                hiddenValue,
+                listText,
+                uploaded: Math.max(fileNames.length, listedFileNames.length, hiddenValue ? expectedFileNames.length : 0),
+              });
+            }
+            await sleep(250);
+          }
+          return JSON.stringify({ ok: false, fileNames: [], uploaded: 0 });
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      const value = verify.result?.value || "{}";
+      let parsed = {};
+      try {
+        parsed = parseChromeDevToolsJsonValue(value);
+      } catch {
+        parsed = {};
+      }
+      return {
+        ok: Boolean(parsed.ok),
+        inputFound: true,
+        uploaded: Number(parsed.uploaded || 0) || (Array.isArray(parsed.fileNames) ? parsed.fileNames.length : 0),
+        fileNames: Array.isArray(parsed.fileNames) ? parsed.fileNames : [],
+        hiddenValue: parsed.hiddenValue || "",
+        selector,
+      };
+    },
   });
 }
 
@@ -387,7 +645,14 @@ export async function runChromeDevToolsFanweiRead({
   const tabErrors = [];
   for (const tab of fanweiTabs) {
     try {
-      const result = await evaluateChromeDevToolsTab({ tab, expression, webSocketFactory, timeoutMs });
+      const result = await evaluateChromeDevToolsTab({
+        tab,
+        expression,
+        webSocketFactory,
+        timeoutMs,
+        port,
+        parseOutput: (value) => parseFanweiAutoReadOutput(value || ""),
+      });
       if (result) return result;
     } catch (error) {
       tabErrors.push(error);

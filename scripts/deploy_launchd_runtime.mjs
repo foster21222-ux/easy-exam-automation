@@ -56,7 +56,7 @@ rmSync(appDir, { recursive: true, force: true });
 mkdirSync(appDir, { recursive: true });
 
 const copied = [];
-for (const name of ["server", "scripts", "outputs", "web", "deploy", "package.json", "requirements.txt", ".env"]) {
+for (const name of ["server", "scripts", "outputs", "web", "deploy", "template", "package.json", "requirements.txt", ".env"]) {
   if (copyIfPresent(path.join(sourceDir, name), path.join(appDir, name))) copied.push(name);
 }
 symlinkSync("../runtime", path.join(appDir, ".easy_exam_runtime"), "dir");

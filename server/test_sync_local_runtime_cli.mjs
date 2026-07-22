@@ -19,11 +19,13 @@ function makeGitSource() {
   const sourceDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-sync-source-"));
   mkdirSync(path.join(sourceDir, "server"), { recursive: true });
   mkdirSync(path.join(sourceDir, "web"), { recursive: true });
+  mkdirSync(path.join(sourceDir, "template"), { recursive: true });
   writeFileSync(path.join(sourceDir, "server", "app.mjs"), "tracked-server\n");
   writeFileSync(path.join(sourceDir, "web", "router.mjs"), "tracked-web\n");
+  writeFileSync(path.join(sourceDir, "template", "exam.xlsx"), "tracked-template\n");
   writeFileSync(path.join(sourceDir, "scratch.txt"), "untracked\n");
   execFileSync("git", ["init"], { cwd: sourceDir, stdio: "ignore" });
-  execFileSync("git", ["add", "server/app.mjs", "web/router.mjs"], { cwd: sourceDir, stdio: "ignore" });
+  execFileSync("git", ["add", "server/app.mjs", "web/router.mjs", "template/exam.xlsx"], { cwd: sourceDir, stdio: "ignore" });
   return sourceDir;
 }
 
@@ -32,8 +34,10 @@ test("sync local runtime copies tracked files, removes stale files, and preserve
   const targetDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-sync-target-"));
   mkdirSync(path.join(targetDir, ".easy_exam_runtime"), { recursive: true });
   mkdirSync(path.join(targetDir, "server"), { recursive: true });
+  mkdirSync(path.join(targetDir, "template"), { recursive: true });
   writeFileSync(path.join(targetDir, ".easy_exam_runtime", "state.json"), '{"keep":true}\n');
   writeFileSync(path.join(targetDir, "server", "stale.mjs"), "old\n");
+  writeFileSync(path.join(targetDir, "template", "stale.xlsx"), "old\n");
 
   const output = execFileSync(process.execPath, [
     path.join(rootDir, "scripts", "sync_local_runtime.mjs"),
@@ -49,9 +53,11 @@ test("sync local runtime copies tracked files, removes stale files, and preserve
   assert.equal(body.restarted, false);
   assert.equal(readFileSync(path.join(targetDir, "server", "app.mjs"), "utf8"), "tracked-server\n");
   assert.equal(readFileSync(path.join(targetDir, "web", "router.mjs"), "utf8"), "tracked-web\n");
+  assert.equal(readFileSync(path.join(targetDir, "template", "exam.xlsx"), "utf8"), "tracked-template\n");
   assert.equal(readFileSync(path.join(targetDir, ".easy_exam_runtime", "state.json"), "utf8"), '{"keep":true}\n');
   assert.equal(existsSync(path.join(targetDir, "scratch.txt")), false);
   assert.equal(existsSync(path.join(targetDir, "server", "stale.mjs")), false);
+  assert.equal(existsSync(path.join(targetDir, "template", "stale.xlsx")), false);
 
   rmSync(sourceDir, { recursive: true, force: true });
   rmSync(targetDir, { recursive: true, force: true });

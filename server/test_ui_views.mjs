@@ -1111,6 +1111,19 @@ test("candidate import requires manual room size before importing candidates", (
   assert.ok(html.includes('roomTargetSizeInput.value = "0";'));
 });
 
+test("candidate import failures use the centered application dialog", () => {
+  const candidateListeners = html.slice(
+    html.indexOf('candidateFileInput.addEventListener("change"'),
+    html.indexOf("const staticPage ="),
+  );
+  assert.ok(candidateListeners.includes("showErrorDialog(`名单解析失败：${message}`)"));
+  assert.ok(candidateListeners.includes("showErrorDialog(`场次加载失败：${message}`)"));
+  assert.ok(candidateListeners.includes("showErrorDialog(`监考账号下载失败：${message}`)"));
+  assert.ok(candidateListeners.includes("showErrorDialog(`考生导入失败：${message}`)"));
+  assert.ok(candidateListeners.includes('candidateLog(`[名单解析] ${message}`, "warn")'));
+  assert.ok(candidateListeners.includes('candidateLog(`[考生导入] ${message}`, "warn")'));
+});
+
 test("candidate mapping allows permit from identity or phone while catching missing course code for formal multi-course tasks", () => {
   assert.equal(html.includes("字段映射重复"), false);
   assert.ok(html.includes("当前考试任务包含"));
@@ -1303,6 +1316,8 @@ test("project source and collaboration cards match the approved compact radius l
   assert.ok(html.includes('class="operation-workflow-heading-icon" src="/web/assets/operation-collaboration-logo.png"'));
   assert.ok(html.includes('data-project-actual-result'));
   assert.ok(html.includes('openOperationDetail("archive", actualResultButton)'));
+  assert.equal(html.includes('class="project-source-arrow"'), false);
+  assert.equal(html.includes(".project-source-auto-config-slot .btn::after"), false);
   assert.match(html, /#projectOperationBatchPanel\s*\{[^}]*border-radius:\s*8px/s);
   assert.match(html, /\.operation-workflow-step\s*\{[^}]*border-radius:\s*8px/s);
   assert.ok(html.includes('class="operation-workflow-connector"'));
@@ -1533,9 +1548,13 @@ test("site errors use the centered application dialog", () => {
   assert.ok(html.includes('id="siteErrorTitle"'));
   assert.ok(html.includes('id="siteErrorMessage"'));
   assert.ok(html.includes('id="siteErrorConfirmBtn"'));
+  assert.match(html, /\.account-editor-modal\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*height:\s*fit-content;[^}]*margin:\s*auto;/s);
+  assert.match(html, /\.session-time-picker\.account-editor-modal\s*\{[\s\S]*inset:\s*auto;[\s\S]*margin:\s*0;/s);
   assert.ok(html.includes("function showErrorDialog(message)"));
   assert.ok(html.includes("siteErrorModal.showModal()"));
   assert.ok(html.includes('siteErrorModal.addEventListener("cancel"'));
+  assert.ok(html.includes('if (action === "edit") return showErrorDialog("项目编辑将在独立表单中接入，不会打开自动配置组件。");'));
+  assert.equal(html.includes('if (action === "edit") return alert("项目编辑将在独立表单中接入，不会打开自动配置组件。");'), false);
   assert.ok(html.includes("showErrorDialog(`下载失败：${error.message || String(error)}`)"));
   assert.ok(html.includes("showErrorDialog(`复制失败：${error.message || String(error)}`)"));
   assert.ok(html.includes("showErrorDialog(error.message || String(error))"));
@@ -1743,6 +1762,9 @@ test("exam detail progress cards include paper binding and grouped candidate flo
   assert.ok(html.includes('data-score-format="pdf"'));
   assert.ok(html.includes("下载成绩单 Excel"));
   assert.ok(html.includes("下载成绩单 PDF"));
+  assert.ok(html.includes("下载盖章压缩包"));
+  assert.ok(html.includes("data-score-stamp-archive-download"));
+  assert.ok(html.includes("data-score-stamp-application"));
   assert.ok(html.includes("?format=${encodeURIComponent(format)}"));
   assert.ok(html.includes("data-monitor-download"));
   assert.ok(html.includes("下载监考账号"));
@@ -1988,6 +2010,19 @@ test("score process card downloads assessment documents when links exist", () =>
   assert.ok(html.includes("scoreReportsDownloadFileName(response)"));
   assert.ok(html.includes("const scoreReportDownload = event.target.closest(\"[data-score-report-download]\")"));
   assert.ok(html.includes("await downloadScoreReports(scoreReportDownload.dataset.scoreReportDownload)"));
+});
+
+test("score process card can retry OA seal application and download encrypted stamp archive", () => {
+  assert.ok(html.includes("function scoreStampApplicationStatusText(scoreStep)"));
+  assert.ok(html.includes("上传加密压缩包并保存"));
+  assert.ok(html.includes("已打开 OA 申请页并上传加密压缩包"));
+  assert.ok(html.includes("async function triggerScoreStampApplication(taskId)"));
+  assert.ok(html.includes("/scores/stamp-application"));
+  assert.ok(html.includes("async function downloadScoreStampArchive(taskId)"));
+  assert.ok(html.includes("/scores/stamp-archive/download"));
+  assert.ok(html.includes("scoreStampArchiveDownloadFileName(response)"));
+  assert.ok(html.includes('const scoreStampApplication = event.target.closest("[data-score-stamp-application]")'));
+  assert.ok(html.includes('const scoreStampArchiveDownload = event.target.closest("[data-score-stamp-archive-download]")'));
 });
 
 test("auto config page exposes exam request template download instead of demo import", () => {

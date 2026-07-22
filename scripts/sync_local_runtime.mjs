@@ -55,6 +55,7 @@ function gitTrackedFiles(sourceDir) {
     "outputs",
     "web",
     "deploy",
+    "template",
     "package.json",
     "requirements.txt",
     ".env.example",
@@ -68,7 +69,7 @@ function syncTrackedFiles(sourceDir, targetDir, files) {
   const runtimeDir = path.join(targetDir, ".easy_exam_runtime");
   mkdirSync(runtimeDir, { recursive: true });
 
-  for (const entry of ["server", "scripts", "outputs", "web", "deploy"]) {
+  for (const entry of ["server", "scripts", "outputs", "web", "deploy", "template"]) {
     rmSync(path.join(targetDir, entry), { recursive: true, force: true });
   }
   for (const entry of ["package.json", "requirements.txt", ".env.example", "README.md", "WORKING_MEMORY.md"]) {

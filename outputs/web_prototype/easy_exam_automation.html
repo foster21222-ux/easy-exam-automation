@@ -1122,6 +1122,11 @@
         --account-glass-saturation: 145%;
         width: min(560px, calc(100vw - 40px));
         max-width: none;
+        position: fixed;
+        inset: 0;
+        height: fit-content;
+        max-height: calc(100vh - 40px);
+        margin: auto;
         padding: 0;
         border: 1px solid rgba(255, 255, 255, 0.78);
         border-radius: 8px;
@@ -2194,13 +2199,6 @@
         white-space: nowrap;
       }
 
-      .project-source-auto-config-slot .btn::after {
-        content: "\203a";
-        margin-left: 10px;
-        font-size: 16px;
-        line-height: 0;
-      }
-
       .project-source-requirement-button {
         min-height: 29px;
         height: 29px;
@@ -2236,15 +2234,6 @@
       }
 
       .source-state.waiting { color: var(--muted); }
-
-      .project-source-arrow {
-        position: absolute;
-        right: 17px;
-        bottom: 17px;
-        width: 20px;
-        height: 20px;
-        color: var(--muted);
-      }
 
       #projectOperationBatchPanel {
         margin: 0 0 14px;
@@ -7656,13 +7645,30 @@
         const status = scoreStep?.status || "pending";
         const processText = status === "running" ? "处理中" : status === "success" ? "重新处理" : "成绩处理";
         const hasAssessmentReports = Number(scoreStep?.result?.reportLinkCount || 0) > 0;
+        const stampStatus = scoreStep?.result?.stampApplication?.status || "";
+        const stampText = stampStatus === "failed" ? "重试盖章申请" : stampStatus === "opened" ? "重新发起盖章申请" : "发起盖章申请";
         const reportDownloadHtml = status === "success" && hasAssessmentReports
           ? `<button class="task-step-action" data-score-report-download="${safeText(task.taskId)}" type="button">下载测评文档</button>`
           : "";
+        const stampApplicationHtml = status === "success"
+          ? `<button class="task-step-action" data-score-stamp-application="${safeText(task.taskId)}" type="button">${stampText}</button>`
+          : "";
+        const stampArchiveHtml = status === "success"
+          ? `<button class="task-step-action" data-score-stamp-archive-download="${safeText(task.taskId)}" type="button">下载盖章压缩包</button>`
+          : "";
         const downloadHtml = status === "success"
-          ? `<button class="task-step-action" data-score-download="${safeText(task.taskId)}" data-score-format="xlsx" type="button">下载成绩单 Excel</button><button class="task-step-action" data-score-download="${safeText(task.taskId)}" data-score-format="pdf" type="button">下载成绩单 PDF</button>${reportDownloadHtml}`
+          ? `<button class="task-step-action" data-score-download="${safeText(task.taskId)}" data-score-format="xlsx" type="button">下载成绩单 Excel</button><button class="task-step-action" data-score-download="${safeText(task.taskId)}" data-score-format="pdf" type="button">下载成绩单 PDF</button>${stampArchiveHtml}${stampApplicationHtml}${reportDownloadHtml}`
           : "";
         return `<div class="task-step-actions"><button class="task-step-action" data-score-process="${safeText(task.taskId)}" type="button" ${status === "running" ? "disabled" : ""}>${processText}</button>${downloadHtml}</div>`;
+      }
+
+      function scoreStampApplicationStatusText(scoreStep) {
+        const stamp = scoreStep?.result?.stampApplication || {};
+        if (stamp.status === "opened" && stamp.saved) return "盖章申请：已打开 OA 申请页、上传加密压缩包并保存，请核对后提交";
+        if (stamp.status === "opened") return "盖章申请：已打开 OA 申请页并上传加密压缩包，请核对后提交";
+        if (stamp.status === "failed") return `盖章申请：自动发起失败，${stamp.errorMessage || "请重试"}`;
+        if (stamp.status === "skipped") return `盖章申请：${stamp.message || "已跳过"}`;
+        return "";
       }
 
       function buildSharedSheetAction(task, sharedSheetStep) {
@@ -8081,7 +8087,10 @@
           stepName: "成绩处理",
           status: scoreStep?.status || "pending",
           triggerActionHtml: buildScoreProcessAction(task, scoreStep),
-          extraDetail: scoreStep?.result?.fileName ? `成绩反馈单文件：${scoreStep.result.fileName}` : "",
+          extraDetail: [
+            scoreStep?.result?.fileName ? `成绩反馈单文件：${scoreStep.result.fileName}` : "",
+            scoreStampApplicationStatusText(scoreStep),
+          ].filter(Boolean).join("；"),
         }));
         const sessionChangeHistoryStep = buildSessionChangeRecordStep(task, stepMap);
         if (sessionChangeHistoryStep) display.push(sessionChangeHistoryStep);
@@ -9053,6 +9062,15 @@
         renderTaskDetail(task);
       }
 
+      async function triggerScoreStampApplication(taskId) {
+        if (!taskId) throw new Error("缺少任务编号");
+        const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/scores/stamp-application`, { method: "POST" });
+        renderTaskDetail(result.task || result);
+        if (result.stampApplication?.status === "failed") {
+          throw new Error(result.stampApplication.errorMessage || "盖章申请自动发起失败");
+        }
+      }
+
       async function triggerProjectSharedSheetFill(taskId) {
         if (!taskId) throw new Error("缺少任务编号");
         const task = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/shared-sheet/fill`, { method: "POST" });
@@ -9079,6 +9097,10 @@
 
       function scoreReportsDownloadFileName(response) {
         return downloadFileNameFromDisposition(response.headers.get("Content-Disposition")) || "测评文档.zip";
+      }
+
+      function scoreStampArchiveDownloadFileName(response) {
+        return downloadFileNameFromDisposition(response.headers.get("Content-Disposition")) || "成绩单盖章附件.zip";
       }
 
       async function downloadScoreFeedback(taskId, format = "xlsx") {
@@ -9109,6 +9131,22 @@
         const link = document.createElement("a");
         link.href = url;
         link.download = scoreReportsDownloadFileName(response);
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      async function downloadScoreStampArchive(taskId) {
+        if (!taskId) throw new Error("缺少任务编号");
+        const response = await fetch(`${runtime.apiBase}/api/tasks/${encodeURIComponent(taskId)}/scores/stamp-archive/download`);
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || "盖章压缩包下载失败");
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = scoreStampArchiveDownloadFileName(response);
         link.click();
         URL.revokeObjectURL(url);
       }
@@ -9222,15 +9260,14 @@
             : item.key === "examRequirement"
               ? `<span class="project-source-icon examRequirement" aria-hidden="true"><img src="/web/assets/easy-exam-requirement-logo.png" alt="" /></span>`
               : `<span class="project-source-icon actualResult" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M12 7h10l7 7v19H12V7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M22 7v8h7M16 22h9M16 27h7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
-          const arrow = `<svg class="project-source-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;
           const content = `${icon}<div class="project-source-content"><div class="project-source-head"><span class="project-source-title">${safeText(item.title)}</span><span class="source-state ${item.ready ? "" : "waiting"}">${item.ready ? "已就绪" : "待补充"}</span></div><div class="project-source-meta">${item.meta.filter(Boolean).map(safeText).join("<br>")}${actionHint}</div></div>`;
           if (item.key === "examRequirement") {
             const requirementButtons = requirements.map((_, index) => `<button class="fanwei-requirement-file-tab project-source-requirement-button" type="button" data-project-source="examRequirement" data-project-source-index="${index}" aria-label="查看和修改需求单 ${index + 1}">需求单 ${index + 1}</button>`).join("");
             return `<div class="project-source-item project-source-item-with-requirements">${content}<div class="project-source-requirement-footer">${requirementButtons ? `<div class="project-source-requirement-list" aria-label="易考需求单列表">${requirementButtons}</div>` : "<span></span>"}<div class="project-source-auto-config-slot" data-project-auto-config-slot></div></div></div>`;
           }
           return item.key === "actualResult"
-            ? `<button class="project-source-item" type="button" data-project-actual-result aria-label="查看${safeText(item.title)}归档信息">${content}${arrow}</button>`
-            : `<button class="project-source-item" type="button" data-project-source="${safeText(item.key)}" aria-label="查看和修改${safeText(item.title)}">${content}${arrow}</button>`;
+            ? `<button class="project-source-item" type="button" data-project-actual-result aria-label="查看${safeText(item.title)}归档信息">${content}</button>`
+            : `<button class="project-source-item" type="button" data-project-source="${safeText(item.key)}" aria-label="查看和修改${safeText(item.title)}">${content}</button>`;
         }).join("");
         const autoConfigSlot = projectSourceStrip.querySelector("[data-project-auto-config-slot]");
         if (autoConfigSlot) {
@@ -14199,7 +14236,9 @@
         try {
           await parseCandidateFile(event.target.files[0]);
         } catch (error) {
-          candidateLog(`[名单解析] ${error.message || String(error)}`, "warn");
+          const message = error.message || String(error);
+          candidateLog(`[名单解析] ${message}`, "warn");
+          showErrorDialog(`名单解析失败：${message}`);
         }
       });
 
@@ -14214,9 +14253,11 @@
 
       candidateDropZone.addEventListener("drop", (event) => {
         event.preventDefault();
-        parseCandidateFile(event.dataTransfer.files[0]).catch((error) =>
-          candidateLog(`[名单解析] ${error.message || String(error)}`, "warn"),
-        );
+        parseCandidateFile(event.dataTransfer.files[0]).catch((error) => {
+          const message = error.message || String(error);
+          candidateLog(`[名单解析] ${message}`, "warn");
+          showErrorDialog(`名单解析失败：${message}`);
+        });
       });
 
       [candidateMapFullName, candidateMapIdentityId, candidateMapPermit, candidateMapCourseCode, candidateMapMobile, candidateMapEmail].forEach((select) => {
@@ -14277,7 +14318,9 @@
           }
           await loadCandidateSessions();
         } catch (error) {
-          candidateLog(`[场次选择] ${error.message || String(error)}`, "warn");
+          const message = error.message || String(error);
+          candidateLog(`[场次选择] ${message}`, "warn");
+          showErrorDialog(`场次加载失败：${message}`);
         }
       });
 
@@ -14301,7 +14344,9 @@
           await downloadMonitorAccountsExcel();
           candidateLog("[监考账号] 已下载监考账号 Excel", "success");
         } catch (error) {
-          candidateLog(`[监考账号] ${error.message || String(error)}`, "warn");
+          const message = error.message || String(error);
+          candidateLog(`[监考账号] ${message}`, "warn");
+          showErrorDialog(`监考账号下载失败：${message}`);
         }
       });
 
@@ -14323,7 +14368,9 @@
         try {
           await importCandidatesToSession();
         } catch (error) {
-          candidateLog(`[考生导入] ${error.message || String(error)}`, "warn");
+          const message = error.message || String(error);
+          candidateLog(`[考生导入] ${message}`, "warn");
+          showErrorDialog(`考生导入失败：${message}`);
         }
       });
 
@@ -14812,7 +14859,7 @@
         }
         const action = actionButton.dataset.action;
         if (action === "auto") return router.navigate(`/auto-config?projectId=${encodeURIComponent(card.dataset.taskId)}`);
-        if (action === "edit") return alert("项目编辑将在独立表单中接入，不会打开自动配置组件。");
+        if (action === "edit") return showErrorDialog("项目编辑将在独立表单中接入，不会打开自动配置组件。");
         if (action === "archive") return archiveProjectCard(card.dataset.taskId).catch((error) => showErrorDialog(error.message || String(error)));
         if (action === "delete") return openProjectDeleteConfirm(card.dataset.taskId, actionButton);
         return router.navigate(`/projects/${encodeURIComponent(card.dataset.taskId)}`);
@@ -15184,6 +15231,42 @@
           } finally {
             scoreReportDownload.textContent = originalText;
             scoreReportDownload.disabled = false;
+          }
+          return;
+        }
+        const scoreStampApplication = event.target.closest("[data-score-stamp-application]");
+        if (scoreStampApplication) {
+          event.stopPropagation();
+          if (scoreStampApplication.disabled) return;
+          scoreStampApplication.disabled = true;
+          const originalText = scoreStampApplication.textContent;
+          scoreStampApplication.textContent = "正在发起...";
+          try {
+            await triggerScoreStampApplication(scoreStampApplication.dataset.scoreStampApplication);
+          } catch (error) {
+            showErrorDialog(error.message || String(error));
+            await openTaskDetail(taskViewState.currentTaskId);
+          } finally {
+            scoreStampApplication.textContent = originalText;
+            scoreStampApplication.disabled = false;
+          }
+          return;
+        }
+        const scoreStampArchiveDownload = event.target.closest("[data-score-stamp-archive-download]");
+        if (scoreStampArchiveDownload) {
+          event.stopPropagation();
+          if (scoreStampArchiveDownload.disabled) return;
+          scoreStampArchiveDownload.disabled = true;
+          const originalText = scoreStampArchiveDownload.textContent;
+          scoreStampArchiveDownload.textContent = "正在下载...";
+          try {
+            await downloadScoreStampArchive(scoreStampArchiveDownload.dataset.scoreStampArchiveDownload);
+          } catch (error) {
+            showErrorDialog(error.message || String(error));
+            await openTaskDetail(taskViewState.currentTaskId);
+          } finally {
+            scoreStampArchiveDownload.textContent = originalText;
+            scoreStampArchiveDownload.disabled = false;
           }
           return;
         }

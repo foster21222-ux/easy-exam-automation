@@ -34,3 +34,6 @@ outputs/web_prototype/*
 *.xlsx
 *.xls
 *.csv
+!template/
+!template/v2易考新建考试需求单.xlsx
+!template/成绩单模板.xlsx

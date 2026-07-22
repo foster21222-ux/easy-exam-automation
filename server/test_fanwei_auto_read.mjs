@@ -6,8 +6,10 @@ import {
   buildFanweiDomExtractorScript,
   buildWindowsChromeLaunchArgs,
   chromeDevToolsListUrl,
+  chromeDevToolsNewTabUrl,
   chromeDevToolsWebSocketUrl,
   escapeAppleScriptString,
+  evaluateChromeDevToolsExpression,
   extractFanweiExamSceneRows,
   fanweiAutoReadPlatform,
   fanweiAutoReadUnavailableMessage,
@@ -16,6 +18,7 @@ import {
   isAllowedChromeDevToolsWebSocketUrl,
   parseFanweiAutoReadOutput,
   runChromeDevToolsFanweiRead,
+  uploadFilesToChromeDevToolsFileInput,
 } from "./fanwei_auto_read.mjs";
 
 test("extracts an all-day exam scene row from the real Fanwei grid layout", () => {
@@ -87,6 +90,7 @@ test("fanwei auto read output parser handles empty and JSON payloads", () => {
 
 test("Chrome DevTools helpers use the local debugging endpoint", () => {
   assert.equal(chromeDevToolsListUrl(9222), "http://127.0.0.1:9222/json");
+  assert.equal(chromeDevToolsNewTabUrl(9222, "https://oa.ata.net.cn/"), "http://127.0.0.1:9222/json/new?https%3A%2F%2Foa.ata.net.cn%2F");
   assert.equal(
     chromeDevToolsWebSocketUrl("ws://127.0.0.1:9222/devtools/page/abc"),
     "ws://127.0.0.1:9222/devtools/page/abc",
@@ -95,6 +99,88 @@ test("Chrome DevTools helpers use the local debugging endpoint", () => {
     chromeDevToolsWebSocketUrl("ws://localhost:9222/devtools/page/abc"),
     "ws://127.0.0.1:9222/devtools/page/abc",
   );
+});
+
+test("Chrome DevTools expression evaluator returns raw page script values", async () => {
+  const value = await evaluateChromeDevToolsExpression({
+    tab: {
+      url: "https://oa.ata.net.cn/workflow",
+      webSocketDebuggerUrl: "ws://127.0.0.1:9222/devtools/page/fanwei",
+    },
+    expression: "1 + 1",
+    webSocketFactory: () => ({
+      send(message) {
+        const parsed = JSON.parse(message);
+        assert.equal(parsed.method, "Runtime.evaluate");
+        assert.equal(parsed.params.expression, "1 + 1");
+      },
+      close() {},
+      on(event, handler) {
+        if (event === "open") queueMicrotask(handler);
+        if (event === "message") queueMicrotask(() => handler(JSON.stringify({
+          id: 1,
+          result: { result: { value: "done" } },
+        })));
+      },
+    }),
+  });
+
+  assert.equal(value, "done");
+});
+
+test("Chrome DevTools file upload uses DOM.setFileInputFiles", async () => {
+  const methods = [];
+  const result = await uploadFilesToChromeDevToolsFileInput({
+    tab: {
+      url: "https://oa.ata.net.cn/workflow",
+      webSocketDebuggerUrl: "ws://127.0.0.1:9222/devtools/page/fanwei",
+    },
+    filePaths: ["/tmp/score-stamp.zip"],
+    selector: 'input[type="file"][data-codex-score-stamp-upload="1"]',
+    prepareExpression: "prepare()",
+    webSocketFactory: () => {
+      let messageHandler = () => {};
+      return {
+        send(message) {
+          const parsed = JSON.parse(message);
+          methods.push(parsed.method);
+          if (parsed.method === "Runtime.evaluate" && parsed.id === 1) {
+            assert.equal(parsed.params.expression, "prepare()");
+          }
+          if (parsed.method === "DOM.querySelector") {
+            assert.equal(parsed.params.selector, 'input[type="file"][data-codex-score-stamp-upload="1"]');
+          }
+          if (parsed.method === "DOM.setFileInputFiles") {
+            assert.deepEqual(parsed.params.files, ["/tmp/score-stamp.zip"]);
+            assert.equal(parsed.params.nodeId, 42);
+          }
+          const responses = {
+            1: { id: 1, result: { result: { value: "{}" } } },
+            2: { id: 2, result: { root: { nodeId: 7 } } },
+            3: { id: 3, result: { nodeId: 42 } },
+            4: { id: 4, result: {} },
+            5: { id: 5, result: { result: { value: { ok: true, fileNames: ["score-stamp.zip"] } } } },
+          };
+          queueMicrotask(() => messageHandler(JSON.stringify(responses[parsed.id])));
+        },
+        close() {},
+        on(event, handler) {
+          if (event === "open") queueMicrotask(handler);
+          if (event === "message") messageHandler = handler;
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(methods, ["Runtime.evaluate", "DOM.getDocument", "DOM.querySelector", "DOM.setFileInputFiles", "Runtime.evaluate"]);
+  assert.deepEqual(result, {
+    ok: true,
+    inputFound: true,
+    uploaded: 1,
+    fileNames: ["score-stamp.zip"],
+    hiddenValue: "",
+    selector: 'input[type="file"][data-codex-score-stamp-upload="1"]',
+  });
 });
 
 test("Chrome DevTools WebSocket URLs must stay on the configured loopback port", () => {

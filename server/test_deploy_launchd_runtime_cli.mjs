@@ -11,7 +11,7 @@ test("launchd runtime deployment rebuilds app code and preserves migrated data",
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-launchd-runtime-"));
   const sourceDir = path.join(tempDir, "source");
   const targetDir = path.join(tempDir, "target");
-  for (const dir of ["server", "scripts", "outputs", "web", "deploy", ".easy_exam_runtime"]) {
+  for (const dir of ["server", "scripts", "outputs", "web", "deploy", "template", ".easy_exam_runtime"]) {
     mkdirSync(path.join(sourceDir, dir), { recursive: true });
   }
   writeFileSync(path.join(sourceDir, "server", "app.mjs"), "version-1\n");
@@ -19,6 +19,7 @@ test("launchd runtime deployment rebuilds app code and preserves migrated data",
   writeFileSync(path.join(sourceDir, "outputs", "index.html"), "output\n");
   writeFileSync(path.join(sourceDir, "web", "router.mjs"), "router\n");
   writeFileSync(path.join(sourceDir, "deploy", "collector.plist.template"), "plist\n");
+  writeFileSync(path.join(sourceDir, "template", "exam.xlsx"), "template\n");
   writeFileSync(path.join(sourceDir, ".easy_exam_runtime", "requirement_requests.sqlite3"), "database-v1\n");
   writeFileSync(path.join(sourceDir, "package.json"), "{}\n");
 
@@ -34,6 +35,7 @@ test("launchd runtime deployment rebuilds app code and preserves migrated data",
   assert.equal(readFileSync(path.join(targetDir, "app", "server", "app.mjs"), "utf8"), "version-1\n");
   assert.equal(readFileSync(path.join(targetDir, "runtime", "requirement_requests.sqlite3"), "utf8"), "database-v1\n");
   assert.equal(readFileSync(path.join(targetDir, "app", "deploy", "collector.plist.template"), "utf8"), "plist\n");
+  assert.equal(readFileSync(path.join(targetDir, "app", "template", "exam.xlsx"), "utf8"), "template\n");
   assert.equal(lstatSync(path.join(targetDir, "app", ".easy_exam_runtime")).isSymbolicLink(), true);
   assert.equal(existsSync(path.join(targetDir, "app", ".easy_exam_runtime", "requirement_requests.sqlite3")), true);
 

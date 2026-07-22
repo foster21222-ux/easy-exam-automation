@@ -114,12 +114,22 @@ import {
 import { buildAutoConfigFromRequirement } from "./requirement_auto_config_adapter.mjs";
 import {
   buildWindowsChromeLaunchArgs,
+  createChromeDevToolsTab,
+  evaluateChromeDevToolsExpression,
+  fetchChromeDevToolsTabs,
   fanweiAutoReadPlatform,
   fanweiAutoReadUnavailableMessage,
   findMacChromeExecutable,
   findWindowsChromeExecutable,
   runChromeDevToolsFanweiRead,
+  uploadFilesToChromeDevToolsFileInput,
 } from "./fanwei_auto_read.mjs";
+import {
+  buildScoreStampAttachmentPrepareScript,
+  buildScoreStampApplicationFillScript,
+  buildScoreStampApplicationPayload,
+  buildScoreStampApplicationSaveScript,
+} from "./score_stamp_application.mjs";
 import {
   normalizeEmailSettings,
   redactEmailSettings,
@@ -4739,6 +4749,237 @@ function scoreFeedbackFormalSessions(task = {}) {
   return (task.sessions || []).filter((session) => session.sessionType === "formal" && session.session_id);
 }
 
+function scoreStampApplicationStatusMessage(stampApplication = {}) {
+  if (stampApplication.status === "opened" && stampApplication.saved) return "已自动打开 OA 成绩盖章申请页、上传加密压缩包并保存，请核对后提交";
+  if (stampApplication.status === "opened") return "已自动打开 OA 成绩盖章申请页并上传加密压缩包，请核对后提交";
+  if (stampApplication.status === "failed") return `自动发起 OA 成绩盖章申请失败：${stampApplication.errorMessage || "未知错误"}`;
+  if (stampApplication.status === "skipped") return stampApplication.message || "已跳过 OA 成绩盖章申请";
+  return "";
+}
+
+function parseChromeJsonValue(value, fallback = {}) {
+  if (value && typeof value === "object") return value;
+  const textValue = String(value ?? "").trim();
+  if (!textValue) return fallback;
+  return JSON.parse(textValue);
+}
+
+function scoreStampArchivePassword() {
+  return String(process.env.SCORE_STAMP_ARCHIVE_PASSWORD || "1234");
+}
+
+function scoreStampArchiveFileName(pdfFileName = "成绩单.pdf") {
+  const base = safeFileName(String(pdfFileName || "成绩单.pdf").replace(/\.pdf$/i, "")).trim() || "成绩单";
+  return safeZipFileName(`${base}-盖章附件`);
+}
+
+async function runZipCommand(args, options = {}) {
+  const child = spawn("zip", args, {
+    cwd: rootDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    ...options,
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  if (exitCode !== 0) throw new Error(stderr.trim() || "加密压缩包生成失败");
+}
+
+async function createPasswordProtectedScoreArchive({ pdfPath, pdfFileName } = {}) {
+  const resolvedPdfPath = path.resolve(String(pdfPath || ""));
+  const generatedRoot = path.resolve(generatedDir);
+  if (!resolvedPdfPath || !resolvedPdfPath.startsWith(`${generatedRoot}${path.sep}`)) {
+    throw new Error("成绩单 PDF 文件不存在，请先完成成绩处理");
+  }
+  await fs.access(resolvedPdfPath);
+  const archivePassword = scoreStampArchivePassword();
+  const archiveFileName = scoreStampArchiveFileName(pdfFileName);
+  const archiveDir = await fs.mkdtemp(path.join(generatedDir, "score-stamp-archive-"));
+  const archivePath = path.join(archiveDir, archiveFileName);
+  const stagingDir = await fs.mkdtemp(path.join(generatedDir, "score-stamp-"));
+  const stagedPdfPath = path.join(stagingDir, safeFileName(pdfFileName || "成绩单.pdf"));
+  try {
+    await fs.copyFile(resolvedPdfPath, stagedPdfPath);
+    await runZipCommand(["-q", "-P", archivePassword, "-j", archivePath, stagedPdfPath]);
+  } finally {
+    await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+  }
+  return {
+    stampArchiveFileName: archiveFileName,
+    stampArchivePath: archivePath,
+    stampArchivePassword: archivePassword,
+  };
+}
+
+async function ensurePasswordProtectedScoreArchive(scoreResult = {}) {
+  const archivePath = path.resolve(String(scoreResult.stampArchivePath || ""));
+  const generatedRoot = path.resolve(generatedDir);
+  const expectedArchiveFileName = scoreResult.stampArchiveFileName || scoreStampArchiveFileName(scoreResult.pdfFileName);
+  if (archivePath && archivePath.startsWith(`${generatedRoot}${path.sep}`)) {
+    try {
+      await fs.access(archivePath);
+      if (path.basename(archivePath) === expectedArchiveFileName) {
+        return {
+          ...scoreResult,
+          stampArchiveFileName: expectedArchiveFileName,
+          stampArchivePassword: scoreResult.stampArchivePassword || scoreStampArchivePassword(),
+        };
+      }
+    } catch {}
+  }
+  return {
+    ...scoreResult,
+    ...(await createPasswordProtectedScoreArchive({
+      pdfPath: scoreResult.pdfFilePath,
+      pdfFileName: scoreResult.pdfFileName,
+    })),
+  };
+}
+
+async function resolveCreatedChromeTab(tab, workflowUrl) {
+  if (tab?.webSocketDebuggerUrl) return tab;
+  const tabs = await fetchChromeDevToolsTabs({ timeoutMs: 5000 });
+  const expectedWorkflowId = new URL(workflowUrl).hash.match(/workflowid=([^&]+)/)?.[1] || "105021";
+  return (Array.isArray(tabs) ? tabs : []).find((item) => tab?.id && item.id === tab.id) ||
+    (Array.isArray(tabs) ? tabs : []).find((item) => String(item?.url || "").includes(`workflowid=${expectedWorkflowId}`));
+}
+
+function isChromeNavigationRetryableError(error) {
+  const message = error?.message || String(error || "");
+  return /Execution context was destroyed|Cannot find context|Cannot find default execution context|Inspected target navigated|Target closed|WebSocket 在操作完成前已关闭/.test(message);
+}
+
+async function withScoreStampChromeRetry({ tab, workflowUrl, operation, attempts = 4, delayMs = 1000 } = {}) {
+  let currentTab = tab;
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await operation(currentTab);
+    } catch (error) {
+      lastError = error;
+      if (!isChromeNavigationRetryableError(error) || attempt === attempts - 1) throw error;
+      await wait(delayMs);
+      currentTab = await resolveCreatedChromeTab(currentTab, workflowUrl) || currentTab;
+    }
+  }
+  throw lastError || new Error("Chrome DevTools 操作失败");
+}
+
+async function startScoreStampApplication(task, scoreResult, req) {
+  if (process.env.SCORE_STAMP_AUTO_DISABLED === "1") {
+    return {
+      status: "skipped",
+      attemptedAt: new Date().toISOString(),
+      message: "已按环境配置跳过 OA 成绩盖章申请自动发起",
+    };
+  }
+  const pdfFilePath = path.resolve(String(scoreResult.pdfFilePath || ""));
+  const generatedRoot = path.resolve(generatedDir);
+  if (!pdfFilePath || !pdfFilePath.startsWith(`${generatedRoot}${path.sep}`)) {
+    throw new Error("成绩单 PDF 文件不存在，请先完成成绩处理");
+  }
+  await fs.access(pdfFilePath);
+  const archiveFilePath = path.resolve(String(scoreResult.stampArchivePath || ""));
+  if (!archiveFilePath || !archiveFilePath.startsWith(`${generatedRoot}${path.sep}`)) {
+    throw new Error("成绩单加密压缩包不存在，请先重新发起盖章申请");
+  }
+  await fs.access(archiveFilePath);
+
+  const payload = buildScoreStampApplicationPayload({
+    task,
+    scoreResult,
+    user: getAuthUserFromRequest(auth, req) || {},
+  });
+  const platform = fanweiAutoReadPlatform();
+  if (platform === "unsupported") {
+    throw new Error(fanweiAutoReadUnavailableMessage("unsupported_platform", process.platform));
+  }
+  await ensureFanweiDevToolsChromeAvailable({ timeoutMs: 5000 });
+  const createdTab = await createChromeDevToolsTab({ url: payload.workflowUrl, timeoutMs: 10000 });
+  const tab = await resolveCreatedChromeTab(createdTab, payload.workflowUrl);
+  if (!tab?.webSocketDebuggerUrl) {
+    throw new Error("已打开 OA 页面，但未取得可自动填写的 Chrome DevTools 标签页。");
+  }
+  const raw = await withScoreStampChromeRetry({
+    tab,
+    workflowUrl: payload.workflowUrl,
+    operation: (currentTab) => evaluateChromeDevToolsExpression({
+      tab: currentTab,
+      expression: buildScoreStampApplicationFillScript(payload),
+      timeoutMs: 45000,
+    }),
+  });
+  const pageResult = parseChromeJsonValue(raw);
+  if (!pageResult.ok) {
+    const detail = (pageResult.warnings || []).join("；") ||
+      (pageResult.url ? `页面地址：${pageResult.url}` : "") ||
+      `返回：${JSON.stringify(pageResult).slice(0, 240)}`;
+    throw new Error(`OA 成绩盖章申请页预填失败：${detail}`);
+  }
+  const uploadResult = await withScoreStampChromeRetry({
+    tab,
+    workflowUrl: payload.workflowUrl,
+    operation: (currentTab) => uploadFilesToChromeDevToolsFileInput({
+      tab: currentTab,
+      filePaths: [archiveFilePath],
+      selector: 'input[type="file"][data-codex-score-stamp-upload="1"]',
+      prepareExpression: buildScoreStampAttachmentPrepareScript(),
+      timeoutMs: 30000,
+    }),
+  });
+  if (!uploadResult.ok || !uploadResult.uploaded) {
+    throw new Error("OA 成绩盖章申请页未找到可上传附件的文件控件，请检查页面附件区域。");
+  }
+  const saveRaw = await withScoreStampChromeRetry({
+    tab,
+    workflowUrl: payload.workflowUrl,
+    operation: (currentTab) => evaluateChromeDevToolsExpression({
+      tab: currentTab,
+      expression: buildScoreStampApplicationSaveScript(),
+      timeoutMs: 15000,
+    }),
+  });
+  const saveResult = parseChromeJsonValue(saveRaw);
+  if (!saveResult.ok || !saveResult.saved) {
+    const detail = (saveResult.warnings || []).join("；") ||
+      (saveResult.url ? `页面地址：${saveResult.url}` : "") ||
+      `返回：${JSON.stringify(saveResult).slice(0, 240)}`;
+    throw new Error(`OA 成绩盖章申请页保存失败：${detail}`);
+  }
+  return {
+    status: "opened",
+    attemptedAt: new Date().toISOString(),
+    workflowUrl: payload.workflowUrl,
+    pageUrl: pageResult.url || "",
+    pdfFileName: payload.pdfFileName,
+    archiveFileName: payload.archiveFileName,
+    archivePassword: payload.archivePassword,
+    filled: Array.isArray(pageResult.filled) ? pageResult.filled : [],
+    uploadedFileNames: Array.isArray(uploadResult.fileNames) && uploadResult.fileNames.length
+      ? uploadResult.fileNames
+      : [payload.archiveFileName].filter(Boolean),
+    uploadHiddenValue: uploadResult.hiddenValue || "",
+    saved: Boolean(saveResult.saved),
+    saveButtonText: saveResult.buttonText || "",
+    warnings: Array.isArray(pageResult.warnings) ? pageResult.warnings : [],
+  };
+}
+
+async function tryStartScoreStampApplication(task, scoreResult, req) {
+  try {
+    return await startScoreStampApplication(task, scoreResult, req);
+  } catch (error) {
+    return {
+      status: "failed",
+      attemptedAt: new Date().toISOString(),
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function scoreFeedbackExamTime(sessions = []) {
   const ranges = [];
   for (const session of sessions) {
@@ -4863,21 +5104,28 @@ async function handleScoreProcess(taskId, req, res) {
       await convertScoreFeedbackToPdf({ inputPath: outputPath, outputPath: pdfOutputPath });
       logs.push(`[成绩处理] 成绩单 PDF 生成成功：${pdfFileName}`);
     }
+    const scoreResult = {
+      sessionId: formalSessions[0].session_id,
+      sessionIds: formalSessions.map((session) => String(session.session_id)),
+      fileName,
+      filePath: outputPath,
+      payloadPath,
+      pdfFileName,
+      pdfFilePath: pdfOutputPath,
+      rowCount: rows.length,
+      sessionCount: formalSessions.length,
+      missingScores,
+      reportLinkCount,
+    };
+    Object.assign(scoreResult, await ensurePasswordProtectedScoreArchive(scoreResult));
+    logs.push(`[盖章申请] 已生成加密压缩包：${scoreResult.stampArchiveFileName}，默认密码：${scoreResult.stampArchivePassword}`);
+    const stampApplication = await tryStartScoreStampApplication(task, scoreResult, req);
+    scoreResult.stampApplication = stampApplication;
+    const stampMessage = scoreStampApplicationStatusMessage(stampApplication);
+    if (stampMessage) logs.push(`[盖章申请] ${stampMessage}`);
     const updated = await updateTaskStep(taskId, "score_process", "success", {
       message: logs.join("\n"),
-      result: {
-        sessionId: formalSessions[0].session_id,
-        sessionIds: formalSessions.map((session) => String(session.session_id)),
-        fileName,
-        filePath: outputPath,
-        payloadPath,
-        pdfFileName,
-        pdfFilePath: pdfOutputPath,
-        rowCount: rows.length,
-        sessionCount: formalSessions.length,
-        missingScores,
-        reportLinkCount,
-      },
+      result: scoreResult,
     });
     return json(res, 200, updated);
   } catch (error) {
@@ -4990,6 +5238,63 @@ async function handleScoreReportDownload(taskId, req, res) {
     "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(scoreReportArchiveFileName(task, formalSession))}`,
   });
   createReadStream(zipPath).pipe(res);
+}
+
+async function handleScoreStampArchiveDownload(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const step = (task.steps || []).find((item) => item.stepKey === "score_process");
+  const result = step?.result || {};
+  if (step?.status !== "success") {
+    return badRequest(res, "请先完成成绩处理并生成成绩单 PDF");
+  }
+  let preparedResult;
+  try {
+    preparedResult = await ensurePasswordProtectedScoreArchive(result);
+  } catch (error) {
+    return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+  }
+  if (preparedResult.stampArchivePath !== result.stampArchivePath) {
+    await updateTaskStep(taskId, "score_process", "success", {
+      message: `[盖章申请] 已生成加密压缩包：${preparedResult.stampArchiveFileName}，默认密码：${preparedResult.stampArchivePassword}`,
+      result: preparedResult,
+    });
+  }
+  const archivePath = path.resolve(String(preparedResult.stampArchivePath || ""));
+  const generatedRoot = path.resolve(generatedDir);
+  if (!archivePath || !archivePath.startsWith(`${generatedRoot}${path.sep}`)) {
+    return badRequest(res, "盖章附件压缩包不存在，请重新处理成绩");
+  }
+  try {
+    await fs.access(archivePath);
+  } catch {
+    return badRequest(res, "盖章附件压缩包不存在，请重新处理成绩");
+  }
+  res.writeHead(200, {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(preparedResult.stampArchiveFileName || scoreStampArchiveFileName(preparedResult.pdfFileName))}`,
+  });
+  createReadStream(archivePath).pipe(res);
+}
+
+async function handleScoreStampApplication(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const step = (task.steps || []).find((item) => item.stepKey === "score_process");
+  const result = step?.result || {};
+  if (step?.status !== "success") {
+    return badRequest(res, "请先完成成绩处理并生成成绩单 PDF");
+  }
+  const preparedResult = await ensurePasswordProtectedScoreArchive(result);
+  const stampApplication = await tryStartScoreStampApplication(task, preparedResult, req);
+  const mergedResult = { ...preparedResult, stampApplication };
+  const message = `[盖章申请] ${scoreStampApplicationStatusMessage(stampApplication)}`;
+  const updated = await updateTaskStep(taskId, "score_process", "success", {
+    message,
+    result: mergedResult,
+  });
+  const statusCode = stampApplication.status === "opened" || stampApplication.status === "skipped" ? 200 : 500;
+  return json(res, statusCode, { ok: statusCode === 200, task: updated, stampApplication, error: stampApplication.errorMessage });
 }
 
 async function handleTaskHide(taskId, req, res) {
@@ -5824,6 +6129,14 @@ async function requestHandler(req, res) {
     const scoreReportDownloadMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/scores\/reports\/download$/);
     if (req.method === "GET" && scoreReportDownloadMatch) {
       return await handleScoreReportDownload(decodeURIComponent(scoreReportDownloadMatch[1]), req, res);
+    }
+    const scoreStampArchiveDownloadMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/scores\/stamp-archive\/download$/);
+    if (req.method === "GET" && scoreStampArchiveDownloadMatch) {
+      return await handleScoreStampArchiveDownload(decodeURIComponent(scoreStampArchiveDownloadMatch[1]), req, res);
+    }
+    const scoreStampApplicationMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/scores\/stamp-application$/);
+    if (req.method === "POST" && scoreStampApplicationMatch) {
+      return await handleScoreStampApplication(decodeURIComponent(scoreStampApplicationMatch[1]), req, res);
     }
     const sessionChangePreviewMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/sessions\/([^/]+)\/change-preview$/);
     if (req.method === "GET" && sessionChangePreviewMatch) {
