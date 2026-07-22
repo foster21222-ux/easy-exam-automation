@@ -122,13 +122,13 @@ export function operationBatchCodeFromText(value) {
 export function operationBatchListResultFromRows(rowTexts, batchName, detailUrl) {
   const normalizedName = text(batchName);
   if (!normalizedName) return null;
-  const codes = [...new Set((rowTexts || [])
-    .filter((rowText) => String(rowText ?? "").split(/\r?\n/).some((line) => text(line) === normalizedName))
-    .map(operationBatchCodeFromText)
-    .filter(Boolean))];
-  if (codes.length === 0) return null;
-  if (codes.length > 1) {
-    throw new Error(`批次列表中找到多个批次代码：${codes.join("、")}`);
+  const matchingRows = (rowTexts || [])
+    .map((rowText) => String(rowText ?? ""))
+    .filter((rowText) => rowText.split(/\r?\n/).some((line) => text(line) === normalizedName));
+  if (matchingRows.length === 0) return null;
+  const codes = matchingRows[0].match(/\b[A-Z]{3}\d{6}\b/g) || [];
+  if (matchingRows.length !== 1 || codes.length !== 1) {
+    throw new Error("批次列表存在多个批次代码或匹配行，无法确认唯一批次代码");
   }
   return {
     operationBatchCode: codes[0],
@@ -334,7 +334,11 @@ export async function resolveSubmittedOperationBatch(page, options = {}) {
     }
   } catch {}
   const findFromList = options.findFromList || ((batchListUrl, batchName) => findCreatedBatchFromList(page, batchListUrl, batchName));
-  return await findFromList(options.batchListUrl, options.batchName);
+  const result = await findFromList(options.batchListUrl, options.batchName);
+  if (!result) {
+    throw reconciliationRequiredError(new Error("创建已提交，但详情页和批次列表均未找到批次代码"));
+  }
+  return result;
 }
 
 function reconciliationRequiredError(error) {

@@ -7,6 +7,7 @@ import {
   operationBatchDisplayId,
 } from "./operation_batch.mjs";
 import {
+  OPERATION_BATCH_RECONCILIATION_REQUIRED,
   operationConsoleNeedsLogin,
   operationConsoleLoginMessage,
   operationBatchCodeFromText,
@@ -70,6 +71,19 @@ test("operation batch list result rejects ambiguous exact matches", () => {
   ], "目标项目_2026年8月", "http://operation/batch/batchList"), /多个批次代码/);
 });
 
+test("operation batch list result rejects duplicate matching rows with the same code", () => {
+  assert.throws(() => operationBatchListResultFromRows([
+    "QTT260007\n目标项目_2026年8月",
+    "QTT260007\n目标项目_2026年8月",
+  ], "目标项目_2026年8月", "http://operation/batch/batchList"), /无法确认唯一批次代码/);
+});
+
+test("operation batch list result rejects a matching row with multiple codes", () => {
+  assert.throws(() => operationBatchListResultFromRows([
+    "QTT260007\nQTT260008\n目标项目_2026年8月",
+  ], "目标项目_2026年8月", "http://operation/batch/batchList"), /无法确认唯一批次代码/);
+});
+
 test("submitted batch falls back to list and preserves the lookup result", async () => {
   const expected = {
     operationBatchCode: "QTT260007",
@@ -100,6 +114,18 @@ test("submitted batch uses the detail code when it appears without list lookup",
   assert.equal(result.operationBatchCode, "QTT260007");
   assert.equal(result.batchGuid, "guid-1");
   assert.equal(listLookups, 0);
+});
+
+test("submitted batch without detail or list result requires reconciliation", async () => {
+  await assert.rejects(
+    () => resolveSubmittedOperationBatch(fakeDetailPageWithoutCode(), {
+      batchListUrl: "http://operation/batch/batchList",
+      batchName: "目标项目_2026年8月",
+      findFromList: async () => null,
+      detailCodeWaitMs: 1,
+    }),
+    (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED && error?.status === 409,
+  );
 });
 
 test("buildOperationBatchDraft maps business requirement fields with explicit sources", () => {
