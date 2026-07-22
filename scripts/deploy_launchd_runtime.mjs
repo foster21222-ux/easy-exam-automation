@@ -2,9 +2,11 @@
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -13,6 +15,8 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+export const DEPLOY_ROLLBACK_INCOMPLETE = "DEPLOY_ROLLBACK_INCOMPLETE";
 
 function parseArgs(argv) {
   const args = {};
@@ -40,8 +44,17 @@ function migrateRuntime(sourceDir, runtimeDir) {
   for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
     const targetPath = path.join(runtimeDir, entry.name);
     if (existsSync(targetPath)) continue;
-    cpSync(path.join(sourceDir, entry.name), targetPath, { recursive: true });
-    copied.push(entry.name);
+    const stagingDir = mkdtempSync(path.join(runtimeDir, ".deploy-runtime-"));
+    const stagedPath = path.join(stagingDir, entry.name);
+    try {
+      cpSync(path.join(sourceDir, entry.name), stagedPath, { recursive: true });
+      if (!existsSync(targetPath)) {
+        renameSync(stagedPath, targetPath);
+        copied.push(entry.name);
+      }
+    } finally {
+      rmSync(stagingDir, { recursive: true, force: true });
+    }
   }
   return copied;
 }
@@ -74,81 +87,201 @@ function dependencyDeclarationsChanged(sourceDir, appDir) {
     !== (existsSync(appLockPath) ? readFileSync(appLockPath, "utf8") : null);
 }
 
-function restorePreservedEntries(appDir, preservedDir, preservedNames) {
-  const remaining = [];
-  for (const name of preservedNames) {
-    const preservedPath = path.join(preservedDir, name);
-    if (!existsSync(preservedPath)) continue;
-    try {
-      mkdirSync(appDir, { recursive: true });
-      rmSync(path.join(appDir, name), { recursive: true, force: true });
-      renameSync(preservedPath, path.join(appDir, name));
-    } catch {
-      remaining.push(name);
+const APP_COPY_NAMES = [
+  "server", "scripts", "outputs", "web", "deploy", "template",
+  "package.json", "package-lock.json", "requirements.txt", ".env", "node_modules",
+];
+const APP_DIRECTORY_NAMES = ["server", "scripts", "outputs", "web", "deploy", "template"];
+const PRESERVED_APP_NAMES = [".env", "node_modules"];
+
+function buildStagedApp(sourceDir, stagedAppDir) {
+  const copied = [];
+  for (const name of APP_COPY_NAMES) {
+    if (copyIfPresent(path.join(sourceDir, name), path.join(stagedAppDir, name))) copied.push(name);
+  }
+  symlinkSync("../runtime", path.join(stagedAppDir, ".easy_exam_runtime"), "dir");
+  const stagedServerDir = path.join(stagedAppDir, "server");
+  const stagedPackageJson = path.join(stagedAppDir, "package.json");
+  const stagedEntry = path.join(stagedServerDir, "easy_exam_server.mjs");
+  if (!existsSync(stagedServerDir) || !lstatSync(stagedServerDir).isDirectory()) {
+    throw new Error("Staged app server must be a directory");
+  }
+  if (!existsSync(stagedPackageJson) || !lstatSync(stagedPackageJson).isFile()) {
+    throw new Error("Staged app package.json is missing");
+  }
+  if (!existsSync(stagedEntry) || !lstatSync(stagedEntry).isFile()) {
+    throw new Error("Staged app server entry is missing");
+  }
+  for (const name of APP_DIRECTORY_NAMES) {
+    if (existsSync(path.join(sourceDir, name)) && !lstatSync(path.join(stagedAppDir, name)).isDirectory()) {
+      throw new Error(`Staged app ${name} must be a directory`);
     }
   }
-  return remaining;
+  const runtimeLink = path.join(stagedAppDir, ".easy_exam_runtime");
+  if (!lstatSync(runtimeLink).isSymbolicLink() || readlinkSync(runtimeLink) !== "../runtime") {
+    throw new Error("Staged app runtime symlink is invalid");
+  }
+  return copied;
 }
 
-const args = parseArgs(process.argv);
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const sourceDir = path.resolve(args.source || path.join(scriptDir, ".."));
-const targetDir = path.resolve(args.target || path.join(os.homedir(), "Library", "Application Support", "easy-exam-automation"));
-const appDir = path.join(targetDir, "app");
-const runtimeDir = path.join(targetDir, "runtime");
-
-mkdirSync(targetDir, { recursive: true });
-mkdirSync(runtimeDir, { recursive: true });
-const sourceNodeModules = path.join(sourceDir, "node_modules");
-const appNodeModules = path.join(appDir, "node_modules");
-if (!existsSync(sourceNodeModules) && existsSync(appNodeModules) && dependencyDeclarationsChanged(sourceDir, appDir)) {
-  throw new Error("Refusing to preserve existing app/node_modules because source dependency declarations changed. Provide source/node_modules or install dependencies before deployment.");
+function rollbackIncompleteError(originalError, rollbackError, recoveryPaths) {
+  const originalMessage = originalError instanceof Error ? originalError.message : String(originalError);
+  const appState = existsSync(recoveryPaths.app)
+    ? "present"
+    : "absent; restore the old app from backup/app before removing stage";
+  const error = new Error(
+    `${originalMessage}\nRollback incomplete.\nRecovery paths:\nbackup: ${recoveryPaths.backup}\nstage: ${recoveryPaths.stage}\napp: ${recoveryPaths.app} (${appState})\nlock: ${recoveryPaths.lock}`,
+    { cause: rollbackError },
+  );
+  error.code = DEPLOY_ROLLBACK_INCOMPLETE;
+  error.recoveryPaths = { ...recoveryPaths, appState };
+  return error;
 }
-const preservedDir = mkdtempSync(path.join(targetDir, ".deploy-preserved-"));
-const preservedNames = [];
-const copied = [];
-let migratedRuntime = [];
-let deploymentComplete = false;
-try {
-  for (const name of [".env", "node_modules"]) {
-    const currentPath = path.join(appDir, name);
-    if (!existsSync(currentPath)) continue;
-    renameSync(currentPath, path.join(preservedDir, name));
-    preservedNames.push(name);
-  }
 
-  rmSync(appDir, { recursive: true, force: true });
-  mkdirSync(appDir, { recursive: true });
-  for (const name of ["server", "scripts", "outputs", "web", "deploy", "template", "package.json", "package-lock.json", "requirements.txt", ".env", "node_modules"]) {
-    if (copyIfPresent(path.join(sourceDir, name), path.join(appDir, name))) copied.push(name);
+function rollbackAppSwitch({ appDir, stagedAppDir, backupAppDir, backupRootDir, movedNames, appBackedUp, stagedActivated, originalError, renameSyncImpl, recoveryPaths }) {
+  let rollbackError;
+  try {
+    if (appBackedUp && existsSync(backupAppDir)) {
+      const activeAppDir = stagedActivated ? appDir : stagedAppDir;
+      for (const name of movedNames) {
+        const activePath = path.join(activeAppDir, name);
+        if (existsSync(activePath)) renameSyncImpl(activePath, path.join(backupAppDir, name));
+      }
+      if (stagedActivated) rmSync(activeAppDir, { recursive: true, force: true });
+      renameSyncImpl(backupAppDir, appDir);
+      if (!stagedActivated) rmSync(stagedAppDir, { recursive: true, force: true });
+    } else if (!appBackedUp) {
+      rmSync(stagedAppDir, { recursive: true, force: true });
+    } else {
+      throw new Error("Backup app is missing during rollback");
+    }
+    rmSync(backupRootDir, { recursive: true, force: true });
+  } catch (error) {
+    rollbackError = error;
   }
-  symlinkSync("../runtime", path.join(appDir, ".easy_exam_runtime"), "dir");
-  migratedRuntime = args.migrateRuntime
-    ? migrateRuntime(path.join(sourceDir, ".easy_exam_runtime"), runtimeDir)
-    : [];
+  if (rollbackError) {
+    throw rollbackIncompleteError(originalError, rollbackError, recoveryPaths);
+  }
+  throw originalError;
+}
 
-  for (const name of preservedNames) {
-    const currentPath = path.join(appDir, name);
-    if (!existsSync(currentPath)) renameSync(path.join(preservedDir, name), currentPath);
+export function switchStagedApp(appDir, stagedAppDir, targetDir, { lockPath = path.join(targetDir, ".deploy-lock"), renameSyncImpl = renameSync } = {}) {
+  const backupRootDir = mkdtempSync(path.join(targetDir, ".deploy-backup-"));
+  const backupAppDir = path.join(backupRootDir, "app");
+  const recoveryPaths = {
+    backup: backupRootDir,
+    stage: stagedAppDir,
+    app: appDir,
+    lock: lockPath,
+  };
+  const hasExistingApp = existsSync(appDir);
+  const movedNames = [];
+  let appBackedUp = false;
+  let stagedActivated = false;
+  try {
+    if (hasExistingApp) {
+      renameSyncImpl(appDir, backupAppDir);
+      appBackedUp = true;
+    }
+    if (hasExistingApp) {
+      for (const name of PRESERVED_APP_NAMES) {
+        const stagedPath = path.join(stagedAppDir, name);
+        const backupPath = path.join(backupAppDir, name);
+        if (!existsSync(stagedPath) && existsSync(backupPath)) {
+          renameSyncImpl(backupPath, stagedPath);
+          movedNames.push(name);
+        }
+      }
+    }
+    renameSyncImpl(stagedAppDir, appDir);
+    stagedActivated = true;
+  } catch (error) {
+    rollbackAppSwitch({
+      appDir,
+      stagedAppDir,
+      backupAppDir,
+      backupRootDir,
+      movedNames,
+      appBackedUp,
+      stagedActivated,
+      originalError: error,
+      renameSyncImpl,
+      recoveryPaths,
+    });
   }
-  deploymentComplete = true;
-} catch (error) {
-  const remaining = restorePreservedEntries(appDir, preservedDir, preservedNames);
-  if (remaining.length === 0) {
-    rmSync(preservedDir, { recursive: true, force: true });
+  try {
+    rmSync(backupRootDir, { recursive: true, force: true });
+    return { backupPath: "" };
+  } catch {
+    return { backupPath: backupRootDir };
+  }
+}
+
+function acquireDeploymentLock(targetDir) {
+  const lockDir = path.join(targetDir, ".deploy-lock");
+  try {
+    mkdirSync(lockDir);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new Error(`Deployment already in progress or needs recovery: ${lockDir}`);
+    }
     throw error;
   }
-  throw new Error(`${error instanceof Error ? error.message : String(error)}\nRecovery path: ${preservedDir}\nRemaining preserved entries: ${remaining.join(", ")}`, { cause: error });
-} finally {
-  if (deploymentComplete) rmSync(preservedDir, { recursive: true, force: true });
+  return lockDir;
 }
 
-process.stdout.write(`${JSON.stringify({
-  ok: true,
-  sourceDir,
-  targetDir,
-  appDir,
-  runtimeDir,
-  copied,
-  migratedRuntime,
-}, null, 2)}\n`);
+export function releaseDeploymentLockAfterDeployment(lockDir, deploymentError) {
+  if (deploymentError?.code === DEPLOY_ROLLBACK_INCOMPLETE) return false;
+  rmSync(lockDir, { recursive: true, force: true });
+  return true;
+}
+
+function main() {
+  const args = parseArgs(process.argv);
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const sourceDir = path.resolve(args.source || path.join(scriptDir, ".."));
+  const targetDir = path.resolve(args.target || path.join(os.homedir(), "Library", "Application Support", "easy-exam-automation"));
+  const appDir = path.join(targetDir, "app");
+  const runtimeDir = path.join(targetDir, "runtime");
+
+  mkdirSync(targetDir, { recursive: true });
+  mkdirSync(runtimeDir, { recursive: true });
+  const lockDir = acquireDeploymentLock(targetDir);
+  const sourceNodeModules = path.join(sourceDir, "node_modules");
+  const appNodeModules = path.join(appDir, "node_modules");
+  let deploymentError;
+  let stagedAppDir = "";
+  try {
+    if (!existsSync(sourceNodeModules) && existsSync(appNodeModules) && dependencyDeclarationsChanged(sourceDir, appDir)) {
+      throw new Error("Refusing to preserve existing app/node_modules because source dependency declarations changed. Provide source/node_modules or install dependencies before deployment.");
+    }
+    stagedAppDir = mkdtempSync(path.join(targetDir, ".deploy-stage-"));
+    const copied = buildStagedApp(sourceDir, stagedAppDir);
+    const migratedRuntime = args.migrateRuntime
+      ? migrateRuntime(path.join(sourceDir, ".easy_exam_runtime"), runtimeDir)
+      : [];
+    const { backupPath } = switchStagedApp(appDir, stagedAppDir, targetDir, { lockPath: lockDir });
+
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      sourceDir,
+      targetDir,
+      appDir,
+      runtimeDir,
+      copied,
+      migratedRuntime,
+      ...(backupPath ? { backupPath, warning: "New app is active but the previous app backup could not be cleaned" } : {}),
+    }, null, 2)}\n`);
+  } catch (error) {
+    deploymentError = error;
+    if (stagedAppDir && error?.code !== DEPLOY_ROLLBACK_INCOMPLETE) {
+      rmSync(stagedAppDir, { recursive: true, force: true });
+    }
+    throw error;
+  } finally {
+    releaseDeploymentLockAfterDeployment(lockDir, deploymentError);
+  }
+}
+
+const scriptPath = fileURLToPath(import.meta.url);
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) main();
