@@ -293,8 +293,25 @@ test("batch search response requires a list endpoint and an exact accepted searc
     "http://operation/batch/batchList",
     options,
   ), false);
+  for (const path of [
+    "/api/telemetry/batch/list",
+    "/proxy/api/batch/list",
+    "/api/batch/list/error",
+    "/api/batch/list/v2",
+  ]) {
+    assert.equal(operationBatchTableResponseMatches(
+      response({ path, postData: JSON.stringify({ batchName: expectedBatchName }) }),
+      "http://operation/batch/batchList",
+      options,
+    ), false);
+  }
   assert.equal(operationBatchTableResponseMatches(
     response({ postData: JSON.stringify({ label: expectedBatchName }) }),
+    "http://operation/batch/batchList",
+    options,
+  ), false);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ postData: JSON.stringify({ error: { batchName: expectedBatchName } }) }),
     "http://operation/batch/batchList",
     options,
   ), false);
@@ -313,6 +330,18 @@ test("batch search response requires a list endpoint and an exact accepted searc
     "http://operation/batch/batchList",
     options,
   ), true);
+  for (const path of [
+    "/batch/page",
+    "/api/batch/getBatchList",
+    "/api/batch/queryBatchList",
+    "/batch/batchList",
+  ]) {
+    assert.equal(operationBatchTableResponseMatches(
+      response({ path, postData: JSON.stringify({ batchName: expectedBatchName }) }),
+      "http://operation/batch/batchList",
+      options,
+    ), true);
+  }
   assert.equal(operationBatchTableResponseMatches(
     response({ path: `/api/batch/search?batchName=${encodeURIComponent(expectedBatchName)}`, method: "GET" }),
     "http://operation/batch/batchList",

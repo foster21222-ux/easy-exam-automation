@@ -317,12 +317,9 @@ async function ensureBatchListReady(page, batchListUrl, options = {}) {
 }
 
 function operationBatchListEndpoint(urlValue, pageUrl) {
-  const pathname = new URL(urlValue, pageUrl).pathname
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase();
-  const words = pathname.split(/[^a-z0-9]+/).filter(Boolean);
-  return words.includes("batch")
-    && words.some((word) => ["list", "query", "search", "page"].includes(word));
+  const pathname = new URL(urlValue, pageUrl).pathname;
+  return /^\/(?:api\/)?batch\/(?:list|query|search|page|getBatchList|queryBatchList|batchList)\/?$/i
+    .test(pathname);
 }
 
 function operationBatchSearchValues(urlValue, postData, pageUrl) {
@@ -335,14 +332,12 @@ function operationBatchSearchValues(urlValue, postData, pageUrl) {
   const body = String(postData ?? "").trim();
   if (!body) return values;
   try {
-    const collect = (value) => {
-      if (!value || typeof value !== "object") return;
-      for (const [key, child] of Object.entries(value)) {
-        if (acceptedFields.has(key)) values.push(text(child));
-        else if (child && typeof child === "object") collect(child);
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [key, value] of Object.entries(parsed)) {
+        if (acceptedFields.has(key)) values.push(text(value));
       }
-    };
-    collect(JSON.parse(body));
+    }
   } catch {
     for (const [key, value] of new URLSearchParams(body)) {
       if (acceptedFields.has(key)) values.push(text(value));
