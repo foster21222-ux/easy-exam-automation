@@ -316,25 +316,61 @@ async function ensureBatchListReady(page, batchListUrl, options = {}) {
   await createButton.waitFor({ state: "visible", timeout: 30000 });
 }
 
+function operationBatchListEndpoint(urlValue, pageUrl) {
+  const pathname = new URL(urlValue, pageUrl).pathname
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase();
+  const words = pathname.split(/[^a-z0-9]+/).filter(Boolean);
+  return words.includes("batch")
+    && words.some((word) => ["list", "query", "search", "page"].includes(word));
+}
+
+function operationBatchSearchValues(urlValue, postData, pageUrl) {
+  const acceptedFields = new Set(["batchName", "batch_name"]);
+  const values = [];
+  const url = new URL(urlValue, pageUrl);
+  for (const [key, value] of url.searchParams) {
+    if (acceptedFields.has(key)) values.push(text(value));
+  }
+  const body = String(postData ?? "").trim();
+  if (!body) return values;
+  try {
+    const collect = (value) => {
+      if (!value || typeof value !== "object") return;
+      for (const [key, child] of Object.entries(value)) {
+        if (acceptedFields.has(key)) values.push(text(child));
+        else if (child && typeof child === "object") collect(child);
+      }
+    };
+    collect(JSON.parse(body));
+  } catch {
+    for (const [key, value] of new URLSearchParams(body)) {
+      if (acceptedFields.has(key)) values.push(text(value));
+    }
+  }
+  return values;
+}
+
 export function operationBatchTableResponseMatches(response, pageUrl, options = {}) {
   try {
     const request = response.request();
     const resourceType = request.resourceType();
+    const pageOrigin = new URL(pageUrl).origin;
+    const responseUrl = response.url();
+    const requestUrl = request.url?.() || responseUrl;
+    const method = text(request.method?.()).toUpperCase();
     if ((resourceType !== "xhr" && resourceType !== "fetch")
-      || new URL(response.url(), pageUrl).origin !== new URL(pageUrl).origin) {
+      || (method !== "GET" && method !== "POST")
+      || new URL(responseUrl, pageUrl).origin !== pageOrigin
+      || new URL(requestUrl, pageUrl).origin !== pageOrigin
+      || !operationBatchListEndpoint(responseUrl, pageUrl)
+      || !operationBatchListEndpoint(requestUrl, pageUrl)) {
       return false;
     }
-    const requiredValue = text(options.requestIncludes);
-    if (!requiredValue) return true;
-    const requestValues = [response.url(), request.url?.(), request.postData?.()]
-      .map((value) => {
-        try {
-          return decodeURIComponent(String(value ?? "").replace(/\+/g, " "));
-        } catch {
-          return String(value ?? "");
-        }
-      });
-    return requestValues.some((value) => value.includes(requiredValue));
+    const expectedBatchName = text(options.expectedBatchName);
+    if (!expectedBatchName) return true;
+    return operationBatchSearchValues(requestUrl, request.postData?.(), pageUrl)
+      .some((value) => value === expectedBatchName);
   } catch {
     return false;
   }
@@ -415,13 +451,13 @@ async function collectOperationBatchListRows(page, initialRows, options = {}) {
       throw reconciliationRequiredError(new Error("批次列表分页缺少唯一的 Ant 下一页控件，无法证明结果完整"));
     }
     const next = nextLocator.first();
-    const classes = text(await next.getAttribute("class"));
-    const ariaDisabled = text(await next.getAttribute("aria-disabled"));
-    if (classes.split(/\s+/).includes("ant-pagination-disabled") || ariaDisabled === "true") return allRows;
     const activePage = await operationBatchActivePage(page);
     if (activePage !== pageNumber) {
       throw reconciliationRequiredError(new Error(`批次列表当前页 ${activePage} 与预期页 ${pageNumber} 不一致，无法证明分页连续`));
     }
+    const classes = text(await next.getAttribute("class"));
+    const ariaDisabled = text(await next.getAttribute("aria-disabled"));
+    if (classes.split(/\s+/).includes("ant-pagination-disabled") || ariaDisabled === "true") return allRows;
     if (pageNumber >= maxPages) {
       throw reconciliationRequiredError(new Error(`批次列表超过安全分页上限 ${maxPages}，无法确认完整结果`));
     }
@@ -456,7 +492,7 @@ export async function findCreatedBatchFromList(page, batchListUrl, batchName, op
     page,
     () => searchInput.press("Enter"),
     options,
-    { requestIncludes: normalizedName },
+    { expectedBatchName: normalizedName },
   );
   const allRows = await collectOperationBatchListRows(page, firstPageRows, options);
   return operationBatchListResultFromRows(allRows, normalizedName, page.url());
@@ -472,10 +508,14 @@ export async function resolveSubmittedOperationBatch(page, options = {}) {
         null,
         { timeout: detailCodeWaitMs },
       );
-      const code = operationBatchCodeFromText(await page.locator("body").innerText());
-      if (code) {
+      const bodyText = await page.locator("body").innerText();
+      const hasExactBatchName = String(bodyText ?? "")
+        .split(/\r?\n/)
+        .some((line) => text(line) === text(options.batchName));
+      const codes = String(bodyText ?? "").match(/\b[A-Z]{3}\d{6}\b/g) || [];
+      if (hasExactBatchName && codes.length === 1) {
         return {
-          operationBatchCode: code,
+          operationBatchCode: codes[0],
           batchGuid: detail.batchGuid,
           detailUrl: detail.detailUrl,
           status: "created_unpublished",

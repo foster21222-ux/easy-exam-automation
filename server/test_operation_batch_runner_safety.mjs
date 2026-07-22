@@ -11,13 +11,20 @@ import {
   runWithOperationBatchContext,
 } from "./operation_batch_runner.mjs";
 
-function fakeBatchListPage(pages, { advancePage = true, malformedPagination = false, paginationCount } = {}) {
+function fakeBatchListPage(pages, {
+  advancePage = true,
+  initialPageIndex = 0,
+  malformedPagination = false,
+  paginationCount,
+} = {}) {
   const events = [];
-  let pageIndex = 0;
+  let pageIndex = initialPageIndex;
   const response = {
     url: () => "http://operation/api/batch/list",
     request: () => ({
       resourceType: () => "xhr",
+      method: () => "POST",
+      url: () => "http://operation/api/batch/list",
       postData: () => JSON.stringify({ batchName: "目标项目_2026年8月" }),
     }),
     ok: () => true,
@@ -137,10 +144,10 @@ function fakeBatchListPage(pages, { advancePage = true, malformedPagination = fa
   return page;
 }
 
-function fakePageWithCode(url, code = "OLD123456") {
+function fakePageWithCode(url, code = "OLD123456", batchName = "目标项目_2026年8月") {
   return {
     locator() {
-      return { innerText: async () => `${code}\n目标项目_2026年8月` };
+      return { innerText: async () => `${code}\n${batchName}` };
     },
     url() {
       return url;
@@ -175,6 +182,47 @@ test("submitted batch only trusts a detail page with a batch guid", async () => 
     assert.deepEqual(result, expected);
     assert.deepEqual(lookups, [[expected.detailUrl, "目标项目_2026年8月"]]);
   }
+});
+
+test("submitted detail requires the exact batch name and one whole-page batch code", async () => {
+  const expected = {
+    operationBatchCode: "QTT260007",
+    batchGuid: "",
+    detailUrl: "http://operation/batch/batchList",
+    status: "created_unpublished",
+  };
+  const detailUrl = "http://operation/batch/batchDetail?batch_guid=guid-1";
+
+  for (const page of [
+    fakePageWithCode(detailUrl, "OLD123456", "其他项目_2026年8月"),
+    fakePageWithCode(detailUrl, "OLD123456\nQTT260007"),
+  ]) {
+    let lookups = 0;
+    const result = await resolveSubmittedOperationBatch(page, {
+      batchListUrl: expected.detailUrl,
+      batchName: "目标项目_2026年8月",
+      findFromList: async () => {
+        lookups += 1;
+        return expected;
+      },
+      detailCodeWaitMs: 1,
+    });
+
+    assert.deepEqual(result, expected);
+    assert.equal(lookups, 1);
+  }
+
+  const direct = await resolveSubmittedOperationBatch(
+    fakePageWithCode(detailUrl, "QTT260007"),
+    {
+      batchListUrl: expected.detailUrl,
+      batchName: "目标项目_2026年8月",
+      findFromList: async () => { throw new Error("unexpected list lookup"); },
+      detailCodeWaitMs: 1,
+    },
+  );
+  assert.equal(direct.operationBatchCode, "QTT260007");
+  assert.equal(direct.batchGuid, "guid-1");
 });
 
 test("batch rows accept structured cells and tab separated cells", () => {
@@ -224,21 +272,62 @@ test("batch search registers its response wait before Enter and waits for stable
   assert.ok(page.events.filter((event) => event === "rows:1").length >= 2);
 });
 
-test("batch search response must carry the exact query value", () => {
-  const response = (postData) => ({
-    url: () => "http://operation/api/batch/list",
-    request: () => ({ resourceType: () => "xhr", postData: () => postData }),
-  });
+test("batch search response requires a list endpoint and an exact accepted search field", () => {
+  const response = ({ path = "/api/batch/list", method = "POST", postData = "" } = {}) => {
+    const url = new URL(path, "http://operation").toString();
+    return {
+      url: () => url,
+      request: () => ({
+        resourceType: () => "xhr",
+        method: () => method,
+        url: () => url,
+        postData: () => postData,
+      }),
+    };
+  };
+  const expectedBatchName = "目标项目_2026年8月";
+  const options = { expectedBatchName };
+
   assert.equal(operationBatchTableResponseMatches(
-    response('{"heartbeat":true}'),
+    response({ path: "/api/telemetry", postData: JSON.stringify({ batchName: expectedBatchName }) }),
     "http://operation/batch/batchList",
-    { requestIncludes: "目标项目_2026年8月" },
+    options,
   ), false);
   assert.equal(operationBatchTableResponseMatches(
-    response('{"batchName":"目标项目_2026年8月"}'),
+    response({ postData: JSON.stringify({ label: expectedBatchName }) }),
     "http://operation/batch/batchList",
-    { requestIncludes: "目标项目_2026年8月" },
+    options,
+  ), false);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ postData: JSON.stringify({ batchName: `${expectedBatchName}_旧` }) }),
+    "http://operation/batch/batchList",
+    options,
+  ), false);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ method: "PUT", postData: JSON.stringify({ batchName: expectedBatchName }) }),
+    "http://operation/batch/batchList",
+    options,
+  ), false);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ postData: JSON.stringify({ batchName: expectedBatchName }) }),
+    "http://operation/batch/batchList",
+    options,
   ), true);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ path: `/api/batch/search?batchName=${encodeURIComponent(expectedBatchName)}`, method: "GET" }),
+    "http://operation/batch/batchList",
+    options,
+  ), true);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ path: "/api/batch/query", postData: new URLSearchParams({ batch_name: expectedBatchName }).toString() }),
+    "http://operation/batch/batchList",
+    options,
+  ), true);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ postData: '{"heartbeat":true}' }),
+    "http://operation/batch/batchList",
+    options,
+  ), false);
 });
 
 test("batch lookup collects every Ant pagination page before resolving", async () => {
@@ -329,6 +418,23 @@ test("batch lookup rejects immediately when the Ant active page does not advance
     (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED && /未推进/.test(error.message),
   );
   assert.equal(page.events.filter((event) => event === "next:click").length, 1);
+});
+
+test("batch lookup rejects a terminal active page other than page one", async () => {
+  const page = fakeBatchListPage([
+    [["QTT260008", "其他项目_2026年8月"]],
+    [["QTT260007", "目标项目_2026年8月"]],
+  ], { initialPageIndex: 1 });
+  await assert.rejects(
+    () => findCreatedBatchFromList(
+      page,
+      "http://operation/batch/batchList",
+      "目标项目_2026年8月",
+      { tableStablePollMs: 0 },
+    ),
+    (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED && /预期页/.test(error.message),
+  );
+  assert.equal(page.events.filter((event) => event === "next:click").length, 0);
 });
 
 test("operation context closes when page acquisition fails", async () => {
