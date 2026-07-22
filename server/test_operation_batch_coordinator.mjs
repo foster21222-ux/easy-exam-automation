@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createOperationBatchCoordinator,
+  operationBatchCreationFailureResponse,
   readFreshOperationBatchTask,
   withFreshOperationBatchTask,
 } from "./operation_batch_coordinator.mjs";
@@ -95,6 +96,59 @@ test("deferred create and reconcile runners block same-task manual recording and
   }
 });
 
+test("deferred automation manual and delete operations reject draft writes with the fresh task", async () => {
+  for (const operation of ["automation", "manual", "delete"]) {
+    const { value } = coordinator();
+    const started = Promise.withResolvers();
+    const finish = Promise.withResolvers();
+    const freshTask = {
+      taskId: "task-a",
+      config: {
+        operationBatchCode: "EZT260003",
+        operationBatch: {
+          status: "creating",
+          code: "EZT260003",
+          events: [{ type: "operation_batch_created", code: "EZT260003" }],
+        },
+      },
+    };
+    const holder = withFreshOperationBatchTask({
+      acquire: () => operation === "automation"
+        ? value.acquireAutomation("task-a")
+        : value.acquireTask("task-a"),
+      readTask: async () => freshTask,
+      run: async () => {
+        started.resolve();
+        await finish.promise;
+      },
+    });
+    await started.promise;
+
+    let writes = 0;
+    const response = await withFreshOperationBatchTask({
+      acquire: () => value.acquireTask("task-a"),
+      readTask: async () => freshTask,
+      onAcquireError: async (error) => ({
+        statusCode: error.status,
+        task: await readFreshOperationBatchTask(async () => freshTask, null),
+      }),
+      run: async () => {
+        writes += 1;
+      },
+    });
+
+    assert.equal(response.statusCode, 409, operation);
+    assert.strictEqual(response.task, freshTask, operation);
+    assert.equal(writes, 0, operation);
+    assert.equal(response.task.config.operationBatch.status, "creating", operation);
+    assert.equal(response.task.config.operationBatch.code, "EZT260003", operation);
+    assert.equal(response.task.config.operationBatch.events.length, 1, operation);
+
+    finish.resolve();
+    await holder;
+  }
+});
+
 test("missing fresh task releases locks without calling the external operation", async () => {
   const { profileInFlight, taskInFlight, value } = coordinator();
   let runCalls = 0;
@@ -152,4 +206,39 @@ test("fresh same-code and different-code results never write over the stored tas
   assert.equal(writes, 0);
   assert.equal(storedTask.config.operationBatchCode, "EZT260003");
   assert.equal(storedTask.config.operationBatch.events.length, 1);
+});
+
+test("creation failure responses force reconciliation outcomes to stable HTTP 409", () => {
+  const latestTask = { taskId: "task-a", config: { operationBatch: { status: "reconciliation_required" } } };
+  const externalError = Object.assign(new Error("local save failed"), { status: 503 });
+  assert.deepEqual(operationBatchCreationFailureResponse({
+    error: externalError,
+    externalBatchConfirmed: true,
+    failure: { status: "failed" },
+    task: latestTask,
+  }), {
+    statusCode: 409,
+    body: {
+      error: "local save failed",
+      errorCode: "OPERATION_BATCH_RECONCILIATION_REQUIRED",
+      task: latestTask,
+    },
+  });
+
+  const pendingError = Object.assign(new Error("result requires reconciliation"), { status: 500 });
+  assert.equal(operationBatchCreationFailureResponse({
+    error: pendingError,
+    failure: { status: "reconciliation_required" },
+    task: latestTask,
+  }).statusCode, 409);
+
+  const ordinaryError = Object.assign(new Error("draft rejected"), { status: 422 });
+  assert.deepEqual(operationBatchCreationFailureResponse({
+    error: ordinaryError,
+    failure: { status: "failed" },
+    task: latestTask,
+  }), {
+    statusCode: 422,
+    body: { error: "draft rejected", task: latestTask },
+  });
 });

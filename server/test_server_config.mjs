@@ -80,6 +80,24 @@ test("operation batch create reconcile manual and delete execute through the fre
   }
 });
 
+test("operation batch draft POST reads before locking and merges only from the fresh task", () => {
+  const handler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchDraft"),
+    serverSource.indexOf("async function handleOperationBatchCreate"),
+  );
+  const getBranchIndex = handler.indexOf('if (req.method !== "POST")');
+  const bodyIndex = handler.indexOf("await readBody(req)");
+  const coordinatorIndex = handler.indexOf("withFreshOperationBatchTask");
+
+  assert.ok(getBranchIndex >= 0);
+  assert.ok(bodyIndex > getBranchIndex);
+  assert.ok(coordinatorIndex > bodyIndex);
+  assert.ok(handler.includes("operationBatchCoordinator.acquireTask(taskId)"));
+  assert.ok(handler.includes("buildOperationBatchDraft(freshTask, payload)"));
+  assert.ok(handler.includes("const current = freshTask.config?.operationBatch || {}"));
+  assert.equal(handler.slice(coordinatorIndex).includes("task.config?.operationBatch"), false);
+});
+
 test("manual operation batch result reads its request body before acquiring the task lock", () => {
   const handler = serverSource.slice(
     serverSource.indexOf("async function handleOperationBatchResult"),

@@ -62,6 +62,7 @@ import {
 } from "./operation_batch.mjs";
 import {
   createOperationBatchCoordinator,
+  operationBatchCreationFailureResponse,
   readFreshOperationBatchTask,
   withFreshOperationBatchTask,
 } from "./operation_batch_coordinator.mjs";
@@ -5391,20 +5392,30 @@ async function persistOperationBatchResult(taskId, task, result) {
 async function handleOperationBatchDraft(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
-  const payload = req.method === "POST" ? (parseJsonSafe(await readBody(req)) || {}) : operationBatchDraftOverridesFromTask(task);
-  const draft = buildOperationBatchDraft(task, payload);
   if (req.method !== "POST") {
+    const draft = buildOperationBatchDraft(task, operationBatchDraftOverridesFromTask(task));
     return json(res, 200, { ok: true, draft, task });
   }
-  const current = task.config?.operationBatch || {};
-  const operationBatch = {
-    ...current,
-    status: current.status || "draft",
-    draft,
-    updatedAt: new Date().toISOString(),
-  };
-  const updated = await runTaskState("update_config", { taskId, config: { operationBatch } });
-  return json(res, 200, { ok: true, draft, task: updated });
+  const payload = parseJsonSafe(await readBody(req)) || {};
+  return await withFreshOperationBatchTask({
+    acquire: () => operationBatchCoordinator.acquireTask(taskId),
+    readTask: () => runTaskState("get", { taskId }),
+    onAcquireError: (error) => operationBatchLockConflictResponse(taskId, task, res, error),
+    onMissing: () => notFound(res),
+    run: async (freshTask) => {
+      if (!visibleByOwner(auth, req, freshTask)) return notFound(res);
+      const draft = buildOperationBatchDraft(freshTask, payload);
+      const current = freshTask.config?.operationBatch || {};
+      const operationBatch = {
+        ...current,
+        status: current.status || "draft",
+        draft,
+        updatedAt: new Date().toISOString(),
+      };
+      const updated = await runTaskState("update_config", { taskId, config: { operationBatch } });
+      return json(res, 200, { ok: true, draft, task: updated });
+    },
+  });
 }
 
 async function handleOperationBatchCreate(taskId, req, res) {
@@ -5489,23 +5500,29 @@ async function handleOperationBatchCreate(taskId, req, res) {
           ...(saved.status === "idempotent" ? { skipped: "operation_batch_result_already_recorded" } : {}),
         });
       } catch (error) {
+        const failure = operationBatchFailureState(error, externalBatchConfirmed);
         let failedTask;
         try {
           failedTask = await runTaskState("get", { taskId });
         } catch (readError) {
-          return json(res, 500, {
-            error: `${error instanceof Error ? error.message : String(error)}；读取最新任务失败：${readError instanceof Error ? readError.message : String(readError)}`,
-            ...(externalBatchConfirmed ? { errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED } : {}),
+          const response = operationBatchCreationFailureResponse({
+            error: new Error(`${error instanceof Error ? error.message : String(error)}；读取最新任务失败：${readError instanceof Error ? readError.message : String(readError)}`),
+            externalBatchConfirmed,
+            failure,
+            reconciliationErrorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
           });
+          return json(res, response.statusCode, response.body);
         }
         if (!failedTask) {
-          return json(res, externalBatchConfirmed ? 409 : 404, {
-            error: error instanceof Error ? error.message : String(error),
-            ...(externalBatchConfirmed ? { errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED } : {}),
+          const response = operationBatchCreationFailureResponse({
+            error,
+            externalBatchConfirmed,
+            failure,
+            reconciliationErrorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
           });
+          return json(res, response.statusCode === 409 ? 409 : 404, response.body);
         }
         const failedCurrent = failedTask.config?.operationBatch || {};
-        const failure = operationBatchFailureState(error, externalBatchConfirmed);
         const updated = await runTaskState("update_config", {
           taskId,
           config: {
@@ -5517,7 +5534,14 @@ async function handleOperationBatchCreate(taskId, req, res) {
             },
           },
         });
-        return json(res, error?.status || 500, { error: error instanceof Error ? error.message : String(error), task: updated });
+        const response = operationBatchCreationFailureResponse({
+          error,
+          externalBatchConfirmed,
+          failure,
+          task: updated,
+          reconciliationErrorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
+        });
+        return json(res, response.statusCode, response.body);
       }
     },
   });

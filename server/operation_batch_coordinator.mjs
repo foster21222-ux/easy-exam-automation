@@ -69,3 +69,24 @@ export async function readFreshOperationBatchTask(readTask, fallbackTask) {
     return fallbackTask;
   }
 }
+
+export function operationBatchCreationFailureResponse(options = {}) {
+  const {
+    error,
+    externalBatchConfirmed = false,
+    failure = {},
+    task,
+    reconciliationErrorCode = "OPERATION_BATCH_RECONCILIATION_REQUIRED",
+  } = options;
+  const reconciliationRequired = externalBatchConfirmed
+    || failure.status === "reconciliation_required";
+  const body = {
+    error: error instanceof Error ? error.message : String(error),
+    ...(reconciliationRequired ? { errorCode: reconciliationErrorCode } : {}),
+    ...(task === undefined ? {} : { task }),
+  };
+  return {
+    statusCode: reconciliationRequired ? 409 : (error?.status || 500),
+    body,
+  };
+}
