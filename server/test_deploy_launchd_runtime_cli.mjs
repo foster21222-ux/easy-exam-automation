@@ -176,6 +176,18 @@ test("launchd runtime deployment refuses changed dependency declarations without
   mkdirSync(path.join(targetDir, "app", "node_modules", "playwright"), { recursive: true });
   writeFileSync(path.join(targetDir, "app", "node_modules", "playwright", "installed.marker"), "old\n");
   writeSourceServer(sourceDir, "version-2");
+
+  writeFileSync(path.join(sourceDir, "package-lock.json"), "source-lock\n");
+  assert.throws(
+    () => execFileSync(process.execPath, command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+    (error) => /node_modules.*dependency declarations/i.test(String(error.stderr || error.message)),
+  );
+  writeFileSync(path.join(targetDir, "app", "package-lock.json"), "different-app-lock\n");
+  assert.throws(
+    () => execFileSync(process.execPath, command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+    (error) => /node_modules.*dependency declarations/i.test(String(error.stderr || error.message)),
+  );
+  rmSync(path.join(sourceDir, "package-lock.json"));
   writeFileSync(path.join(sourceDir, "package.json"), '{"dependencies":{"new-package":"1.0.0"}}\n');
 
   assert.throws(
@@ -187,6 +199,33 @@ test("launchd runtime deployment refuses changed dependency declarations without
   assert.equal(readFileSync(path.join(targetDir, "app", "node_modules", "playwright", "installed.marker"), "utf8"), "old\n");
   assert.equal(readFileSync(path.join(targetDir, "app", "server", "app.mjs"), "utf8"), "version-1\n");
   assert.deepEqual(readdirSync(targetDir).filter((name) => name.startsWith(".deploy-")), []);
+});
+
+test("launchd runtime deployment preserves installed dependencies when only the app has an automatic lockfile", () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-launchd-runtime-app-lock-"));
+  const sourceDir = path.join(tempDir, "source");
+  const targetDir = path.join(tempDir, "target");
+  for (const dir of ["server", "scripts", "outputs", "web", "deploy", "template"]) {
+    mkdirSync(path.join(sourceDir, dir), { recursive: true });
+  }
+  writeSourceServer(sourceDir, "version-1");
+  writeFileSync(path.join(sourceDir, "package.json"), '{"dependencies":{"playwright":"1.0.0"}}\n');
+  const command = [
+    path.join(rootDir, "scripts", "deploy_launchd_runtime.mjs"),
+    "--source", sourceDir,
+    "--target", targetDir,
+  ];
+  execFileSync(process.execPath, command, { encoding: "utf8" });
+
+  mkdirSync(path.join(targetDir, "app", "node_modules", "playwright"), { recursive: true });
+  writeFileSync(path.join(targetDir, "app", "node_modules", "playwright", "installed.marker"), "installed\n");
+  writeFileSync(path.join(targetDir, "app", "package-lock.json"), '{"lockfileVersion":3}\n');
+  writeSourceServer(sourceDir, "version-2");
+
+  execFileSync(process.execPath, command, { encoding: "utf8" });
+
+  assert.equal(readFileSync(path.join(targetDir, "app", "server", "app.mjs"), "utf8"), "version-2\n");
+  assert.equal(readFileSync(path.join(targetDir, "app", "node_modules", "playwright", "installed.marker"), "utf8"), "installed\n");
 });
 
 test("launchd runtime deployment leaves the old app untouched when staged app validation fails", () => {

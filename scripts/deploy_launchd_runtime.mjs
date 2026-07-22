@@ -83,8 +83,9 @@ function dependencyDeclarationsChanged(sourceDir, appDir) {
     !== dependencyDeclaration(path.join(appDir, "package.json"))) return true;
   const sourceLockPath = path.join(sourceDir, "package-lock.json");
   const appLockPath = path.join(appDir, "package-lock.json");
-  return (existsSync(sourceLockPath) ? readFileSync(sourceLockPath, "utf8") : null)
-    !== (existsSync(appLockPath) ? readFileSync(appLockPath, "utf8") : null);
+  if (!existsSync(sourceLockPath)) return false;
+  return !existsSync(appLockPath)
+    || readFileSync(sourceLockPath, "utf8") !== readFileSync(appLockPath, "utf8");
 }
 
 const APP_COPY_NAMES = [
