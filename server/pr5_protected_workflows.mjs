@@ -1,5 +1,5 @@
 export const PROTECTED_BASE_COMMIT =
-  "e3250c09bfb2666a9787b4d23bdf348634f69ff8";
+  "d4fb619512e5e8227a6c397c7c19b05c2b1daddd";
 
 export const PROTECTED_EXACT_FILES = [
   "server/fanwei_auto_read.mjs",
@@ -78,69 +78,10 @@ export const PROTECTED_SHARED_REGIONS = {
       endAnchor: "const roomsPreviewMatch = url.pathname.match(",
       allowedInsertions: [
         {
-          name: "email settings route",
-          kind: "js-block",
-          startAnchor: "if ((req.method === \"GET\" || req.method === \"POST\") && url.pathname === \"/api/email/settings\") {",
-          afterAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/settings\") {",
-          beforeAnchor: "if (url.pathname === \"/api/customer-service-scheduler\" || url.pathname.startsWith(\"/api/customer-service-scheduler/\")) {",
-        },
-        {
-          name: "email test route",
-          kind: "js-block",
-          startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/email/test\") {",
-          afterAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/settings\") {",
-          beforeAnchor: "if (url.pathname === \"/api/customer-service-scheduler\" || url.pathname.startsWith(\"/api/customer-service-scheduler/\")) {",
-        },
-        {
-          name: "operation environment route",
-          kind: "js-block",
-          startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/operation-console/environment\") {",
-          afterAnchor: "if (await handleWechatCollector(req, res, url)) {",
-          beforeAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/tasks\") {",
-        },
-        {
-          name: "operation environment install route",
-          kind: "js-block",
-          startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/operation-console/environment/install\") {",
-          afterAnchor: "if (await handleWechatCollector(req, res, url)) {",
-          beforeAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/tasks\") {",
-        },
-        {
-          name: "operation environment enable route",
-          kind: "js-block",
-          startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/operation-console/environment/enable\") {",
-          afterAnchor: "if (await handleWechatCollector(req, res, url)) {",
-          beforeAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/tasks\") {",
-        },
-        {
-          name: "operation batch draft route",
+          name: "operation batch reconcile route",
           kind: "js-route-pair",
-          startAnchor: "const operationBatchDraftMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/draft$/);",
-          routeAnchor: "if ((req.method === \"GET\" || req.method === \"POST\") && operationBatchDraftMatch) {",
-          afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
-          beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
-        },
-        {
-          name: "operation batch create route",
-          kind: "js-route-pair",
-          startAnchor: "const operationBatchCreateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/create$/);",
-          routeAnchor: "if (req.method === \"POST\" && operationBatchCreateMatch) {",
-          afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
-          beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
-        },
-        {
-          name: "operation batch result route",
-          kind: "js-route-pair",
-          startAnchor: "const operationBatchResultMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/result$/);",
-          routeAnchor: "if (req.method === \"POST\" && operationBatchResultMatch) {",
-          afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
-          beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
-        },
-        {
-          name: "content requirement email route",
-          kind: "js-route-pair",
-          startAnchor: "const contentRequirementEmailMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/content-requirement-email$/);",
-          routeAnchor: "if (req.method === \"POST\" && contentRequirementEmailMatch) {",
+          startAnchor: "const operationBatchReconcileMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/reconcile$/);",
+          routeAnchor: "if (req.method === \"POST\" && operationBatchReconcileMatch) {",
           afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
           beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
         },
@@ -181,7 +122,7 @@ export const PROTECTED_SHARED_REGIONS = {
     { name: "Fanwei preview read", kind: "js-block", startAnchor: "async function copyFanweiReaderScript() {" },
     { name: "Fanwei auto-read status", kind: "js-block", startAnchor: "async function loadFanweiAutoReadStatus() {" },
     { name: "Fanwei requirement import", kind: "js-block", startAnchor: "async function createFanweiRequirementImport() {" },
-    { name: "auto-config progress event wiring", kind: "js-block", startAnchor: "function connectEvents(jobId) {" },
+    { name: "auto-config progress event wiring", kind: "js-block", startAnchor: "function connectEvents(jobId, requirementIndex = uiState.autoConfigRequirementIndex) {" },
     { name: "protected page registration", kind: "js-array", startAnchor: "const pages = [" },
     { name: "candidate import wiring", kind: "js-call", startAnchor: "candidateImportBtn.addEventListener(\"click\", async () => {" },
     { name: "Fanwei preview wiring", kind: "js-call", startAnchor: "fanweiCopyScriptBtn.addEventListener(\"click\", () => copyFanweiReaderScript().catch((error) => {" },

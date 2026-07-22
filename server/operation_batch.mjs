@@ -1,3 +1,5 @@
+import { OPERATION_BATCH_RECONCILIATION_REQUIRED } from "./operation_batch_runner.mjs";
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -144,7 +146,7 @@ export function applyOperationBatchResult(task = {}, result = {}) {
   const current = task.config?.operationBatch || {};
   const events = Array.isArray(current.events) ? current.events.slice() : [];
   events.push({
-    type: "operation_batch_created",
+    type: text(result.eventType || "operation_batch_created"),
     code,
     status: text(result.status || "created_unpublished"),
     at: new Date().toISOString(),
@@ -157,11 +159,22 @@ export function applyOperationBatchResult(task = {}, result = {}) {
       batchGuid: text(result.batchGuid),
       detailUrl: text(result.detailUrl),
       status: text(result.status || "created_unpublished"),
+      errorCode: "",
       errorMessage: "",
       updatedAt: new Date().toISOString(),
       events,
     },
   };
+}
+
+export function operationBatchNeedsReconciliation(task = {}) {
+  const current = task.config?.operationBatch || {};
+  const code = firstNonEmpty(task.config?.operationBatchCode, current.code);
+  if (/^[A-Z]{3}\d{6}$/.test(code)) return false;
+  return current.status === "creating"
+    || current.status === "reconciliation_required"
+    || current.errorCode === OPERATION_BATCH_RECONCILIATION_REQUIRED
+    || current.errorMessage === "创建完成，但未能从详情页读取批次代码";
 }
 
 export function operationBatchDisplayId(task = {}) {

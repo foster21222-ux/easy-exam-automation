@@ -54,6 +54,7 @@ import {
   acquireOperationBatchCreation,
   applyOperationBatchResult,
   buildOperationBatchDraft,
+  operationBatchNeedsReconciliation,
   releaseOperationBatchCreation,
 } from "./operation_batch.mjs";
 import {
@@ -61,7 +62,11 @@ import {
   enableOperationConsoleAutomation,
   installOperationConsoleAutomationDeps,
 } from "./operation_console_env.mjs";
-import { runOperationBatchCreation } from "./operation_batch_runner.mjs";
+import {
+  OPERATION_BATCH_RECONCILIATION_REQUIRED,
+  runOperationBatchCreation,
+  runOperationBatchReconciliation,
+} from "./operation_batch_runner.mjs";
 import { deleteTaskSessionsFromTenant } from "./session_deletion.mjs";
 import { calculateRoomSizes } from "./room_assignment.mjs";
 import {
@@ -5335,7 +5340,8 @@ function operationBatchDraftOverridesFromTask(task = {}) {
   };
 }
 
-const operationBatchCreationInFlight = new Set();
+const operationBatchAutomationInFlight = new Set();
+const operationBatchAutomationLockKey = "persistent-profile";
 
 async function handleOperationBatchDraft(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
@@ -5369,6 +5375,13 @@ async function handleOperationBatchCreate(taskId, req, res) {
       skipped: "operation_batch_already_created",
     });
   }
+  if (operationBatchNeedsReconciliation(task)) {
+    return json(res, 409, {
+      error: "运营批次创建结果待同步，请先执行批次对账。",
+      errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
+      task,
+    });
+  }
   if (process.env.OPERATION_CONSOLE_AUTOMATION_ENABLED !== "1") {
     return json(res, 409, {
       error: "运营控制台浏览器自动化未启用。请先确认测试环境已登录，并设置 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 后重启服务。",
@@ -5380,7 +5393,7 @@ async function handleOperationBatchCreate(taskId, req, res) {
   if (missing.length) {
     return badRequest(res, `批次草稿仍有缺失字段：${missing.join("；")}`);
   }
-  acquireOperationBatchCreation(operationBatchCreationInFlight, taskId);
+  acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
   try {
     const current = task.config?.operationBatch || {};
     await runTaskState("update_config", {
@@ -5406,12 +5419,14 @@ async function handleOperationBatchCreate(taskId, req, res) {
   } catch (error) {
     const failedTask = await runTaskState("get", { taskId });
     const failedCurrent = failedTask.config?.operationBatch || {};
+    const reconciliationRequired = error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED;
     const updated = await runTaskState("update_config", {
       taskId,
       config: {
         operationBatch: {
           ...failedCurrent,
-          status: "failed",
+          status: reconciliationRequired ? "reconciliation_required" : "failed",
+          errorCode: reconciliationRequired ? OPERATION_BATCH_RECONCILIATION_REQUIRED : "",
           errorMessage: error instanceof Error ? error.message : String(error),
           updatedAt: new Date().toISOString(),
         },
@@ -5419,7 +5434,68 @@ async function handleOperationBatchCreate(taskId, req, res) {
     });
     return json(res, error?.status || 500, { error: error instanceof Error ? error.message : String(error), task: updated });
   } finally {
-    releaseOperationBatchCreation(operationBatchCreationInFlight, taskId);
+    releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+  }
+}
+
+async function handleOperationBatchReconcile(taskId, req, res) {
+  const task = await runTaskState("get", { taskId });
+  if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
+  const existingOperationBatchCode = task.config?.operationBatchCode || task.config?.operationBatch?.code || "";
+  if (existingOperationBatchCode) {
+    return json(res, 200, {
+      ok: true,
+      task,
+      operationBatch: task.config?.operationBatch || {},
+      operationBatchCode: existingOperationBatchCode,
+      skipped: "operation_batch_already_created",
+    });
+  }
+  if (process.env.OPERATION_CONSOLE_AUTOMATION_ENABLED !== "1") {
+    return json(res, 409, {
+      error: "运营控制台浏览器自动化未启用。请先确认测试环境已登录，并设置 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 后重启服务。",
+    });
+  }
+  const payload = parseJsonSafe(await readBody(req)) || operationBatchDraftOverridesFromTask(task);
+  const draft = buildOperationBatchDraft(task, payload);
+  acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
+  try {
+    const reconciled = await runOperationBatchReconciliation(draft, {
+      baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
+      userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
+    });
+    if (!reconciled) {
+      throw new Error("批次列表未找到唯一匹配的运营批次代码");
+    }
+    const freshTask = await runTaskState("get", { taskId });
+    const patch = applyOperationBatchResult(freshTask, {
+      ...reconciled,
+      eventType: "operation_batch_reconciled",
+    });
+    const updated = await runTaskState("update_config", { taskId, config: patch });
+    return json(res, 200, { ok: true, task: updated, operationBatch: updated.config?.operationBatch || {}, operationBatchCode: updated.config?.operationBatchCode || "" });
+  } catch (error) {
+    const pendingTask = await runTaskState("get", { taskId });
+    const pendingCurrent = pendingTask.config?.operationBatch || {};
+    const updated = await runTaskState("update_config", {
+      taskId,
+      config: {
+        operationBatch: {
+          ...pendingCurrent,
+          status: "reconciliation_required",
+          errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
+    return json(res, 409, {
+      error: error instanceof Error ? error.message : String(error),
+      errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED,
+      task: updated,
+    });
+  } finally {
+    releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey);
   }
 }
 
@@ -6101,6 +6177,10 @@ async function requestHandler(req, res) {
     const operationBatchCreateMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/create$/);
     if (req.method === "POST" && operationBatchCreateMatch) {
       return await handleOperationBatchCreate(decodeURIComponent(operationBatchCreateMatch[1]), req, res);
+    }
+    const operationBatchReconcileMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/reconcile$/);
+    if (req.method === "POST" && operationBatchReconcileMatch) {
+      return await handleOperationBatchReconcile(decodeURIComponent(operationBatchReconcileMatch[1]), req, res);
     }
     const operationBatchResultMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/result$/);
     if (req.method === "POST" && operationBatchResultMatch) {

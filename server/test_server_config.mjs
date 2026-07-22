@@ -19,11 +19,13 @@ test("content email reads the same configured requirement database as the requir
 test("server wires operation collaboration and content email endpoints", () => {
   assert.match(serverSource, /from "\.\/operation_batch\.mjs"/);
   assert.match(serverSource, /from "\.\/operation_batch_runner\.mjs"/);
+  assert.match(serverSource, /runOperationBatchReconciliation/);
   assert.match(serverSource, /from "\.\/operation_console_env\.mjs"/);
   assert.match(serverSource, /from "\.\/content_requirement_email\.mjs"/);
   assert.match(serverSource, /\/api\/email\/settings/);
   assert.match(serverSource, /\/api\/operation-console\/environment/);
   assert.match(serverSource, /operation-batch\\\/create/);
+  assert.match(serverSource, /operation-batch\\\/reconcile/);
   assert.match(serverSource, /content-requirement-email/);
 });
 
@@ -52,15 +54,43 @@ test("global email and operation environment mutations require administrators", 
   assert.ok(requireAdminBlock.includes('role: "admin"'));
 });
 
-test("operation batch creation uses a per-task guard released in finally", () => {
-  const handler = serverSource.slice(
+test("operation batch creation and reconciliation share a global persistent-profile guard", () => {
+  const createHandler = serverSource.slice(
     serverSource.indexOf("async function handleOperationBatchCreate"),
+    serverSource.indexOf("async function handleOperationBatchReconcile"),
+  );
+  const reconcileHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchReconcile"),
     serverSource.indexOf("async function handleOperationBatchResult"),
   );
-  assert.ok(serverSource.includes("const operationBatchCreationInFlight = new Set()"));
-  assert.ok(handler.includes("acquireOperationBatchCreation(operationBatchCreationInFlight, taskId)"));
-  assert.ok(handler.includes("finally"));
-  assert.ok(handler.includes("releaseOperationBatchCreation(operationBatchCreationInFlight, taskId)"));
+  assert.ok(serverSource.includes("const operationBatchAutomationInFlight = new Set()"));
+  assert.ok(serverSource.includes('const operationBatchAutomationLockKey = "persistent-profile"'));
+  for (const handler of [createHandler, reconcileHandler]) {
+    assert.ok(handler.includes("acquireOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey)"));
+    assert.ok(handler.includes("finally"));
+    assert.ok(handler.includes("releaseOperationBatchCreation(operationBatchAutomationInFlight, operationBatchAutomationLockKey)"));
+  }
+});
+
+test("operation batch creation blocks tasks that require reconciliation", () => {
+  const createHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchCreate"),
+    serverSource.indexOf("async function handleOperationBatchReconcile"),
+  );
+  assert.ok(createHandler.includes("operationBatchNeedsReconciliation"));
+  assert.ok(createHandler.includes("error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED"));
+  assert.ok(createHandler.includes('status: reconciliationRequired ? "reconciliation_required" : "failed"'));
+});
+
+test("operation batch reconciliation persists its stable state and audit event", () => {
+  const reconcileHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchReconcile"),
+    serverSource.indexOf("async function handleOperationBatchResult"),
+  );
+  assert.ok(reconcileHandler.includes("runOperationBatchReconciliation"));
+  assert.ok(reconcileHandler.includes('eventType: "operation_batch_reconciled"'));
+  assert.ok(reconcileHandler.includes('status: "reconciliation_required"'));
+  assert.ok(reconcileHandler.includes("OPERATION_BATCH_RECONCILIATION_REQUIRED"));
 });
 
 test("server listen host can be configured for LAN deployment", () => {

@@ -5,6 +5,7 @@ import {
   applyOperationBatchResult,
   buildOperationBatchDraft,
   operationBatchDisplayId,
+  operationBatchNeedsReconciliation,
 } from "./operation_batch.mjs";
 import {
   OPERATION_BATCH_RECONCILIATION_REQUIRED,
@@ -233,6 +234,42 @@ test("applyOperationBatchResult writes batch code without replacing internal ids
   assert.equal(patch.operationBatch.draft.fields.operationTaskSerial.value, "R0031682");
   assert.equal(patch.operationBatch.events.length, 1);
   assert.equal(patch.operationBatch.events[0].type, "operation_batch_created");
+});
+
+test("applyOperationBatchResult records the requested reconciliation audit event", () => {
+  const patch = applyOperationBatchResult({}, {
+    operationBatchCode: "EZT260003",
+    eventType: "operation_batch_reconciled",
+  });
+
+  assert.equal(patch.operationBatch.events[0].type, "operation_batch_reconciled");
+});
+
+test("operation batch reconciliation state includes stable and legacy submitted errors", () => {
+  assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatch: { status: "reconciliation_required" } },
+  }), true);
+  assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatch: { errorCode: OPERATION_BATCH_RECONCILIATION_REQUIRED } },
+  }), true);
+  assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatch: { status: "failed", errorMessage: "创建完成，但未能从详情页读取批次代码" } },
+  }), true);
+  assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatch: { status: "failed", errorMessage: "登录失败" } },
+  }), false);
+});
+
+test("operation batch reconciliation state treats interrupted creating without a code as pending", () => {
+  assert.equal(operationBatchNeedsReconciliation({
+    config: { operationBatch: { status: "creating" } },
+  }), true);
+  assert.equal(operationBatchNeedsReconciliation({
+    config: {
+      operationBatchCode: "EZT260003",
+      operationBatch: { status: "creating" },
+    },
+  }), false);
 });
 
 test("operationBatchDisplayId prefers batch code over internal requirement id", () => {
