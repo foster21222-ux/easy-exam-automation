@@ -15,16 +15,18 @@ function fakeBatchListPage(pages, {
   advancePage = true,
   initialPageIndex = 0,
   malformedPagination = false,
+  pageUrl = "http://operation/batch/batchList",
   paginationCount,
+  responseUrl = "http://operation/api/batch/list",
 } = {}) {
   const events = [];
   let pageIndex = initialPageIndex;
   const response = {
-    url: () => "http://operation/api/batch/list",
+    url: () => responseUrl,
     request: () => ({
       resourceType: () => "xhr",
       method: () => "POST",
-      url: () => "http://operation/api/batch/list",
+      url: () => responseUrl,
       postData: () => JSON.stringify({ batchName: "目标项目_2026年8月" }),
     }),
     ok: () => true,
@@ -138,7 +140,7 @@ function fakeBatchListPage(pages, {
     },
     async waitForTimeout() {},
     url() {
-      return "http://operation/batch/batchList";
+      return pageUrl;
     },
   };
   return page;
@@ -315,6 +317,34 @@ test("batch search registers its response wait before Enter and waits for stable
   assert.ok(page.events.filter((event) => event === "rows:1").length >= 2);
 });
 
+test("batch lookup rejects redirects outside the configured list origin or path", async () => {
+  for (const urls of [
+    {
+      pageUrl: "http://foreign.example/batch/batchList",
+      responseUrl: "http://foreign.example/api/batch/list",
+    },
+    {
+      pageUrl: "http://operation/other/batchList",
+      responseUrl: "http://operation/api/batch/list",
+    },
+  ]) {
+    const page = fakeBatchListPage([
+      [["OLD123456", "目标项目_2026年8月"]],
+    ], urls);
+
+    await assert.rejects(
+      () => findCreatedBatchFromList(
+        page,
+        "http://operation/batch/batchList",
+        "目标项目_2026年8月",
+        { tableStablePollMs: 0 },
+      ),
+      (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED,
+    );
+    assert.equal(page.events.includes("search:enter"), false);
+  }
+});
+
 test("batch search response requires a list endpoint and an exact accepted search field", () => {
   const response = ({ path = "/api/batch/list", method = "POST", postData = "" } = {}) => {
     const url = new URL(path, "http://operation").toString();
@@ -331,6 +361,14 @@ test("batch search response requires a list endpoint and an exact accepted searc
   const expectedBatchName = "目标项目_2026年8月";
   const options = { expectedBatchName };
 
+  assert.equal(operationBatchTableResponseMatches(
+    response({
+      path: "http://foreign.example/api/batch/list",
+      postData: JSON.stringify({ batchName: expectedBatchName }),
+    }),
+    "http://operation/batch/batchList",
+    options,
+  ), false);
   assert.equal(operationBatchTableResponseMatches(
     response({ path: "/api/telemetry", postData: JSON.stringify({ batchName: expectedBatchName }) }),
     "http://operation/batch/batchList",

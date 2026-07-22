@@ -302,21 +302,41 @@ async function ensureBatchListReady(page, batchListUrl, options = {}) {
   const loginWaitMinutes = Number(options.loginWaitMinutes || process.env.OPERATION_CONSOLE_LOGIN_WAIT_MINUTES || 10);
   const waitMs = Math.max(1, loginWaitMinutes) * 60 * 1000;
   const createButton = page.getByRole("button", { name: /创建批次/ });
+  let ready = false;
   try {
     await createButton.waitFor({ state: "visible", timeout: 10000 });
-    return;
+    ready = true;
   } catch {}
 
-  if (!operationConsoleNeedsLogin(page.url())) {
-    throw new Error(`未找到“创建批次”按钮，当前页面：${page.url()}`);
-  }
+  if (!ready) {
+    if (!operationConsoleNeedsLogin(page.url())) {
+      throw new Error(`未找到“创建批次”按钮，当前页面：${page.url()}`);
+    }
 
-  // Keep the headed browser open so the user can finish SSO login manually.
-  await page.waitForURL((url) => !operationConsoleNeedsLogin(String(url)), { timeout: waitMs }).catch(() => {
-    throw new Error(operationConsoleLoginMessage(loginWaitMinutes));
-  });
-  await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
-  await createButton.waitFor({ state: "visible", timeout: 30000 });
+    // Keep the headed browser open so the user can finish SSO login manually.
+    await page.waitForURL((url) => !operationConsoleNeedsLogin(String(url)), { timeout: waitMs }).catch(() => {
+      throw new Error(operationConsoleLoginMessage(loginWaitMinutes));
+    });
+    await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
+    await createButton.waitFor({ state: "visible", timeout: 30000 });
+  }
+  assertOperationBatchListPage(page, batchListUrl);
+}
+
+function operationBatchListPageMatches(urlValue, batchListUrl) {
+  try {
+    const actual = new URL(text(urlValue));
+    const expected = new URL(text(batchListUrl));
+    return actual.origin === expected.origin && actual.pathname === expected.pathname;
+  } catch {
+    return false;
+  }
+}
+
+function assertOperationBatchListPage(page, batchListUrl) {
+  if (!operationBatchListPageMatches(page.url(), batchListUrl)) {
+    throw reconciliationRequiredError(new Error(`批次列表最终地址不可信：${page.url()}`));
+  }
 }
 
 function operationBatchListEndpoint(urlValue, pageUrl) {
@@ -396,11 +416,13 @@ async function waitForStableOperationBatchRows(page, options = {}) {
 }
 
 async function performOperationBatchTableAction(page, action, options = {}, responseOptions = {}) {
+  const batchListUrl = text(responseOptions.batchListUrl);
+  assertOperationBatchListPage(page, batchListUrl);
   const loading = page
     .locator(".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning")
     .first();
   const responseWait = page.waitForResponse(
-    (response) => operationBatchTableResponseMatches(response, page.url(), responseOptions),
+    (response) => operationBatchTableResponseMatches(response, batchListUrl, responseOptions),
     { timeout: Number(options.batchListResponseWaitMs || 30000) },
   );
   try {
@@ -413,7 +435,9 @@ async function performOperationBatchTableAction(page, action, options = {}, resp
     const responseError = await response.finished();
     if (responseError) throw responseError;
     await loading.waitFor({ state: "hidden", timeout: Number(options.batchListLoadingWaitMs || 30000) });
-    return await waitForStableOperationBatchRows(page, options);
+    const rows = await waitForStableOperationBatchRows(page, options);
+    assertOperationBatchListPage(page, batchListUrl);
+    return rows;
   } catch (error) {
     responseWait.catch(() => {});
     throw reconciliationRequiredError(error);
@@ -433,11 +457,12 @@ async function operationBatchActivePage(page) {
   return Number(value);
 }
 
-async function collectOperationBatchListRows(page, initialRows, options = {}) {
+async function collectOperationBatchListRows(page, initialRows, batchListUrl, options = {}) {
   const maxPages = Math.max(1, Number(options.maxBatchListPages || 100));
   const allRows = [...initialRows];
   let previousPageRows = initialRows;
   for (let pageNumber = 1; ; pageNumber += 1) {
+    assertOperationBatchListPage(page, batchListUrl);
     const pagination = page.locator(".ant-pagination");
     const paginationCount = await pagination.count();
     if (paginationCount === 0) return allRows;
@@ -463,7 +488,12 @@ async function collectOperationBatchListRows(page, initialRows, options = {}) {
     if (await control.count() !== 1) {
       throw reconciliationRequiredError(new Error("批次列表下一页控件不可操作，无法证明结果完整"));
     }
-    const rows = await performOperationBatchTableAction(page, () => control.click(), options);
+    const rows = await performOperationBatchTableAction(
+      page,
+      () => control.click(),
+      options,
+      { batchListUrl },
+    );
     const nextActivePage = await operationBatchActivePage(page);
     if (nextActivePage !== activePage + 1) {
       throw reconciliationRequiredError(new Error(`批次列表点击下一页后未推进：仍为第 ${nextActivePage} 页`));
@@ -482,6 +512,7 @@ export async function findCreatedBatchFromList(page, batchListUrl, batchName, op
     throw reconciliationRequiredError(new Error("批次名称为空，无法查询运营批次"));
   }
   await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
+  assertOperationBatchListPage(page, batchListUrl);
   await page.getByRole("button", { name: /创建批次/ }).waitFor({ state: "visible", timeout: 30000 });
   const searchInput = page.locator("input[placeholder*=批次代码], input[placeholder*=批次名称]").first();
   await searchInput.waitFor({ state: "visible", timeout: 30000 });
@@ -490,10 +521,10 @@ export async function findCreatedBatchFromList(page, batchListUrl, batchName, op
     page,
     () => searchInput.press("Enter"),
     options,
-    { expectedBatchName: normalizedName },
+    { batchListUrl, expectedBatchName: normalizedName },
   );
-  const allRows = await collectOperationBatchListRows(page, firstPageRows, options);
-  return operationBatchListResultFromRows(allRows, normalizedName, page.url());
+  const allRows = await collectOperationBatchListRows(page, firstPageRows, batchListUrl, options);
+  return operationBatchListResultFromRows(allRows, normalizedName, batchListUrl);
 }
 
 export async function resolveSubmittedOperationBatch(page, options = {}) {
