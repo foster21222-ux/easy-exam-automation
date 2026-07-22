@@ -228,6 +228,10 @@ test("project workflow route returns sourced batch personnel content and archive
 });
 
 test("project source snapshots can be edited and rebuild downstream workflow data", () => {
+  const sourceSnapshotHandler = serverSource.slice(
+    serverSource.indexOf("async function handleProjectSourceSnapshotUpdate"),
+    serverSource.indexOf("async function handleFanweiBridgeToken"),
+  );
   assert.ok(serverSource.includes("async function handleProjectSourceSnapshotUpdate(taskId, req, res)"));
   assert.ok(serverSource.includes("/source-snapshot$/"));
   assert.ok(serverSource.includes("normalizeFanweiBusinessRequirement(raw, { requirementFields })"));
@@ -250,6 +254,10 @@ test("project source snapshots can be edited and rebuild downstream workflow dat
   assert.ok(serverSource.includes("sourceKey: fanweiSource.serialNo"));
   assert.ok(serverSource.includes('projectName: source === "fanwei"'));
   assert.ok(serverSource.includes('runTaskState("update_config", {'));
+  assert.equal(
+    (sourceSnapshotHandler.match(/reviewStatus: "auto_confirmed"/g) || []).length,
+    2,
+  );
 });
 
 test("auto configuration jobs can resume from a persisted project requirement", () => {

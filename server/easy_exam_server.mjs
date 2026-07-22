@@ -1652,6 +1652,7 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
       projectCode: businessRequirement.project_code || task.config?.projectCode || "",
       projectSourceChangeHistory: appendProjectSourceChangeHistory(task, {
         source: "fanwei",
+        reviewStatus: "auto_confirmed",
         changedAt: now,
         versionBefore: Number(currentSource.version || 0),
         versionAfter: Number(fanweiSource.version || 0),
@@ -1699,6 +1700,7 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
       examRequirement: examRequirements[0],
       projectSourceChangeHistory: appendProjectSourceChangeHistory(task, {
         source: "examRequirement",
+        reviewStatus: "auto_confirmed",
         requirementIndex,
         changedAt: now,
         versionBefore: Number(current.version || 0),
