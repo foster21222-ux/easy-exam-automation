@@ -424,7 +424,10 @@ test("operation batch runner identifies operation console login redirect", () =>
   assert.equal(operationConsoleNeedsLogin("http://172.16.21.201:9004/loginWaiting?response_type=code"), true);
   assert.equal(operationConsoleNeedsLogin("http://172.16.21.201:9003/OAuth2/authorize?redirect_uri=http%3A%2F%2F172.16.18.198%3A8020%2Fuser%2Flogin"), true);
   assert.equal(operationConsoleNeedsLogin("http://172.16.18.198:8020/batch/batchList"), false);
-  assert.match(operationConsoleLoginMessage(10), /10 分钟/);
+  const loginMessage = operationConsoleLoginMessage(10);
+  assert.match(loginMessage, /10 分钟/);
+  assert.match(loginMessage, /继续当前批次操作/);
+  assert.doesNotMatch(loginMessage, /继续创建/);
 });
 
 test("operation batch runner extracts operation batch code from batch list text", () => {

@@ -92,7 +92,7 @@ export function operationConsoleNeedsLogin(urlValue = "") {
 }
 
 export function operationConsoleLoginMessage(minutes) {
-  return `运营控制台需要登录。请在自动化浏览器中完成登录，系统会等待最多 ${minutes} 分钟；登录完成后会继续创建未发布批次。`;
+  return `运营控制台需要登录。请在自动化浏览器中完成登录，系统会等待最多 ${minutes} 分钟；登录完成后会继续当前批次操作。`;
 }
 
 export function operationTaskSearchInputSelector() {
