@@ -225,6 +225,49 @@ test("submitted detail requires the exact batch name and one whole-page batch co
   assert.equal(direct.batchGuid, "guid-1");
 });
 
+test("submitted detail requires the exact batch path on the batch-list origin", async () => {
+  const expected = {
+    operationBatchCode: "QTT260007",
+    batchGuid: "",
+    detailUrl: "http://operation/batch/batchList",
+    status: "created_unpublished",
+  };
+
+  for (const detailUrl of [
+    "http://other.example/batch/batchDetail?batch_guid=guid-1",
+    "http://operation:8080/batch/batchDetail?batch_guid=guid-1",
+    "https://operation/batch/batchDetail?batch_guid=guid-1",
+    "http://operation/other/batchDetail?batch_guid=guid-1",
+    "http://operation/batch/batchDetail/?batch_guid=guid-1",
+  ]) {
+    let lookups = 0;
+    const result = await resolveSubmittedOperationBatch(fakePageWithCode(detailUrl, "OLD123456"), {
+      batchListUrl: expected.detailUrl,
+      batchName: "目标项目_2026年8月",
+      findFromList: async () => {
+        lookups += 1;
+        return expected;
+      },
+      detailCodeWaitMs: 1,
+    });
+
+    assert.deepEqual(result, expected);
+    assert.equal(lookups, 1);
+  }
+
+  const direct = await resolveSubmittedOperationBatch(
+    fakePageWithCode("http://operation/batch/batchDetail?batch_guid=guid-1", "QTT260007"),
+    {
+      batchListUrl: expected.detailUrl,
+      batchName: "目标项目_2026年8月",
+      findFromList: async () => { throw new Error("unexpected list lookup"); },
+      detailCodeWaitMs: 1,
+    },
+  );
+  assert.equal(direct.operationBatchCode, "QTT260007");
+  assert.equal(direct.batchGuid, "guid-1");
+});
+
 test("batch rows accept structured cells and tab separated cells", () => {
   const detailUrl = "http://operation/batch/batchList";
   assert.equal(operationBatchListResultFromRows([

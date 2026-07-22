@@ -119,11 +119,14 @@ export function operationBatchCodeFromText(value) {
   return text(value).match(/\b[A-Z]{3}\d{6}\b/)?.[0] || "";
 }
 
-export function operationBatchDetailIdentity(urlValue) {
+export function operationBatchDetailIdentity(urlValue, batchListUrl) {
   try {
     const url = new URL(text(urlValue));
+    const expectedOrigin = new URL(text(batchListUrl)).origin;
     const batchGuid = text(url.searchParams.get("batch_guid"));
-    if (!/\/batchDetail\/?$/.test(url.pathname) || !batchGuid) return null;
+    if (url.pathname !== "/batch/batchDetail"
+      || url.origin !== expectedOrigin
+      || !batchGuid) return null;
     return { detailUrl: url.toString(), batchGuid };
   } catch {
     return null;
@@ -495,7 +498,7 @@ export async function findCreatedBatchFromList(page, batchListUrl, batchName, op
 
 export async function resolveSubmittedOperationBatch(page, options = {}) {
   const detailCodeWaitMs = Number(options.detailCodeWaitMs || 60000);
-  const detail = operationBatchDetailIdentity(page.url());
+  const detail = operationBatchDetailIdentity(page.url(), options.batchListUrl);
   if (detail) {
     try {
       await page.waitForFunction(
