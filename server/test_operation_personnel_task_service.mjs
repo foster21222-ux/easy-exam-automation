@@ -1,0 +1,592 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { buildOperationPersonnelTaskDraft, operationPersonnelTaskFingerprint } from "./operation_personnel_task.mjs";
+import { createOperationPersonnelTaskService } from "./operation_personnel_task_service.mjs";
+
+const START = Date.parse("2026-07-23T02:00:00.000Z");
+
+function owner() {
+  return { email: "owner@example.com", role: "user" };
+}
+
+function baseTask() {
+  return {
+    taskId: "task-a",
+    ownerEmail: "owner@example.com",
+    projectName: "示例考试",
+    config: {
+      requirementRequestId: "requirement-a",
+      operationBatchCode: "EZT260003",
+      operationBatch: { code: "EZT260003", status: "created_unpublished" },
+      businessRequirement: {
+        operation_serial_number: "R0042483",
+        project_code: "P260001",
+        project_name: "示例考试",
+        ata_invigilator_arrangement: "需要安排分散人工监考",
+      },
+      examRequirement: {
+        id: "requirement-1",
+        version: 3,
+        fields: { "考试名称": "示例考试", "考试日期时间": "2026/08/22 09:00-11:00" },
+        config: {
+          startTimeDisplay: "2026/08/22 09:00",
+          endTimeDisplay: "2026/08/22 11:00",
+          earlyLoginMinutes: 30,
+          courses: [{ code: "C001", name: "综合能力" }],
+        },
+      },
+    },
+    sessions: [{
+      sessionType: "formal",
+      start: "2026/08/22 09:00",
+      end: "2026/08/22 11:00",
+      candidateCount: 81,
+    }],
+  };
+}
+
+function inspectionFor(task, environment = "test") {
+  const draft = buildOperationPersonnelTaskDraft(task, {
+    environment,
+    now: new Date(START).toISOString(),
+  });
+  const to = environment === "production"
+    ? [{ group: "拓展二部", id: "p1", name: "唐润梅" }]
+    : [{ group: "演示组", id: "t1", name: "张乐翔" }];
+  const cc = environment === "production"
+    ? ["c1", "c2", "c3", "c4"].map((id, index) => ({
+      group: "结算组",
+      id,
+      name: `结算${index + 1}`,
+    }))
+    : [];
+  return {
+    batch: {
+      ...draft.batch,
+      batchName: "",
+      projectDepartment: "",
+      projectManager: "",
+      systemType: "",
+      published: false,
+    },
+    schedules: [],
+    personnel: {},
+    dates: {},
+    requirements: [],
+    taskSheet: {
+      type: "分散在线监考",
+      conditions: [{ name: "人员配置", satisfied: true }],
+      content: "任务内容",
+    },
+    sendRecords: [],
+    directoryMatch: { to, cc },
+  };
+}
+
+function successfulAttemptResult(overrides = {}) {
+  return {
+    status: "sent",
+    sendRecord: { type: "首次发送", sentAt: "2026-07-23T02:00:20.000Z" },
+    operationSnapshot: { batch: { code: "EZT260003", published: true } },
+    completedAt: "2026-07-23T02:00:21.000Z",
+    ...overrides,
+  };
+}
+
+function serviceHarness(options = {}) {
+  let currentTime = START;
+  const task = baseTask();
+  const requirement = options.requirement || { requestId: "requirement-a", version: 3, changeRequests: [] };
+  const runnerCalls = [];
+  const attemptInstructions = [];
+  const recheckInstructions = [];
+  const deferredJobs = [];
+  const profileLocks = [];
+  const taskLocks = [];
+  let tokenCounter = 0;
+  let attemptCounter = 0;
+  let inspection = inspectionFor(task, options.environment || "test");
+
+  if (options.alreadySent || options.changedAfterSend) {
+    const currentDraft = buildOperationPersonnelTaskDraft(task, {
+      environment: options.environment || "test",
+      now: new Date(START).toISOString(),
+    });
+    task.config.operationPersonnelTask = {
+      schemaVersion: 1,
+      environment: options.environment || "test",
+      status: "sent",
+      draft: currentDraft,
+      draftVersion: 1,
+      sourceFingerprint: operationPersonnelTaskFingerprint(currentDraft),
+      lastSuccessfulFingerprint: options.changedAfterSend
+        ? "previous-fingerprint"
+        : operationPersonnelTaskFingerprint(currentDraft),
+      scheduleCodeMap: currentDraft.scheduleCodeMap,
+      lastOperationSnapshot: structuredClone(inspection),
+      checkpoints: {},
+      activePreview: null,
+      activeAttempt: null,
+      sendHistory: [],
+      changeSummary: "",
+      events: [],
+    };
+  }
+
+  if (options.orphanedAttemptCheckpoint || options.resultUnknown) {
+    const draft = buildOperationPersonnelTaskDraft(task, {
+      environment: options.environment || "test",
+      now: new Date(START).toISOString(),
+    });
+    const checkpointName = options.orphanedAttemptCheckpoint || "verify_send_record";
+    const attempt = {
+      attemptId: "attempt-orphan",
+      kind: "initial",
+      operator: "owner@example.com",
+      environment: options.environment || "test",
+      requirementVersion: 3,
+      draftVersion: 1,
+      fingerprint: operationPersonnelTaskFingerprint(draft),
+      recipients: { to: inspection.directoryMatch.to, cc: inspection.directoryMatch.cc },
+      changeSummary: "",
+      createdAt: "2026-07-23T02:00:00.000Z",
+      startedAt: "2026-07-23T02:00:01.000Z",
+      status: "running",
+    };
+    task.config.operationPersonnelTask = {
+      schemaVersion: 1,
+      environment: options.environment || "test",
+      status: options.resultUnknown ? "result_unknown" : "sending",
+      draft,
+      draftVersion: 1,
+      sourceFingerprint: operationPersonnelTaskFingerprint(draft),
+      lastSuccessfulFingerprint: "",
+      scheduleCodeMap: draft.scheduleCodeMap,
+      lastOperationSnapshot: null,
+      checkpoints: {
+        ...(options.submitStartedAt ? {
+          submit_send: {
+            name: "submit_send",
+            status: "running",
+            readback: { kind: "initial", startedAt: options.submitStartedAt },
+          },
+        } : {}),
+        [checkpointName]: {
+          name: checkpointName,
+          status: "running",
+          ...(checkpointName === "submit_send"
+            ? { readback: { kind: "initial", startedAt: attempt.startedAt } }
+            : {}),
+        },
+      },
+      activePreview: null,
+      activeAttempt: attempt,
+      sendHistory: [],
+      changeSummary: "",
+      events: [],
+    };
+  }
+
+  const updateTaskConfig = async (taskId, config) => {
+    assert.equal(taskId, task.taskId);
+    task.config = { ...task.config, ...structuredClone(config) };
+    return task;
+  };
+  const runnerResult = options.runnerResult || successfulAttemptResult();
+  const service = createOperationPersonnelTaskService({
+    readTask: async (taskId) => taskId === task.taskId ? task : null,
+    updateTaskConfig,
+    readRequirement: async () => requirement,
+    coordinator: {
+      acquireProfile() {
+        profileLocks.push("acquire");
+        return () => profileLocks.push("release");
+      },
+      acquireTask(taskId) {
+        assert.equal(taskId, task.taskId);
+        taskLocks.push("acquire");
+        return () => taskLocks.push("release");
+      },
+    },
+    runInspection: async (instruction) => {
+      runnerCalls.push("inspection");
+      assert.equal(instruction.environment, options.environment || "test");
+      options.onInspection?.(task);
+      return structuredClone(inspection);
+    },
+    runAttempt: async (instruction, runnerOptions) => {
+      runnerCalls.push("attempt");
+      attemptInstructions.push(structuredClone(instruction));
+      if (options.checkpoint) await runnerOptions.onCheckpoint(options.checkpoint);
+      if (typeof runnerResult === "function") return runnerResult();
+      return typeof runnerResult?.then === "function" ? runnerResult : structuredClone(runnerResult);
+    },
+    runRecheck: async (instruction) => {
+      runnerCalls.push("recheck");
+      recheckInstructions.push(structuredClone(instruction));
+      return structuredClone(options.recheckResult || { status: "result_unknown", sendRecord: null });
+    },
+    environment: options.environment ?? "test",
+    activeAttemptIds: new Set(),
+    now: () => currentTime,
+    makeToken: () => `preview-${++tokenCounter}`,
+    makeAttemptId: () => `attempt-${++attemptCounter}`,
+    defer: (job) => deferredJobs.push(job),
+  });
+
+  return {
+    service,
+    task,
+    requirement,
+    runnerCalls,
+    attemptInstructions,
+    recheckInstructions,
+    deferredJobs,
+    profileLocks,
+    taskLocks,
+    setInspection(value) {
+      inspection = value;
+    },
+    advance(ms) {
+      currentTime += ms;
+    },
+    async runDeferred() {
+      while (deferredJobs.length) await deferredJobs.shift()();
+    },
+  };
+}
+
+test("preview token binds requirement, draft, operation snapshot and directory", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const active = harness.task.config.operationPersonnelTask.activePreview;
+
+  assert.equal(active.requirementVersion, 3);
+  assert.equal(active.draftVersion, preview.draftVersion);
+  assert.match(active.operationSnapshotFingerprint, /^[a-f0-9]{64}$/);
+  assert.match(active.directoryMatchFingerprint, /^[a-f0-9]{64}$/);
+  harness.task.config.examRequirement.version += 1;
+
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
+  );
+});
+
+test("preview token expires after ten minutes", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {});
+  assert.equal(preview.expiresAt, "2026-07-23T02:10:00.000Z");
+  harness.advance(10 * 60 * 1000 + 1);
+
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
+  );
+});
+
+test("preview rejects a requirement version changed during the operation inspection", async () => {
+  const harness = serviceHarness({
+    onInspection: (task) => {
+      task.config.examRequirement.version += 1;
+    },
+  });
+  await assert.rejects(
+    harness.service.preview("task-a", owner(), {}),
+    { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
+  );
+  assert.equal(harness.task.config.operationPersonnelTask, undefined);
+});
+
+test("identical successful fingerprint cannot be resent", async () => {
+  const harness = serviceHarness({ alreadySent: true });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_CONTENT_UNCHANGED", status: 409 },
+  );
+});
+
+test("service environment is authoritative and request environment is ignored", async () => {
+  const harness = serviceHarness({ environment: "test" });
+  const preview = await harness.service.preview("task-a", owner(), { environment: "production" });
+  assert.equal(preview.state.environment, "test");
+  assert.deepEqual(preview.state.draft.recipients.toNames, ["张乐翔"]);
+  assert.equal(preview.state.draft.recipients.ccCount, 0);
+});
+
+test("unknown service environment blocks get and preview", async () => {
+  const harness = serviceHarness({ environment: "staging" });
+  const current = await harness.service.get("task-a", owner());
+  assert.equal(current.state.status, "unsupported");
+  assert.equal(current.state.environment, "staging");
+
+  await assert.rejects(
+    harness.service.preview("task-a", owner(), { environment: "test" }),
+    { code: "PERSONNEL_ENVIRONMENT_INVALID", status: 409 },
+  );
+});
+
+test("missing service environment cannot fall back to a test draft", async () => {
+  const harness = serviceHarness({ environment: "" });
+  const current = await harness.service.get("task-a", owner());
+  assert.equal(current.state.status, "unsupported");
+  assert.deepEqual(current.state.draft, {});
+});
+
+test("pending external requirement change blocks preview", async () => {
+  const harness = serviceHarness({
+    requirement: { changeRequests: [{ status: "pending_internal_review" }] },
+  });
+  await assert.rejects(
+    harness.service.preview("task-a", owner(), {}),
+    { code: "PERSONNEL_PENDING_REQUIREMENT_CHANGE", status: 409 },
+  );
+});
+
+test("non-owner cannot read or operate a personnel task", async () => {
+  const harness = serviceHarness();
+  const stranger = { email: "other@example.com", role: "user" };
+  await assert.rejects(harness.service.get("task-a", stranger), {
+    code: "PERSONNEL_TASK_NOT_FOUND",
+    status: 404,
+  });
+  await assert.rejects(harness.service.preview("task-a", stranger, {}), {
+    code: "PERSONNEL_TASK_NOT_FOUND",
+    status: 404,
+  });
+});
+
+test("editable draft changes increment version and append an auto-confirmed audit event", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {
+    dates: { end: "2026-08-18" },
+    monitorCount: 4,
+  });
+  assert.equal(preview.draftVersion, 2);
+  assert.equal(preview.state.draft.dates.end, "2026-08-18");
+  assert.equal(preview.state.draft.personnel.monitorCount, 4);
+  assert.deepEqual(
+    preview.state.events.at(-1).changes.map((item) => item.path),
+    ["dates.end", "personnel.monitorCount"],
+  );
+  assert.equal(preview.state.events.at(-1).type, "operation_personnel_draft_auto_confirmed");
+});
+
+test("send persists queued attempt and returns before the runner completes", async () => {
+  const pending = Promise.withResolvers();
+  const harness = serviceHarness({ runnerResult: pending.promise });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const accepted = await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+
+  assert.equal(accepted.statusCode, 202);
+  assert.equal(harness.task.config.operationPersonnelTask.activeAttempt.status, "queued");
+  assert.equal(harness.runnerCalls.includes("attempt"), false);
+  pending.resolve(successfulAttemptResult());
+});
+
+test("resend requires a non-empty reviewed change summary", async () => {
+  const harness = serviceHarness({ changedAfterSend: true });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: " ",
+    }),
+    { code: "PERSONNEL_CHANGE_SUMMARY_REQUIRED", status: 400 },
+  );
+});
+
+test("preview token is consumed once and double submit cannot create two attempts", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const payload = {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  };
+  const first = await harness.service.send("task-a", owner(), payload);
+  assert.equal(first.statusCode, 202);
+  assert.equal(harness.task.config.operationPersonnelTask.activePreview, null);
+  await assert.rejects(
+    harness.service.send("task-a", owner(), payload),
+    { code: "PERSONNEL_ATTEMPT_IN_PROGRESS", status: 409 },
+  );
+  assert.equal(harness.deferredJobs.length, 1);
+});
+
+test("a resumable orphan keeps its attempt id and completed checkpoints", async () => {
+  const harness = serviceHarness({ orphanedAttemptCheckpoint: "sync_personnel_dates" });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const accepted = await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+  assert.equal(accepted.attemptId, "attempt-orphan");
+  assert.equal(
+    harness.task.config.operationPersonnelTask.checkpoints.sync_personnel_dates.status,
+    "running",
+  );
+});
+
+test("queued attempt retains the exact previewed batch identity", async () => {
+  const harness = serviceHarness();
+  const inspected = inspectionFor(harness.task);
+  inspected.batch.batchName = "2026 秋季批次";
+  inspected.batch.projectDepartment = "交付一部";
+  inspected.batch.projectManager = "负责人";
+  inspected.batch.systemType = "易考";
+  harness.setInspection(inspected);
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+  await harness.runDeferred();
+  assert.equal(harness.attemptInstructions[0].target.batch.batchName, "2026 秋季批次");
+  assert.equal(harness.attemptInstructions[0].target.batch.projectDepartment, "交付一部");
+});
+
+test("background attempt persists checkpoints and atomically records success", async () => {
+  const checkpoint = {
+    name: "submit_send",
+    status: "running",
+    startedAt: "2026-07-23T02:00:10.000Z",
+    targetDigest: "digest",
+    readback: { kind: "initial", startedAt: "2026-07-23T02:00:10.000Z" },
+  };
+  const harness = serviceHarness({ checkpoint });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const accepted = await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+  await harness.runDeferred();
+
+  const state = harness.task.config.operationPersonnelTask;
+  assert.deepEqual(state.checkpoints.submit_send, checkpoint);
+  assert.equal(state.status, "sent");
+  assert.equal(state.activeAttempt.attemptId, accepted.attemptId);
+  assert.equal(state.activeAttempt.status, "sent");
+  assert.equal(state.sendHistory.length, 1);
+  assert.equal(state.sendHistory[0].attemptId, accepted.attemptId);
+  assert.equal(state.sendHistory[0].fingerprint, state.lastSuccessfulFingerprint);
+});
+
+test("failure classification preserves the irreversible submit boundary", async () => {
+  for (const checkpoint of [
+    { name: "sync_personnel_dates", status: "running" },
+    {
+      name: "submit_send",
+      status: "running",
+      readback: { kind: "initial", startedAt: "2026-07-23T02:00:10.000Z" },
+    },
+  ]) {
+    const failure = new Error("runner stopped");
+    const harness = serviceHarness({
+      checkpoint,
+      runnerResult: async () => { throw failure; },
+    });
+    const preview = await harness.service.preview("task-a", owner(), {});
+    await harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    });
+    await harness.runDeferred();
+    assert.equal(
+      harness.task.config.operationPersonnelTask.status,
+      checkpoint.name === "submit_send" ? "result_unknown" : "failed_resumable",
+    );
+  }
+});
+
+test("restart recovery distinguishes pre-send failure from unknown send result", async () => {
+  const beforeSend = serviceHarness({ orphanedAttemptCheckpoint: "sync_personnel_dates" });
+  assert.equal((await beforeSend.service.get("task-a", owner())).state.status, "failed_resumable");
+
+  const afterSend = serviceHarness({ orphanedAttemptCheckpoint: "verify_send_record" });
+  assert.equal((await afterSend.service.get("task-a", owner())).state.status, "result_unknown");
+});
+
+test("attempt lookup is project-scoped", async () => {
+  const harness = serviceHarness({ resultUnknown: true });
+  await assert.rejects(harness.service.attempt("task-a", owner(), "attempt-other"), {
+    code: "PERSONNEL_ATTEMPT_NOT_FOUND",
+    status: 404,
+  });
+  assert.equal(
+    (await harness.service.attempt("task-a", owner(), "attempt-orphan")).attempt.attemptId,
+    "attempt-orphan",
+  );
+});
+
+test("result_unknown cannot start a new send attempt", async () => {
+  const harness = serviceHarness({ resultUnknown: true });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_RESULT_UNKNOWN", status: 409 },
+  );
+  assert.equal(harness.deferredJobs.length, 0);
+});
+
+test("recheck only runs for result_unknown and never invokes send", async () => {
+  const harness = serviceHarness({ resultUnknown: true });
+  await harness.service.recheck("task-a", owner());
+  assert.deepEqual(harness.runnerCalls, ["recheck"]);
+});
+
+test("recheck uses the irreversible submit checkpoint start time", async () => {
+  const harness = serviceHarness({
+    resultUnknown: true,
+    submitStartedAt: "2026-07-23T02:00:10.000Z",
+  });
+  await harness.service.recheck("task-a", owner());
+  assert.equal(
+    harness.recheckInstructions[0].attempt.startedAt,
+    "2026-07-23T02:00:10.000Z",
+  );
+});
+
+test("recheck reconciles a newly visible record without another send or attempt id", async () => {
+  const harness = serviceHarness({
+    resultUnknown: true,
+    recheckResult: {
+      status: "sent",
+      sendRecord: { type: "首次发送", sentAt: "2026-07-23T02:00:20.000Z" },
+      operationSnapshot: { batch: { published: true } },
+    },
+  });
+  const result = await harness.service.recheck("task-a", owner());
+  assert.equal(result.state.status, "sent");
+  assert.equal(result.state.sendHistory.length, 1);
+  assert.equal(result.state.sendHistory[0].attemptId, "attempt-orphan");
+  assert.equal(result.state.activeAttempt.attemptId, "attempt-orphan");
+  assert.deepEqual(harness.runnerCalls, ["recheck"]);
+});
