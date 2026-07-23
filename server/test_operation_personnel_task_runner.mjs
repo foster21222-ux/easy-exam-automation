@@ -70,6 +70,308 @@ test("current operation detail header never invents ambiguous identity fields", 
   ]);
 });
 
+function visiblePersonnelTaskSheetRaw(overrides = {}) {
+  return {
+    conditions: [
+      "【易考-考试日程】已设置",
+      "【人员-在线监考】配置项已设置",
+      "【人员落实时间】已设置且【人员落实时间】未结束",
+      "【批次状态】为【已发布】",
+    ],
+    keyValueRows: [
+      ["项目编码", "4473-26"],
+      ["项目名称", "测试运控项目"],
+      ["批次名称", "目标批次"],
+      ["项目部归属", "项目实施五部"],
+      ["项目经理", "经理"],
+      ["系统类型", "易考"],
+      ["人员落实开始日期", "2026-07-24"],
+      ["人员落实结束日期", "2026-08-18"],
+      ["人员落实平台", "悦站"],
+      ["监考类型", "分散监考"],
+      ["人员名单提交日期", "2026-08-19"],
+      ["正式考试-最早登录系统时间", "考生可于考试开始前30分钟登录"],
+      ["正式考试-监考人员安排", "ATA监考-分散"],
+      ["正式考试-监考人员数量", "3"],
+      ["正式考试-监考人员比例", "1:50"],
+      ["正式考试-监考登录监控", "是"],
+    ],
+    scheduleHeaders: [
+      "场次",
+      "日程代码",
+      "日程",
+      "时长(分钟)",
+      "科目名称",
+      "考生提前登录(分钟)",
+    ],
+    scheduleRows: [
+      ["1", "1", "2026-08-22 13:30~15:30", "120", "目标考试", "30"],
+    ],
+    sendRecordRows: [
+      ["发送时间", "变更内容"],
+      ["2026-07-23 10:09:34", "首次发送"],
+    ],
+    ...overrides,
+  };
+}
+
+test("current personnel task sheet maps visible tables into a normalized snapshot", () => {
+  assert.equal(
+    typeof operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw,
+    "function",
+  );
+  const snapshot = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(
+    visiblePersonnelTaskSheetRaw(),
+  );
+
+  assert.deepEqual(snapshot.batch, {
+    code: "",
+    projectCode: "4473-26",
+    projectName: "测试运控项目",
+    batchName: "目标批次",
+    projectDepartment: "项目实施五部",
+    projectManager: "经理",
+    systemType: "易考",
+    published: false,
+  });
+  assert.deepEqual(snapshot.schedules, [{
+    scheduleEntryId: "",
+    scheduleCode: 1,
+    subjectCode: "",
+    subjectName: "目标考试",
+    start: "2026-08-22 13:30",
+    end: "2026-08-22 15:30",
+    durationMinutes: 120,
+    earlyLoginMinutes: 30,
+  }]);
+  assert.deepEqual(snapshot.personnel, {
+    serviceType: "ATA 监考－分散在线监考",
+    platform: "悦站",
+    loginMonitoring: "是",
+    monitorRatio: "1:50",
+    candidateBasis: "",
+    monitorCount: 3,
+    earliestLoginMinutes: 30,
+    trialIncluded: false,
+  });
+  assert.deepEqual(snapshot.dates, {
+    start: "2026-07-24",
+    end: "2026-08-18",
+    nameListDue: "2026-08-19",
+  });
+  assert.equal(snapshot.taskSheet.type, "分散在线监考");
+  assert.equal(snapshot.taskSheet.conditions.length, 4);
+  assert.equal(snapshot.taskSheet.conditions.every((item) => item.satisfied), true);
+  assert.deepEqual(snapshot.sendRecords, [{
+    type: "首次发送",
+    sentAt: "2026-07-23 10:09:34",
+  }]);
+});
+
+test("current personnel task sheet blocks a missing schedule header", () => {
+  assert.equal(
+    typeof operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw,
+    "function",
+  );
+  assert.throws(
+    () => operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(
+      visiblePersonnelTaskSheetRaw({
+        scheduleHeaders: ["场次", "日程代码", "日程"],
+      }),
+    ),
+    /任务单日程表头/,
+  );
+});
+
+test("current personnel task sheet blocks an invalid send record row", () => {
+  assert.equal(
+    typeof operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw,
+    "function",
+  );
+  assert.throws(
+    () => operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(
+      visiblePersonnelTaskSheetRaw({
+        sendRecordRows: [
+          ["发送时间", "变更内容"],
+          ["", "首次发送"],
+        ],
+      }),
+    ),
+    /发送记录/,
+  );
+});
+
+function fakePersonnelTaskListPage(rows = []) {
+  const events = [];
+  const rowLocators = rows.map((cells, rowIndex) => ({
+    locator: (selector) => {
+      assert.equal(selector, "td");
+      return { allInnerTexts: async () => cells };
+    },
+    rowIndex,
+  }));
+  const mainTable = {
+    locator(selector) {
+      if (selector === "thead th") {
+        return {
+          allInnerTexts: async () => [
+            "批次名称",
+            "项目部归属",
+            "项目经理",
+            "首次发送时间",
+            "最近一次发送时间",
+            "操作",
+          ],
+        };
+      }
+      if (selector === "tbody tr") {
+        return {
+          count: async () => rowLocators.length,
+          nth: (index) => rowLocators[index],
+        };
+      }
+      throw new Error(`unexpected main table selector: ${selector}`);
+    },
+  };
+  const fixedTable = {
+    locator(selector) {
+      if (selector === "thead th") {
+        return { allInnerTexts: async () => ["操作"] };
+      }
+      throw new Error(`unexpected fixed table selector: ${selector}`);
+    },
+  };
+  const tables = {
+    count: async () => 2,
+    nth: (index) => [mainTable, fixedTable][index],
+  };
+  const fixedRows = {
+    nth: (index) => ({
+      getByText: (name, options) => {
+        assert.equal(name, "发送任务单");
+        assert.equal(options.exact, true);
+        return {
+          count: async () => 1,
+          click: async () => events.push(`click:${index}`),
+        };
+      },
+    }),
+  };
+  const searchInput = {
+    count: async () => 1,
+    fill: async (value) => events.push(`fill:${value}`),
+  };
+  return {
+    events,
+    goto: async (url) => events.push(`goto:${url}`),
+    locator(selector) {
+      if (selector === 'input[placeholder="请输入批次代码、批次名称、项目经理"]:visible') {
+        return searchInput;
+      }
+      if (selector === "table:visible") return tables;
+      if (selector === ".ant-table-fixed-right table:visible tbody tr") return fixedRows;
+      throw new Error(`unexpected page selector: ${selector}`);
+    },
+    getByText(name, options) {
+      assert.equal(options.exact, true);
+      return {
+        first() {
+          return this;
+        },
+        waitFor: async () => events.push(`wait:${name}`),
+      };
+    },
+  };
+}
+
+test("current personnel task list opens the exact fixed action row", async () => {
+  assert.equal(
+    typeof operationPersonnelRunner.openVisiblePersonnelTaskSheet,
+    "function",
+  );
+  const page = fakePersonnelTaskListPage([
+    ["其它批次", "项目实施五部", "经理", "", "", "发送任务单"],
+    ["目标批次", "项目实施五部", "经理", "2026-07-23 10:09:34", "2026-07-23 10:09:34", "发送任务单"],
+  ]);
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { batchName: "目标批次" } },
+    { baseUrl: "http://operation.test/" },
+  );
+
+  assert.deepEqual(page.events, [
+    "goto:http://operation.test/job/decentralizedInvigilate",
+    "fill:目标批次",
+    "wait:目标批次",
+    "click:1",
+    "wait:任务单发送需满足以下条件",
+  ]);
+});
+
+test("current personnel task list blocks duplicate exact batch names", async () => {
+  assert.equal(
+    typeof operationPersonnelRunner.openVisiblePersonnelTaskSheet,
+    "function",
+  );
+  const page = fakePersonnelTaskListPage([
+    ["目标批次", "项目实施五部", "经理", "", "", "发送任务单"],
+    ["目标批次", "项目实施五部", "经理", "", "", "发送任务单"],
+  ]);
+
+  await assert.rejects(
+    () => operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+      page,
+      { batch: { batchName: "目标批次" } },
+      { baseUrl: "http://operation.test" },
+    ),
+    /目标批次.*精确匹配到 2 行/,
+  );
+  assert.equal(page.events.some((event) => event.startsWith("click:")), false);
+});
+
+test("current personnel task sheet reader parses the unique visible dialog", async () => {
+  assert.equal(
+    typeof operationPersonnelRunner.readVisiblePersonnelTaskSheet,
+    "function",
+  );
+  const page = {
+    locator: (selector) => {
+      assert.equal(selector, ".ant-modal:visible");
+      return {
+        filter: ({ hasText }) => {
+          assert.equal(hasText, "任务单发送需满足以下条件");
+          return { count: async () => 1 };
+        },
+      };
+    },
+    evaluate: async () => visiblePersonnelTaskSheetRaw(),
+  };
+
+  const snapshot = await operationPersonnelRunner.readVisiblePersonnelTaskSheet(page);
+
+  assert.equal(snapshot.batch.batchName, "目标批次");
+  assert.equal(snapshot.schedules.length, 1);
+  assert.equal(snapshot.sendRecords[0].type, "首次发送");
+});
+
+test("current personnel task sheet reader blocks duplicate visible dialogs", async () => {
+  assert.equal(
+    typeof operationPersonnelRunner.readVisiblePersonnelTaskSheet,
+    "function",
+  );
+  const page = {
+    locator: () => ({
+      filter: () => ({ count: async () => 2 }),
+    }),
+  };
+
+  await assert.rejects(
+    () => operationPersonnelRunner.readVisiblePersonnelTaskSheet(page),
+    /分散在线监考任务单弹窗.*实际 2 个/,
+  );
+});
+
 function validInstruction(overrides = {}) {
   const target = {
     batch: {
@@ -753,6 +1055,90 @@ test("inspection opens only the exact batch code and returns a read-only snapsho
   });
   assert.equal(JSON.stringify(snapshot).includes("hidden@example.com"), false);
   assert.equal(JSON.stringify(snapshot).includes("不应返回"), false);
+});
+
+test("inspection reads current task sheet sections after verifying the batch detail", async () => {
+  const opened = [];
+  let directoryReads = 0;
+  const taskSheetSnapshot = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(
+    visiblePersonnelTaskSheetRaw(),
+  );
+  const snapshot = await inspectOperationPersonnelTask(
+    {},
+    {
+      environment: "test",
+      batch: {
+        code: "EZT260003",
+        batchName: "目标批次",
+        projectDepartment: "项目实施五部",
+        projectManager: "经理",
+        systemType: "易考",
+      },
+    },
+    {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => opened.push("batch"),
+      readBatch: async () => ({
+        code: "EZT260003",
+        projectCode: "4473-26",
+        projectName: "测试运控项目",
+        batchName: "目标批次",
+        projectDepartment: "项目实施五部",
+        projectManager: "经理",
+        systemType: "易考",
+        published: true,
+      }),
+      openPersonnelTaskSheet: async () => opened.push("task-sheet"),
+      readPersonnelTaskSheetSnapshot: async () => taskSheetSnapshot,
+      readDirectoryGroups: async () => {
+        directoryReads += 1;
+        return [];
+      },
+    },
+  );
+
+  assert.deepEqual(opened, ["batch", "task-sheet"]);
+  assert.equal(directoryReads, 0);
+  assert.equal(snapshot.batch.code, "EZT260003");
+  assert.equal(snapshot.schedules.length, 1);
+  assert.equal(snapshot.personnel.platform, "悦站");
+  assert.equal(snapshot.sendRecords[0].type, "首次发送");
+  assert.deepEqual(snapshot.directoryMatch, { to: [], cc: [] });
+});
+
+test("inspection resolves the exact directory only with a real probe summary", async () => {
+  let directoryReads = 0;
+  const taskSheetSnapshot = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(
+    visiblePersonnelTaskSheetRaw(),
+  );
+  const snapshot = await inspectOperationPersonnelTask(
+    {},
+    {
+      environment: "test",
+      directoryProbeSummary: "dates.end：2026-08-18 → 2026-08-19",
+      batch: { code: "EZT260003", batchName: "目标批次" },
+    },
+    {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => {},
+      readBatch: async () => ({ code: "EZT260003", batchName: "目标批次" }),
+      openPersonnelTaskSheet: async () => {},
+      readPersonnelTaskSheetSnapshot: async () => taskSheetSnapshot,
+      readDirectoryGroups: async () => {
+        directoryReads += 1;
+        return [{
+          name: "演示组",
+          people: [{ id: "u1", name: "张乐翔" }],
+        }];
+      },
+    },
+  );
+
+  assert.equal(directoryReads, 1);
+  assert.deepEqual(snapshot.directoryMatch, {
+    to: [{ group: "演示组", id: "u1", name: "张乐翔" }],
+    cc: [],
+  });
 });
 
 test("inspection rejects missing and duplicate exact batch rows", async () => {

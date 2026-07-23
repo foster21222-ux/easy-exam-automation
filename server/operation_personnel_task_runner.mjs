@@ -334,6 +334,258 @@ export function operationPersonnelBatchIdentityFromVisibleRaw(raw = {}) {
   };
 }
 
+function visibleRowMap(rows = []) {
+  const output = new Map();
+  for (const row of rows) {
+    const key = text(row?.[0]);
+    if (!key) continue;
+    if (output.has(key)) {
+      throw new Error(`运控人员任务检查阻断：任务单字段“${key}”重复`);
+    }
+    output.set(key, text(row?.[1]));
+  }
+  return output;
+}
+
+function requiredHeaderIndex(headers = [], label) {
+  const matches = headers
+    .map((header, index) => ({ header: text(header), index }))
+    .filter((item) => item.header === label);
+  if (matches.length !== 1) {
+    throw new Error(`运控人员任务检查阻断：任务单日程表头“${label}”必须精确匹配 1 列`);
+  }
+  return matches[0].index;
+}
+
+function visibleScheduleRange(value) {
+  const [startValue, endValue, ...extra] = text(value).split("~").map(text);
+  if (!startValue || !endValue || extra.length) {
+    throw new Error(`运控人员任务检查阻断：任务单日程“${text(value)}”格式无效`);
+  }
+  const startDate = startValue.match(/^(\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}$/)?.[1];
+  const end = /^\d{2}:\d{2}$/.test(endValue) && startDate
+    ? `${startDate} ${endValue}`
+    : endValue;
+  return { start: startValue, end };
+}
+
+function visibleConditionSatisfied(value) {
+  const normalized = text(value);
+  if (/未设置|未发布|已结束/.test(normalized)) return false;
+  return /已设置|未结束|已发布/.test(normalized);
+}
+
+export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
+  const values = visibleRowMap(raw.keyValueRows);
+  if (values.get("监考类型") !== "分散监考"
+    || values.get("正式考试-监考人员安排") !== "ATA监考-分散") {
+    throw new Error("运控人员任务检查阻断：任务单不是 ATA 分散在线监考");
+  }
+
+  const scheduleHeaders = [...(raw.scheduleHeaders || [])].map(text);
+  const scheduleIndexes = Object.fromEntries([
+    "日程代码",
+    "日程",
+    "时长(分钟)",
+    "科目名称",
+    "考生提前登录(分钟)",
+  ].map((label) => [label, requiredHeaderIndex(scheduleHeaders, label)]));
+  const schedules = [...(raw.scheduleRows || [])].map((row) => {
+    const range = visibleScheduleRange(row[scheduleIndexes["日程"]]);
+    return {
+      scheduleCode: row[scheduleIndexes["日程代码"]],
+      subjectName: row[scheduleIndexes["科目名称"]],
+      start: range.start,
+      end: range.end,
+      durationMinutes: row[scheduleIndexes["时长(分钟)"]],
+      earlyLoginMinutes: row[scheduleIndexes["考生提前登录(分钟)"]],
+    };
+  });
+
+  const sendRows = [...(raw.sendRecordRows || [])];
+  if (sendRows.length < 1
+    || text(sendRows[0]?.[0]) !== "发送时间"
+    || text(sendRows[0]?.[1]) !== "变更内容") {
+    throw new Error("运控人员任务检查阻断：发送记录表头无效");
+  }
+  const sendRecords = sendRows.slice(1).map((row) => {
+    const sentAt = text(row?.[0]);
+    const type = text(row?.[1]);
+    if (!sentAt || !["首次发送", "再次发送"].includes(type)) {
+      throw new Error("运控人员任务检查阻断：发送记录行无效");
+    }
+    return { type, sentAt };
+  });
+  const loginMinutes = values.get("正式考试-最早登录系统时间")
+    ?.match(/前\s*(\d+)\s*分钟/)?.[1] || "";
+  const requirementNames = [
+    "正式考试-最早登录系统时间",
+    "正式考试-监考人员安排",
+    "正式考试-监考人员数量",
+    "正式考试-监考人员比例",
+    "正式考试-监考登录监控",
+  ];
+  const conditions = [...(raw.conditions || [])].map((name) => ({
+    name: text(name),
+    satisfied: visibleConditionSatisfied(name),
+  }));
+
+  return normalizeOperationPersonnelSnapshot({
+    batch: {
+      projectCode: values.get("项目编码"),
+      projectName: values.get("项目名称"),
+      batchName: values.get("批次名称"),
+      projectDepartment: values.get("项目部归属"),
+      projectManager: values.get("项目经理"),
+      systemType: values.get("系统类型"),
+    },
+    schedules,
+    personnel: {
+      serviceType: "ATA 监考－分散在线监考",
+      platform: values.get("人员落实平台"),
+      loginMonitoring: values.get("正式考试-监考登录监控"),
+      monitorRatio: values.get("正式考试-监考人员比例"),
+      monitorCount: values.get("正式考试-监考人员数量"),
+      earliestLoginMinutes: loginMinutes,
+      trialIncluded: false,
+    },
+    dates: {
+      start: values.get("人员落实开始日期"),
+      end: values.get("人员落实结束日期"),
+      nameListDue: values.get("人员名单提交日期"),
+    },
+    requirements: requirementNames.map((name) => ({
+      name,
+      value: values.get(name),
+    })),
+    taskSheet: {
+      type: "分散在线监考",
+      conditions,
+      content: text(raw.content),
+    },
+    sendRecords,
+  });
+}
+
+export async function openVisiblePersonnelTaskSheet(page, instruction = {}, options = {}) {
+  const batchName = text(instruction.batch?.batchName || instruction.batchName);
+  if (!batchName) throw new Error("缺少运控批次名称");
+  const baseUrl = text(
+    options.baseUrl
+    || process.env.OPERATION_CONSOLE_BASE_URL
+    || "http://172.16.18.198:8020",
+  );
+  await page.goto(`${baseUrl.replace(/\/$/, "")}/job/decentralizedInvigilate`, {
+    waitUntil: "domcontentloaded",
+  });
+  const search = page.locator(
+    'input[placeholder="请输入批次代码、批次名称、项目经理"]:visible',
+  );
+  if (await search.count() !== 1) {
+    throw operationControlError("分散在线监考任务筛选框", await search.count());
+  }
+  await search.fill(batchName);
+  await page.getByText(batchName, { exact: true }).first().waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
+
+  const tables = page.locator("table:visible");
+  const matches = [];
+  for (let index = 0; index < await tables.count(); index += 1) {
+    const table = tables.nth(index);
+    const headers = (await table.locator("thead th").allInnerTexts()).map(text);
+    if (headers.includes("批次名称") && headers.includes("操作")) {
+      matches.push({ table, headers });
+    }
+  }
+  if (matches.length !== 1) {
+    throw operationControlError("分散在线监考任务主表", matches.length);
+  }
+  const { table, headers } = matches[0];
+  const batchNameIndex = headers.indexOf("批次名称");
+  const rows = table.locator("tbody tr");
+  const exactRows = [];
+  for (let index = 0; index < await rows.count(); index += 1) {
+    const cells = (await rows.nth(index).locator("td").allInnerTexts()).map(text);
+    if (cells[batchNameIndex] === batchName) exactRows.push(index);
+  }
+  if (exactRows.length !== 1) {
+    throw new Error(`运控批次名称 ${batchName} 精确匹配到 ${exactRows.length} 行`);
+  }
+  const action = page.locator(".ant-table-fixed-right table:visible tbody tr")
+    .nth(exactRows[0])
+    .getByText("发送任务单", { exact: true });
+  await clickUniqueVisible(action, "分散在线监考发送任务单入口");
+  await page.getByText("任务单发送需满足以下条件", { exact: true }).first().waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
+}
+
+export async function readVisiblePersonnelTaskSheet(page) {
+  const dialogs = page.locator(".ant-modal:visible").filter({
+    hasText: "任务单发送需满足以下条件",
+  });
+  const dialogCount = await dialogs.count();
+  if (dialogCount !== 1) {
+    throw operationControlError("分散在线监考任务单弹窗", dialogCount);
+  }
+  const raw = await page.evaluate(() => {
+    const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
+    const visible = (node) => Boolean(
+      node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length),
+    );
+    const modals = [...document.querySelectorAll(".ant-modal")].filter((node) => (
+      visible(node)
+      && clean(node.innerText).includes("任务单发送需满足以下条件")
+    ));
+    const modal = modals[0];
+    const tables = [...modal.querySelectorAll("table")].filter(visible);
+    const cells = (row) => [...row.querySelectorAll("th, td")].map((cell) => clean(cell.textContent));
+    const tableRows = (table) => [...table.querySelectorAll("tr")].filter(visible).map(cells);
+    const sendTable = tables.find((table) => {
+      const first = tableRows(table)[0] || [];
+      return first[0] === "发送时间" && first[1] === "变更内容";
+    });
+    const scheduleTable = tables.find((table) => {
+      const headers = [...table.querySelectorAll("thead th")].map((cell) => clean(cell.textContent));
+      return headers.includes("日程代码")
+        && headers.includes("日程")
+        && headers.includes("科目名称");
+    });
+    const keyValueRows = tables
+      .filter((table) => table !== sendTable && table !== scheduleTable)
+      .flatMap(tableRows)
+      .filter((row) => row.length === 2);
+    const scheduleHeaders = scheduleTable
+      ? [...scheduleTable.querySelectorAll("thead th")].map((cell) => clean(cell.textContent))
+      : [];
+    const scheduleRows = scheduleTable
+      ? [...scheduleTable.querySelectorAll("tbody tr")].filter(visible).map(cells)
+      : [];
+    const sendRecordRows = sendTable ? tableRows(sendTable) : [];
+    const modalText = String(modal.innerText ?? "");
+    const conditions = [...modalText.matchAll(
+      /\d+、\s*(.*?)(?=\s*\d+、|基本信息)/gs,
+    )].map((match) => clean(match[1])).filter(Boolean);
+    return {
+      conditions,
+      keyValueRows,
+      scheduleHeaders,
+      scheduleRows,
+      sendRecordRows,
+      content: JSON.stringify({
+        conditions,
+        keyValueRows,
+        scheduleHeaders,
+        scheduleRows,
+      }),
+    };
+  });
+  return operationPersonnelTaskSheetFromVisibleRaw(raw);
+}
+
 async function readVisibleOperationPersonnelSnapshot(page) {
   if (typeof page.evaluate !== "function") return {};
   const snapshot = await page.evaluate(() => {
@@ -578,6 +830,51 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     batch,
     text(instruction.environment),
   );
+  const legacySectionReaders = [
+    "readSchedules",
+    "readPersonnel",
+    "readDates",
+    "readRequirements",
+    "readTaskSheet",
+    "readSendRecords",
+  ].some((name) => typeof options[name] === "function")
+    || typeof options.readVisibleSnapshot === "function";
+  if (!legacySectionReaders) {
+    await (
+      options.openPersonnelTaskSheet
+      || ((actualPage, actualInstruction) => (
+        openVisiblePersonnelTaskSheet(actualPage, actualInstruction, options)
+      ))
+    )(page, instruction);
+    const taskSnapshot = normalizeOperationPersonnelSnapshot(await (
+      options.readPersonnelTaskSheetSnapshot || readVisiblePersonnelTaskSheet
+    )(page, instruction));
+    const directoryProbeSummary = text(instruction.directoryProbeSummary);
+    let matched = { to: [], cc: [] };
+    if (directoryProbeSummary) {
+      await options.openPersonnelDirectory?.(page, instruction);
+      const groups = await (
+        options.readDirectoryGroups
+        || ((actualPage, actualInstruction) => (
+          VISIBLE_OPERATION_PERSONNEL_ADAPTER.readDirectoryGroups(
+            actualPage,
+            actualInstruction,
+          )
+        ))
+      )(page, instruction);
+      matched = matchOperationPersonnelRecipients({
+        environment: text(instruction.environment),
+        groups,
+      });
+    }
+    return normalizeOperationPersonnelSnapshot({
+      ...taskSnapshot,
+      batch: { ...taskSnapshot.batch, ...batch },
+      directoryMatch: directoryProbeSummary
+        ? directoryMatch(text(instruction.environment), matched)
+        : { to: [], cc: [] },
+    });
+  }
   const groups = await read("readDirectoryGroups", "directoryGroups", []);
   const environment = text(instruction.environment);
   const matched = matchOperationPersonnelRecipients({ environment, groups });
