@@ -428,7 +428,6 @@ export async function performOperationBatchTableAction(page, action, options = {
   responseWait.catch(() => {});
   try {
     await action();
-    await loading.waitFor({ state: "visible", timeout: Number(options.batchListLoadingWaitMs || 30000) });
     const response = await responseWait;
     if (typeof response.ok === "function" && !response.ok()) {
       throw new Error(`批次列表查询请求失败：${response.url()}`);

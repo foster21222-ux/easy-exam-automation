@@ -15,6 +15,7 @@ import {
 function fakeBatchListPage(pages, {
   advancePage = true,
   initialPageIndex = 0,
+  loadingVisible = true,
   malformedPagination = false,
   pageUrl = "http://operation/batch/batchList",
   paginationCount,
@@ -104,7 +105,14 @@ function fakeBatchListPage(pages, {
       }
       if (selector === "tbody tr") return rowLocator;
       if (selector === ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning") {
-        return { first: () => ({ waitFor: async ({ state }) => events.push(`loading:${state}`) }) };
+        return {
+          first: () => ({
+            waitFor: async ({ state }) => {
+              events.push(`loading:${state}`);
+              if (state === "visible" && !loadingVisible) throw new Error("loading spinner was not visible");
+            },
+          }),
+        };
       }
       if (selector === ".ant-pagination") {
         const count = paginationCount ?? (pages.length > 1 || malformedPagination ? 1 : 0);
@@ -159,7 +167,7 @@ function fakePageWithCode(url, code = "OLD123456", batchName = "目标项目_202
   };
 }
 
-test("table action handles a response timeout before a slower loading wait completes", async () => {
+test("table action handles a response timeout before a slower action completes", async () => {
   const page = {
     url: () => "http://operation/batch/batchList",
     waitForResponse: () => Promise.reject(new Error("response timeout")),
@@ -175,7 +183,7 @@ test("table action handles a response timeout before a slower loading wait compl
   await assert.rejects(
     performOperationBatchTableAction(
       page,
-      async () => {},
+      () => new Promise((resolve) => setTimeout(resolve, 20)),
       {},
       { batchListUrl: "http://operation/batch/batchList" },
     ),
@@ -337,10 +345,25 @@ test("batch search registers its response wait before Enter and waits for stable
 
   assert.equal(result.operationBatchCode, "QTT260007");
   assert.ok(page.events.indexOf("response:wait") < page.events.indexOf("search:enter"));
-  assert.ok(page.events.indexOf("search:enter") < page.events.indexOf("loading:visible"));
-  assert.ok(page.events.indexOf("loading:visible") < page.events.indexOf("response:finished"));
+  assert.ok(page.events.indexOf("search:enter") < page.events.indexOf("response:finished"));
   assert.ok(page.events.indexOf("response:finished") < page.events.indexOf("loading:hidden"));
   assert.ok(page.events.filter((event) => event === "rows:1").length >= 2);
+});
+
+test("batch search accepts a completed exact response when the loading spinner is too fast to appear", async () => {
+  const page = fakeBatchListPage(
+    [[["QTT260007", "目标项目_2026年8月"]]],
+    { loadingVisible: false },
+  );
+  const result = await findCreatedBatchFromList(
+    page,
+    "http://operation/batch/batchList",
+    "目标项目_2026年8月",
+    { tableStablePollMs: 0 },
+  );
+  assert.equal(result.operationBatchCode, "QTT260007");
+  assert.ok(page.events.includes("response:finished"));
+  assert.ok(page.events.includes("loading:hidden"));
 });
 
 test("batch lookup rejects redirects outside the configured list origin or path", async () => {
