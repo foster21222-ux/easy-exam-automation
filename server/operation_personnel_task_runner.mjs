@@ -277,9 +277,57 @@ function verifyBatchDetailIdentity(expected = {}, actual = {}) {
   }
 }
 
+function visibleHeaderField(value, label) {
+  const normalized = text(value).replace(/\s+/g, " ");
+  const labels = ["业务部归属", "业务负责人", "项目部归属", "项目经理", "考试日期"];
+  const otherLabels = labels.filter((item) => item !== label).join("|");
+  const match = normalized.match(new RegExp(
+    `${label}[：:]\\s*(.*?)(?=\\s*(?:\\||(?:${otherLabels})[：:])|$)`,
+  ));
+  return text(match?.[1]);
+}
+
+export function operationPersonnelBatchIdentityFromVisibleRaw(raw = {}) {
+  const titleUnique = Number(raw.titleCount) === 1;
+  const projectLinksUnique = Number(raw.projectLinkCount) === 2;
+  const headerUnique = Number(raw.headerInfoCount) === 1;
+  const statusUnique = Number(raw.statusCount) === 1;
+  const systemTypeUnique = Number(raw.systemTypeCount) === 1 && Boolean(text(raw.systemType));
+  const projectDepartment = headerUnique
+    ? visibleHeaderField(raw.headerInfoText, "项目部归属")
+    : "";
+  const projectManager = headerUnique
+    ? visibleHeaderField(raw.headerInfoText, "项目经理")
+    : "";
+  const checks = [
+    ["批次代码", titleUnique && Boolean(text(raw.code))],
+    ["批次名称", titleUnique && Boolean(text(raw.batchName))],
+    ["项目编码", projectLinksUnique && Boolean(text(raw.projectCode))],
+    ["项目名称", projectLinksUnique && Boolean(text(raw.projectName))],
+    ["项目部归属", Boolean(projectDepartment)],
+    ["项目经理", Boolean(projectManager)],
+    ["系统类型", systemTypeUnique],
+    ["发布状态", statusUnique],
+  ];
+  const missing = checks.filter(([, present]) => !present).map(([label]) => label);
+  return {
+    batch: {
+      code: titleUnique ? text(raw.code) : "",
+      projectCode: projectLinksUnique ? text(raw.projectCode) : "",
+      projectName: projectLinksUnique ? text(raw.projectName) : "",
+      batchName: titleUnique ? text(raw.batchName) : "",
+      projectDepartment,
+      projectManager,
+      systemType: systemTypeUnique ? text(raw.systemType) : "",
+      published: statusUnique && [...(raw.statusTags || [])].map(text).includes("已发布"),
+    },
+    evidence: { present: missing.length === 0, missing },
+  };
+}
+
 async function readVisibleOperationPersonnelSnapshot(page) {
   if (typeof page.evaluate !== "function") return {};
-  return page.evaluate(() => {
+  const snapshot = await page.evaluate(() => {
     const clean = (value) => String(value ?? "").trim();
     const visible = (node) => Boolean(node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length));
     const field = (label) => {
@@ -352,7 +400,43 @@ async function readVisibleOperationPersonnelSnapshot(page) {
         name: clean(person.getAttribute("data-person-name") || person.textContent),
       })),
     }));
+    const currentTitles = [...document.querySelectorAll(".header-title")].filter(visible);
+    const currentTitle = currentTitles.length === 1 ? currentTitles[0] : null;
+    const currentHeaderInfos = [...document.querySelectorAll(".header-info")].filter(visible);
+    const currentHeaderInfo = currentHeaderInfos.length === 1 ? currentHeaderInfos[0] : null;
+    const projectLinks = currentHeaderInfo
+      ? [...currentHeaderInfo.querySelectorAll(".hover-link")].filter(visible)
+      : [];
+    const currentHeaderRoot = currentTitle?.parentElement?.parentElement;
+    const statusNodes = currentHeaderRoot
+      ? [...currentHeaderRoot.querySelectorAll(".right p")].filter(
+        (node) => visible(node) && clean(node.textContent).startsWith("批次状态"),
+      )
+      : [];
+    const systemTypeNodes = [...document.querySelectorAll(".basic-item")].filter((node) => {
+      const label = node.querySelector(".basic-title-1");
+      return visible(node) && clean(label?.textContent).replace(/[：:]\s*$/, "") === "系统类型";
+    });
+    const currentBatchRaw = {
+      titleCount: currentTitles.length,
+      code: clean(currentTitle?.querySelector(":scope > span")?.textContent),
+      batchName: clean(currentTitle?.querySelector(":scope > label")?.textContent),
+      projectLinkCount: projectLinks.length,
+      projectCode: clean(projectLinks[0]?.textContent),
+      projectName: clean(projectLinks[1]?.textContent),
+      headerInfoCount: currentHeaderInfos.length,
+      headerInfoText: clean(currentHeaderInfo?.textContent),
+      statusCount: statusNodes.length,
+      statusTags: statusNodes.length === 1
+        ? [...statusNodes[0].querySelectorAll(".ant-tag")].map((node) => clean(node.textContent))
+        : [],
+      systemTypeCount: systemTypeNodes.length,
+      systemType: systemTypeNodes.length === 1
+        ? clean(systemTypeNodes[0].querySelector("label")?.textContent)
+        : "",
+    };
     return {
+      __currentBatchRaw: currentBatchRaw,
       batch: {
         code: fields["批次代码"].value,
         projectCode: fields["项目编码"].value,
@@ -422,6 +506,15 @@ async function readVisibleOperationPersonnelSnapshot(page) {
       },
     };
   });
+  if (Object.values(snapshot.__currentBatchRaw || {}).some((value) => (
+    Array.isArray(value) ? value.length > 0 : Boolean(value)
+  ))) {
+    const current = operationPersonnelBatchIdentityFromVisibleRaw(snapshot.__currentBatchRaw);
+    snapshot.batch = current.batch;
+    snapshot.evidence.batch = current.evidence;
+  }
+  delete snapshot.__currentBatchRaw;
+  return snapshot;
 }
 
 function assertVisibleSection(snapshot, key) {

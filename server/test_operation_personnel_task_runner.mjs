@@ -6,9 +6,69 @@ import {
   inspectOperationPersonnelTask,
   matchOperationPersonnelRecipients,
   normalizeOperationPersonnelSnapshot,
+  operationPersonnelBatchIdentityFromVisibleRaw,
   operationPersonnelConflicts,
   runOperationPersonnelInspection,
 } from "./operation_personnel_task_runner.mjs";
+
+test("current operation detail header maps exact visible batch identity", () => {
+  assert.deepEqual(operationPersonnelBatchIdentityFromVisibleRaw({
+    titleCount: 1,
+    code: "EZT260004",
+    batchName: "中国邮政集团公司湖北省分公司招聘考试_2026年8月",
+    projectLinkCount: 2,
+    projectCode: "4473-26",
+    projectName: "第三方评价-黑龙江省善用人力资源有限公司",
+    headerInfoCount: 1,
+    headerInfoText: [
+      "4473-26 | 第三方评价-黑龙江省善用人力资源有限公司 | 业务部归属：业务二部 | 业务负责人：田永军",
+      "项目部归属：项目实施五部 | 项目经理：经理 | 考试日期：2026-08-22",
+    ].join("\n"),
+    statusCount: 1,
+    statusTags: ["实施中", "已发布"],
+    systemTypeCount: 1,
+    systemType: "易考",
+  }), {
+    batch: {
+      code: "EZT260004",
+      projectCode: "4473-26",
+      projectName: "第三方评价-黑龙江省善用人力资源有限公司",
+      batchName: "中国邮政集团公司湖北省分公司招聘考试_2026年8月",
+      projectDepartment: "项目实施五部",
+      projectManager: "经理",
+      systemType: "易考",
+      published: true,
+    },
+    evidence: { present: true, missing: [] },
+  });
+});
+
+test("current operation detail header never invents ambiguous identity fields", () => {
+  const result = operationPersonnelBatchIdentityFromVisibleRaw({
+    titleCount: 2,
+    code: "EZT260004",
+    batchName: "目标批次",
+    projectLinkCount: 1,
+    projectCode: "4473-26",
+    projectName: "",
+    headerInfoCount: 1,
+    headerInfoText: "项目部归属：项目实施五部",
+    statusCount: 0,
+    statusTags: [],
+    systemTypeCount: 2,
+    systemType: "易考",
+  });
+  assert.equal(result.evidence.present, false);
+  assert.deepEqual(result.evidence.missing, [
+    "批次代码",
+    "批次名称",
+    "项目编码",
+    "项目名称",
+    "项目经理",
+    "系统类型",
+    "发布状态",
+  ]);
+});
 
 function validInstruction(overrides = {}) {
   const target = {
