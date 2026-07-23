@@ -6,6 +6,7 @@ import {
   findCreatedBatchFromList,
   operationBatchListResultFromRows,
   operationBatchTableResponseMatches,
+  performOperationBatchTableAction,
   resolveSubmittedOperationBatch,
   runOperationBatchReconciliation,
   runWithOperationBatchContext,
@@ -157,6 +158,31 @@ function fakePageWithCode(url, code = "OLD123456", batchName = "目标项目_202
     async waitForFunction() {},
   };
 }
+
+test("table action handles a response timeout before a slower loading wait completes", async () => {
+  const page = {
+    url: () => "http://operation/batch/batchList",
+    waitForResponse: () => Promise.reject(new Error("response timeout")),
+    locator(selector) {
+      assert.equal(selector, ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning");
+      return {
+        first: () => ({
+          waitFor: () => new Promise((resolve) => setTimeout(resolve, 20)),
+        }),
+      };
+    },
+  };
+  await assert.rejects(
+    performOperationBatchTableAction(
+      page,
+      async () => {},
+      {},
+      { batchListUrl: "http://operation/batch/batchList" },
+    ),
+    (error) => error.code === OPERATION_BATCH_RECONCILIATION_REQUIRED
+      && error.message === "response timeout",
+  );
+});
 
 test("submitted batch only trusts a detail page with a batch guid", async () => {
   const expected = {
@@ -430,6 +456,11 @@ test("batch search response requires a list endpoint and an exact accepted searc
   ), true);
   assert.equal(operationBatchTableResponseMatches(
     response({ path: "/api/batch/query", postData: new URLSearchParams({ batch_name: expectedBatchName }).toString() }),
+    "http://operation/batch/batchList",
+    options,
+  ), true);
+  assert.equal(operationBatchTableResponseMatches(
+    response({ path: "/api/batch/getBatchList", postData: JSON.stringify({ condition: expectedBatchName }) }),
     "http://operation/batch/batchList",
     options,
   ), true);

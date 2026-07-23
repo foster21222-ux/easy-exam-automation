@@ -346,7 +346,7 @@ function operationBatchListEndpoint(urlValue, pageUrl) {
 }
 
 function operationBatchSearchValues(urlValue, postData, pageUrl) {
-  const acceptedFields = new Set(["batchName", "batch_name"]);
+  const acceptedFields = new Set(["batchName", "batch_name", "condition"]);
   const values = [];
   const url = new URL(urlValue, pageUrl);
   for (const [key, value] of url.searchParams) {
@@ -425,6 +425,7 @@ export async function performOperationBatchTableAction(page, action, options = {
     (response) => operationBatchTableResponseMatches(response, batchListUrl, responseOptions),
     { timeout: Number(options.batchListResponseWaitMs || 30000) },
   );
+  responseWait.catch(() => {});
   try {
     await action();
     await loading.waitFor({ state: "visible", timeout: Number(options.batchListLoadingWaitMs || 30000) });
@@ -439,7 +440,6 @@ export async function performOperationBatchTableAction(page, action, options = {
     assertOperationBatchListPage(page, batchListUrl);
     return rows;
   } catch (error) {
-    responseWait.catch(() => {});
     throw reconciliationRequiredError(error);
   }
 }
