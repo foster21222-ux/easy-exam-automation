@@ -201,6 +201,49 @@ test("current personnel task sheet blocks an invalid send record row", () => {
   );
 });
 
+test("current personnel send record table maps its header row and visible records", () => {
+  assert.equal(
+    typeof operationPersonnelRunner.operationPersonnelSendRecordsFromVisibleRows,
+    "function",
+  );
+  assert.deepEqual(
+    operationPersonnelRunner.operationPersonnelSendRecordsFromVisibleRows([
+      ["发送时间", "变更内容"],
+      ["2026-07-23 10:12:08", "再次发送"],
+      ["2026-07-23 10:09:34", "首次发送"],
+    ]),
+    [
+      { type: "再次发送", sentAt: "2026-07-23 10:12:08" },
+      { type: "首次发送", sentAt: "2026-07-23 10:09:34" },
+    ],
+  );
+  assert.throws(
+    () => operationPersonnelRunner.operationPersonnelSendRecordsFromVisibleRows([
+      ["发送类型", "发送时间"],
+    ]),
+    /发送记录表头无效/,
+  );
+});
+
+test("current personnel directory labels map exact email identities", () => {
+  assert.equal(
+    typeof operationPersonnelRunner.operationPersonnelDirectoryPeopleFromVisibleTexts,
+    "function",
+  );
+  assert.deepEqual(
+    operationPersonnelRunner.operationPersonnelDirectoryPeopleFromVisibleTexts([
+      "演练组",
+      "zhanglexiang@ata.net.cn (张乐翔)",
+      "maomengmeng@ata.net.cn (毛萌萌)",
+      "zhanglexiang@ata.net.cn (张乐翔)",
+    ]),
+    [
+      { id: "zhanglexiang@ata.net.cn", name: "张乐翔" },
+      { id: "maomengmeng@ata.net.cn", name: "毛萌萌" },
+    ],
+  );
+});
+
 function fakePersonnelTaskListPage(rows = []) {
   const events = [];
   const rowLocators = rows.map((cells, rowIndex) => ({
@@ -369,6 +412,39 @@ test("current personnel task sheet reader blocks duplicate visible dialogs", asy
   await assert.rejects(
     () => operationPersonnelRunner.readVisiblePersonnelTaskSheet(page),
     /分散在线监考任务单弹窗.*实际 2 个/,
+  );
+});
+
+test("current top-right send record reader uses the visible task sheet table", async () => {
+  assert.equal(
+    typeof operationPersonnelRunner.readVisibleTopRightSendRecords,
+    "function",
+  );
+  const page = {
+    locator: (selector) => {
+      assert.equal(selector, ".ant-modal:visible");
+      return {
+        filter: ({ hasText }) => {
+          assert.equal(hasText, "任务单发送需满足以下条件");
+          return { count: async () => 1 };
+        },
+      };
+    },
+    evaluate: async () => visiblePersonnelTaskSheetRaw({
+      sendRecordRows: [
+        ["发送时间", "变更内容"],
+        ["2026-07-23 10:12:08", "再次发送"],
+        ["2026-07-23 10:09:34", "首次发送"],
+      ],
+    }),
+  };
+
+  assert.deepEqual(
+    await operationPersonnelRunner.readVisibleTopRightSendRecords(page),
+    [
+      { type: "再次发送", sentAt: "2026-07-23 10:12:08" },
+      { type: "首次发送", sentAt: "2026-07-23 10:09:34" },
+    ],
   );
 });
 
@@ -748,6 +824,43 @@ test("never retries the final send click when the send record is delayed", async
   assert.equal(result.status, "result_unknown");
 });
 
+test("resend accepts a delayed new record after reopening without clicking send twice", async () => {
+  const oldRecord = {
+    type: "首次发送",
+    sentAt: "2026-07-23T01:59:00.000Z",
+  };
+  const target = {
+    ...validInstruction().target,
+    sendRecords: [oldRecord],
+  };
+  const page = fakeOperationPage({
+    published: true,
+    schedules: target.schedules,
+    personnelPlatform: target.personnel.platform,
+    dates: target.dates,
+    requirements: target.requirements,
+    sendRecords: [oldRecord],
+    sendRecordsAfterReopen: [{
+      type: "再次发送",
+      sentAt: "2026-07-23T02:00:01.000Z",
+    }],
+  });
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({
+      kind: "resend",
+      baseline: target,
+      target,
+      changeSummary: "人员落实结束日期调整",
+    }),
+    attemptOptions(page),
+  );
+
+  assert.equal(page.events.filter((item) => item === "send:confirm").length, 1);
+  assert.equal(page.events.filter((item) => item === "task-sheet:reopen").length, 1);
+  assert.equal(result.status, "sent");
+  assert.equal(result.sendRecord.type, "再次发送");
+});
+
 test("resend only accepts a record later than attempt start", () => {
   assert.equal(operationPersonnelRunner.findAttemptSendRecord([
     { type: "再次发送", sentAt: "2026-07-23T01:59:59.000Z" },
@@ -771,13 +884,17 @@ test("send record matching only accepts a fresh top-right record for both attemp
   assert.equal(operationPersonnelRunner.findAttemptSendRecord([
     { type: "其它记录", sentAt: "2026-07-23T02:00:02.000Z" },
     { type: "首次发送", sentAt: "2026-07-23T02:00:01.000Z" },
-  ], { kind: "initial", startedAt }), null);
+  ], { kind: "initial", startedAt }).sentAt, "2026-07-23T02:00:01.000Z");
   assert.equal(operationPersonnelRunner.findAttemptSendRecord([
     { type: "首次发送", sentAt: "not-a-time" },
   ], { kind: "initial", startedAt }), null);
   assert.equal(operationPersonnelRunner.findAttemptSendRecord([
     { type: "首次发送", sentAt: "2026-07-23T02:00:01.000Z" },
   ], { kind: "initial", startedAt }).sentAt, "2026-07-23T02:00:01.000Z");
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "首次发送", sentAt: "2026-07-23T01:59:59.000Z" },
+    { type: "首次发送", sentAt: "2026-07-23T02:00:02.000Z" },
+  ], { kind: "initial", startedAt }).sentAt, "2026-07-23T02:00:02.000Z");
 });
 
 test("completed checkpoint persistence failure after the click resumes without another click", async () => {
@@ -839,6 +956,7 @@ test("recheck is read-only", async () => {
   assert.equal(page.events.some((item) => (
     /publish|fill|delete|send:confirm|recipients:select/.test(item)
   )), false);
+  assert.equal(page.events.filter((item) => item === "task-sheet:open").length, 1);
 });
 
 test("resume skips a verified checkpoint and blocks drift before continuing", async () => {
@@ -1139,6 +1257,38 @@ test("inspection resolves the exact directory only with a real probe summary", a
     to: [{ group: "演示组", id: "u1", name: "张乐翔" }],
     cc: [],
   });
+});
+
+test("attempt change summary rechecks the exact directory before applying changes", async () => {
+  let directoryReads = 0;
+  const taskSheetSnapshot = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(
+    visiblePersonnelTaskSheetRaw(),
+  );
+  const snapshot = await inspectOperationPersonnelTask(
+    {},
+    {
+      environment: "test",
+      changeSummary: "人员落实结束日期调整",
+      batch: { code: "EZT260003", batchName: "目标批次" },
+    },
+    {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => {},
+      readBatch: async () => ({ code: "EZT260003", batchName: "目标批次" }),
+      openPersonnelTaskSheet: async () => {},
+      readPersonnelTaskSheetSnapshot: async () => taskSheetSnapshot,
+      readDirectoryGroups: async () => {
+        directoryReads += 1;
+        return [{
+          name: "演示组",
+          people: [{ id: "u1", name: "张乐翔" }],
+        }];
+      },
+    },
+  );
+
+  assert.equal(directoryReads, 1);
+  assert.equal(snapshot.directoryMatch.to[0].name, "张乐翔");
 });
 
 test("inspection rejects missing and duplicate exact batch rows", async () => {

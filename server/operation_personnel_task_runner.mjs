@@ -375,6 +375,37 @@ function visibleConditionSatisfied(value) {
   return /已设置|未结束|已发布/.test(normalized);
 }
 
+export function operationPersonnelSendRecordsFromVisibleRows(rows = []) {
+  const visibleRows = [...rows];
+  if (visibleRows.length < 1
+    || text(visibleRows[0]?.[0]) !== "发送时间"
+    || text(visibleRows[0]?.[1]) !== "变更内容") {
+    throw new Error("运控人员任务检查阻断：发送记录表头无效");
+  }
+  return visibleRows.slice(1).map((row) => {
+    const sentAt = text(row?.[0]);
+    const type = text(row?.[1]);
+    if (!sentAt || !["首次发送", "再次发送"].includes(type)) {
+      throw new Error("运控人员任务检查阻断：发送记录行无效");
+    }
+    return { type, sentAt };
+  });
+}
+
+export function operationPersonnelDirectoryPeopleFromVisibleTexts(values = []) {
+  const seen = new Set();
+  return [...values].flatMap((value) => {
+    const match = text(value).match(/^([^\s()]+@[^\s()]+)\s+\(([^()]+)\)$/);
+    if (!match) return [];
+    const id = text(match[1]);
+    const name = text(match[2]);
+    const key = `${id}\0${name}`;
+    if (!id || !name || seen.has(key)) return [];
+    seen.add(key);
+    return [{ id, name }];
+  });
+}
+
 export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
   const values = visibleRowMap(raw.keyValueRows);
   if (values.get("监考类型") !== "分散监考"
@@ -402,20 +433,9 @@ export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
     };
   });
 
-  const sendRows = [...(raw.sendRecordRows || [])];
-  if (sendRows.length < 1
-    || text(sendRows[0]?.[0]) !== "发送时间"
-    || text(sendRows[0]?.[1]) !== "变更内容") {
-    throw new Error("运控人员任务检查阻断：发送记录表头无效");
-  }
-  const sendRecords = sendRows.slice(1).map((row) => {
-    const sentAt = text(row?.[0]);
-    const type = text(row?.[1]);
-    if (!sentAt || !["首次发送", "再次发送"].includes(type)) {
-      throw new Error("运控人员任务检查阻断：发送记录行无效");
-    }
-    return { type, sentAt };
-  });
+  const sendRecords = operationPersonnelSendRecordsFromVisibleRows(
+    raw.sendRecordRows,
+  );
   const loginMinutes = values.get("正式考试-最早登录系统时间")
     ?.match(/前\s*(\d+)\s*分钟/)?.[1] || "";
   const requirementNames = [
@@ -849,19 +869,26 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     const taskSnapshot = normalizeOperationPersonnelSnapshot(await (
       options.readPersonnelTaskSheetSnapshot || readVisiblePersonnelTaskSheet
     )(page, instruction));
-    const directoryProbeSummary = text(instruction.directoryProbeSummary);
+    const directoryProbeSummary = text(
+      instruction.directoryProbeSummary || instruction.changeSummary,
+    );
     let matched = { to: [], cc: [] };
     if (directoryProbeSummary) {
-      await options.openPersonnelDirectory?.(page, instruction);
-      const groups = await (
-        options.readDirectoryGroups
-        || ((actualPage, actualInstruction) => (
-          VISIBLE_OPERATION_PERSONNEL_ADAPTER.readDirectoryGroups(
-            actualPage,
-            actualInstruction,
-          )
-        ))
-      )(page, instruction);
+      let groups;
+      if (options.openPersonnelDirectory || options.readDirectoryGroups) {
+        await options.openPersonnelDirectory?.(page, instruction);
+        groups = await (
+          options.readDirectoryGroups
+          || ((actualPage, actualInstruction) => (
+            VISIBLE_OPERATION_PERSONNEL_ADAPTER.readDirectoryGroups(
+              actualPage,
+              actualInstruction,
+            )
+          ))
+        )(page, instruction);
+      } else {
+        groups = await inspectVisiblePersonnelDirectory(page, instruction);
+      }
       matched = matchOperationPersonnelRecipients({
         environment: text(instruction.environment),
         groups,
@@ -1028,6 +1055,25 @@ async function topVisibleDialog(page, label) {
   return dialogs.last();
 }
 
+async function uniqueVisibleModalWithText(page, value, label) {
+  const visibleModals = page.locator(".ant-modal:visible");
+  if (typeof visibleModals?.filter !== "function") {
+    return topVisibleDialog(page, label);
+  }
+  const modals = visibleModals.filter({ hasText: value });
+  return uniqueVisibleControl(modals, label);
+}
+
+async function clickUniqueNamedButton(container, names, label) {
+  const matches = [];
+  for (const name of names) {
+    const button = container.getByRole("button", { name, exact: true });
+    if (await button.count() === 1) matches.push(button);
+  }
+  if (matches.length !== 1) throw operationControlError(label, matches.length);
+  await matches[0].click();
+}
+
 async function exactVisibleRows(page, value) {
   if (typeof page?.locator !== "function") return [];
   const rows = page.locator("table:visible tbody tr");
@@ -1162,48 +1208,193 @@ async function syncVisibleRequirements(page, target = [], current = []) {
   }
 }
 
-function cssAttribute(value) {
-  return text(value).replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
-}
-
 async function selectVisiblePeople(dialog, groupName, people) {
-  await clickUniqueVisible(
-    dialog.getByText(groupName, { exact: true }),
-    `人员目录组 ${groupName}`,
-  );
+  const group = dialog.getByRole("checkbox", { name: groupName, exact: true });
+  await clickUniqueVisible(group, `人员目录组 ${groupName}`);
   for (const person of people) {
-    const candidate = dialog.locator(
-      `[data-person-id="${cssAttribute(person.id)}"]:visible`,
-    ).filter({ hasText: person.name });
+    const label = `${person.id} (${person.name})`;
+    const candidate = dialog.getByRole("checkbox", { name: label, exact: true });
     const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
-    const actualName = text(
-      await exact.getAttribute("data-person-name") || await exact.innerText(),
-    );
-    if (actualName !== person.name) throw operationControlError(`人员 ${person.id}/${person.name}`, 0);
-    await exact.click();
+    await exact.check();
   }
 }
 
-async function readVisibleRecipientChips(page) {
-  const read = async (kind) => {
-    const chips = page.locator(
-      `[data-recipient-kind="${kind}"]:visible [data-person-id]:visible`,
+async function visibleDirectoryPeople(dialog) {
+  const values = await dialog.evaluate((node) => {
+    const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
+    const visible = (element) => Boolean(
+      element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length),
     );
-    const count = await chips.count();
-    const people = [];
-    for (let index = 0; index < count; index += 1) {
-      const chip = chips.nth(index);
-      people.push({
-        id: text(await chip.getAttribute("data-person-id")),
-        name: text(await chip.getAttribute("data-person-name") || await chip.innerText()),
-      });
-    }
-    return people;
-  };
-  return { to: await read("to"), cc: await read("cc") };
+    return [...node.querySelectorAll("*")]
+      .filter(visible)
+      .filter((element) => element.children.length === 0)
+      .map((element) => clean(element.textContent))
+      .filter((value) => /^[^\s()]+@[^\s()]+\s+\([^()]+\)$/.test(value));
+  });
+  return operationPersonnelDirectoryPeopleFromVisibleTexts(values);
 }
 
-async function readVisibleTopRightSendRecords(page) {
+async function expandVisibleDirectoryGroup(dialog, groupName) {
+  const before = await visibleDirectoryPeople(dialog);
+  await clickUniqueVisible(
+    dialog.getByRole("checkbox", { name: groupName, exact: true }),
+    `人员目录组 ${groupName}`,
+  );
+  const after = await visibleDirectoryPeople(dialog);
+  const existing = new Set(before.map((person) => `${person.id}\0${person.name}`));
+  const members = after.filter((person) => !existing.has(`${person.id}\0${person.name}`));
+  if (!members.length) {
+    throw operationControlError(`人员目录组 ${groupName} 成员`, 0);
+  }
+  return members;
+}
+
+async function openVisibleMailRecipientDirectory(mailDialog, label) {
+  const control = await labeledVisibleControl(
+    mailDialog,
+    label,
+    "input:visible, textarea:visible, .ant-select:visible",
+  );
+  await control.click();
+}
+
+async function confirmVisibleDirectory(page) {
+  const dialog = await topVisibleDialog(page, "人员目录弹窗");
+  await clickUniqueNamedButton(
+    dialog,
+    ["确 定", "确定"],
+    "人员目录确定按钮",
+  );
+}
+
+async function cancelVisibleDirectory(page) {
+  const dialog = await topVisibleDialog(page, "人员目录弹窗");
+  await clickUniqueNamedButton(
+    dialog,
+    ["取 消", "取消"],
+    "人员目录取消按钮",
+  );
+}
+
+async function closeVisibleMailDialog(page) {
+  const mailDialog = await uniqueVisibleModalWithText(page, "邮件发送", "邮件发送弹窗");
+  const close = mailDialog.locator(".ant-modal-close:visible");
+  const closeCount = await close.count();
+  if (closeCount === 1) {
+    await close.click();
+    return;
+  }
+  await clickUniqueVisible(
+    mailDialog.getByRole("button", { name: "取 消", exact: true }),
+    "邮件发送取消按钮",
+  );
+}
+
+export async function openVisiblePersonnelMailDialog(page, instruction = {}) {
+  const taskDialog = await uniqueVisibleModalWithText(
+    page,
+    "任务单发送需满足以下条件",
+    "分散在线监考任务单弹窗",
+  );
+  await clickUniqueVisible(
+    taskDialog.getByRole("button", { name: "发送任务单", exact: true }),
+    "任务单内置发送按钮",
+  );
+
+  const summary = page.locator(
+    'textarea[placeholder="请填写任务单变更内容"]:visible, input[placeholder="请填写任务单变更内容"]:visible',
+  );
+  const summaryCount = await summary.count();
+  if (summaryCount > 1) throw operationControlError("任务单变更内容", summaryCount);
+  if (summaryCount === 1) {
+    const changeSummary = text(instruction.changeSummary);
+    if (!changeSummary) throw new Error("重新发送人员任务必须填写变化摘要");
+    await summary.fill(changeSummary);
+    const dialog = await topVisibleDialog(page, "任务单变更内容弹窗");
+    await clickUniqueVisible(
+      dialog.getByRole("button", { name: "下一步", exact: true }),
+      "任务单变更内容下一步按钮",
+    );
+  }
+
+  return uniqueVisibleModalWithText(page, "邮件发送", "邮件发送弹窗");
+}
+
+async function readVisibleMailRecipients(page) {
+  const raw = await page.evaluate(() => {
+    const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
+    const visible = (element) => Boolean(
+      element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length),
+    );
+    const modals = [...document.querySelectorAll(".ant-modal")].filter((element) => (
+      visible(element) && clean(element.innerText).includes("邮件发送")
+    ));
+    if (modals.length !== 1) return { modalCount: modals.length, to: [], cc: [] };
+    const modal = modals[0];
+    const read = (label) => {
+      const labels = [...modal.querySelectorAll("*")].filter((element) => (
+        visible(element)
+        && element.children.length === 0
+        && clean(element.textContent) === label
+      ));
+      if (labels.length !== 1) return [];
+      const field = labels[0].closest(".ant-form-item") || labels[0].parentElement;
+      const values = [
+        clean(field?.innerText),
+        ...[...(field?.querySelectorAll("input, textarea") || [])].map((input) => clean(input.value)),
+      ].join(" ");
+      return [...values.matchAll(/([^\s(),;]+@[^\s(),;]+)\s+\(([^()]+)\)/g)]
+        .map((match) => `${match[1]} (${match[2]})`);
+    };
+    return {
+      modalCount: 1,
+      to: read("收件人"),
+      cc: read("抄送（C）"),
+    };
+  });
+  if (raw.modalCount !== 1) throw operationControlError("邮件发送弹窗", raw.modalCount);
+  return {
+    to: operationPersonnelDirectoryPeopleFromVisibleTexts(raw.to),
+    cc: operationPersonnelDirectoryPeopleFromVisibleTexts(raw.cc),
+  };
+}
+
+export async function inspectVisiblePersonnelDirectory(page, instruction = {}) {
+  const mailDialog = await openVisiblePersonnelMailDialog(page, instruction);
+  const rule = RECIPIENT_RULES[text(instruction.environment)];
+  if (!rule) throw new Error(`未知运控收件环境：${text(instruction.environment) || "空"}`);
+  const groups = [];
+  for (const groupName of [...new Set([rule.toGroup, rule.ccGroup].filter(Boolean))]) {
+    await openVisibleMailRecipientDirectory(
+      mailDialog,
+      groupName === rule.toGroup ? "收件人" : "抄送（C）",
+    );
+    const dialog = await topVisibleDialog(page, "人员目录弹窗");
+    groups.push({
+      name: groupName,
+      people: await expandVisibleDirectoryGroup(dialog, groupName),
+    });
+    await cancelVisibleDirectory(page);
+  }
+  await closeVisibleMailDialog(page);
+  return groups;
+}
+
+export async function readVisibleTopRightSendRecords(page) {
+  const visibleDialogs = page.locator(".ant-modal:visible");
+  if (typeof visibleDialogs?.filter === "function") {
+    const taskDialogs = visibleDialogs.filter({
+      hasText: "任务单发送需满足以下条件",
+    });
+    const taskDialogCount = await taskDialogs.count();
+    if (taskDialogCount > 1) {
+      throw operationControlError("分散在线监考任务单弹窗", taskDialogCount);
+    }
+    if (taskDialogCount === 1) {
+      return (await readVisiblePersonnelTaskSheet(page)).sendRecords;
+    }
+  }
+
   const marked = page.locator("[data-operation-send-records]:visible");
   const markedCount = await marked.count();
   if (markedCount > 1) throw operationControlError("任务单右上角发送记录区", markedCount);
@@ -1251,7 +1442,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
   readPersonnel: (page) => readVisibleSection(page, "personnel"),
   readDates: (page) => readVisibleSection(page, "dates"),
   readRequirements: (page) => readVisibleSection(page, "requirements"),
-  readTaskSheet: (page) => readVisibleSection(page, "taskSheet"),
+  readTaskSheet: async (page) => (await readVisiblePersonnelTaskSheet(page)).taskSheet,
   readSendRecords: (page) => readVisibleTopRightSendRecords(page),
   readDirectoryGroups: (page) => readVisibleSection(page, "directoryGroups"),
 
@@ -1312,68 +1503,48 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
     syncVisibleRequirements(page, target, current)
   ),
 
-  async openTaskSheet(page, instruction = {}) {
-    await clickUniqueVisible(
-      page.getByRole("tab", { name: "任务单", exact: true }),
-      "任务单页签",
-    );
-    await clickUniqueVisible(
-      page.getByText("分散在线监考", { exact: true }),
-      "分散在线监考任务单",
-    );
-    const rows = await exactVisibleRows(page, instruction.batch?.code || instruction.batchCode);
-    if (rows.length !== 1) {
-      throw operationControlError(`批次 ${instruction.batch?.code || instruction.batchCode} 任务单行`, rows.length);
-    }
-    await clickUniqueVisible(
-      rows[0].getByRole("button", { name: "发送任务单", exact: true }),
-      "发送任务单按钮",
-    );
-  },
+  openTaskSheet: (page, instruction = {}) => (
+    openVisiblePersonnelTaskSheet(page, instruction)
+  ),
 
   async selectRecipients(page, recipients, instruction = {}) {
-    const taskDialog = await topVisibleDialog(page, "任务单弹窗");
-    await clickUniqueVisible(
-      taskDialog.getByRole("button", { name: "发送", exact: true }),
-      "任务单内置发送按钮",
-    );
-    const directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
+    const mailDialog = await openVisiblePersonnelMailDialog(page, instruction);
     const rule = RECIPIENT_RULES[text(instruction.environment)];
     if (!rule) throw new Error(`未知运控收件环境：${text(instruction.environment) || "空"}`);
     if (recipients.to.length !== 1 || recipients.to[0].name !== rule.toName
       || recipients.cc.length !== rule.ccCount) {
       throw operationControlError("固定收件人与抄送人", 0);
     }
-    await clickUniqueVisible(
-      directoryDialog.getByRole("tab", { name: "收件人", exact: true }),
-      "收件人页签",
-    );
+    await openVisibleMailRecipientDirectory(mailDialog, "收件人");
+    let directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
     await selectVisiblePeople(directoryDialog, rule.toGroup, recipients.to);
+    await confirmVisibleDirectory(page);
     if (recipients.cc.length) {
-      await clickUniqueVisible(
-        directoryDialog.getByRole("tab", { name: "抄送人", exact: true }),
-        "抄送人页签",
-      );
+      await openVisibleMailRecipientDirectory(mailDialog, "抄送（C）");
+      directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
       await selectVisiblePeople(directoryDialog, rule.ccGroup, recipients.cc);
+      await confirmVisibleDirectory(page);
     }
-    await clickUniqueVisible(
-      directoryDialog.getByRole("button", { name: "确定", exact: true }),
-      "人员目录确定按钮",
-    );
   },
 
-  readSelectedRecipients: (page) => readVisibleRecipientChips(page),
+  readSelectedRecipients: (page) => readVisibleMailRecipients(page),
 
   async confirmSend(page) {
-    await confirmTopVisibleDialog(page);
+    const mailDialog = await uniqueVisibleModalWithText(page, "邮件发送", "邮件发送弹窗");
+    await clickUniqueNamedButton(
+      mailDialog,
+      ["确 定", "确定"],
+      "邮件发送最终确定按钮",
+    );
   },
 
   async closeTaskSheet(page) {
-    const dialog = await topVisibleDialog(page, "任务单弹窗");
-    await clickUniqueVisible(
-      dialog.getByRole("button", { name: "关闭", exact: true }),
-      "任务单关闭按钮",
+    const dialog = await uniqueVisibleModalWithText(
+      page,
+      "任务单发送需满足以下条件",
+      "分散在线监考任务单弹窗",
     );
+    await clickUniqueVisible(dialog.locator(".ant-modal-close:visible"), "任务单关闭按钮");
   },
 
   reopenTaskSheet: (page, instruction) => (
@@ -1503,11 +1674,12 @@ function assertReadback(name, expected, actual) {
 export function findAttemptSendRecord(records = [], attempt = {}) {
   const expectedType = attempt.kind === "resend" ? "再次发送" : "首次发送";
   const startedAt = Date.parse(attempt.startedAt);
-  const record = normalizeSendRecords(records)[0];
-  if (!record || record.type !== expectedType) return null;
-  const sentAt = Date.parse(record.sentAt);
-  if (!Number.isFinite(sentAt) || !Number.isFinite(startedAt) || sentAt <= startedAt) return null;
-  return record;
+  if (!Number.isFinite(startedAt)) return null;
+  return normalizeSendRecords(records).find((record) => {
+    if (record.type !== expectedType) return false;
+    const sentAt = Date.parse(record.sentAt);
+    return Number.isFinite(sentAt) && sentAt > startedAt;
+  }) || null;
 }
 
 async function waitForNewSendRecord(readRecords, attempt, options = {}) {
@@ -1792,6 +1964,7 @@ export async function runOperationPersonnelRecheck(instruction, options = {}) {
   const context = options.context || await launchOperationBatchContext(userDataDir, false, options);
   return runWithOperationBatchContext(context, async (page) => {
     await locateOperationPersonnelBatch(page, instruction, options);
+    await operationMethod(page, options, "openTaskSheet")(page, instruction);
     const records = normalizeSendRecords(
       await operationMethod(page, options, "readSendRecords")(page, instruction),
     );
