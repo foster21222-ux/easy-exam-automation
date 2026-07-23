@@ -440,6 +440,20 @@ export async function openExactOperationBatchCard(page, batchCode) {
   try {
     await matches[0].locator.click();
     await detailWait;
+    await page.waitForFunction((expectedCode) => {
+      const visible = (node) => Boolean(
+        node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length),
+      );
+      const titles = [...document.querySelectorAll(".header-title")].filter(visible);
+      if (titles.length !== 1) return false;
+      const code = titles[0].querySelector(":scope > span")?.textContent?.trim();
+      const name = titles[0].querySelector(":scope > label")?.textContent?.trim();
+      const info = titles[0].parentElement?.querySelector(".header-info");
+      const projectLinks = info
+        ? [...info.querySelectorAll(".hover-link")].filter(visible)
+        : [];
+      return code === expectedCode && Boolean(name) && projectLinks.length === 2;
+    }, normalizedCode, { timeout: 30000 });
   } catch (error) {
     throw reconciliationRequiredError(error);
   }

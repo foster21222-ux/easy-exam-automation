@@ -54,6 +54,7 @@ function fakeBatchCardsPage(cards, {
         detailWait = { predicate, resolve };
       });
     },
+    waitForFunction: async () => events.push("wait:identity"),
     locator(selector) {
       if (selector === "thead th") {
         return { allInnerTexts: async () => tableHeaders };
@@ -166,7 +167,7 @@ test("card detail opening clicks only one exact dedicated batch code", async () 
     { code: "EZT260004", name: "目标批次" },
   ]);
   await openExactOperationBatchCard(page, "EZT260004");
-  assert.deepEqual(page.events, ["wait:detail", "click:EZT260004"]);
+  assert.deepEqual(page.events, ["wait:detail", "click:EZT260004", "wait:identity"]);
 });
 
 test("card detail opening blocks duplicate exact batch codes before clicking", async () => {
