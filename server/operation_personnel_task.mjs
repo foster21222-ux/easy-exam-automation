@@ -193,6 +193,10 @@ export function buildOperationPersonnelTaskDraft(task = {}, options = {}) {
     environment,
     batch: {
       code: text(task.config?.operationBatchCode || task.config?.operationBatch?.code),
+      batchName: text(
+        task.config?.operationBatch?.batchName
+        || task.config?.operationBatch?.draft?.fields?.batchName?.value,
+      ),
       operationTaskSerial: text(task.config?.businessRequirement?.operation_serial_number),
       projectCode: text(task.config?.businessRequirement?.project_code),
       projectName: text(task.config?.businessRequirement?.project_name || task.projectName),

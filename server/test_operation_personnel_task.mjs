@@ -115,6 +115,21 @@ test("uses the persisted operation batch draft estimate when actual candidate co
   assert.ok(!draft.warnings.some((item) => item.code === "MONITOR_COUNT_REQUIRED"));
 });
 
+test("uses the persisted operation batch name for the personnel task list", () => {
+  const task = structuredClone(baseTask);
+  task.config.operationBatch.draft = {
+    fields: {
+      batchName: { value: "示例考试_2026年8月" },
+    },
+  };
+  const draft = buildOperationPersonnelTaskDraft(task, {
+    environment: "test",
+    now: "2026-07-23T02:00:00.000Z",
+  });
+
+  assert.equal(draft.batch.batchName, "示例考试_2026年8月");
+});
+
 test("does not prefill invalid past personnel dates", () => {
   const draft = buildOperationPersonnelTaskDraft(baseTask, {
     environment: "test",
