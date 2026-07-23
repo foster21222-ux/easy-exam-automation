@@ -5425,6 +5425,15 @@ async function assertOperationPersonnelTaskVisible(taskId, req) {
   throw error;
 }
 
+async function readOperationPersonnelPayload(req) {
+  const payload = parseJsonSafe(await readBody(req));
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) return payload;
+  const error = new Error("请求 JSON 格式无效");
+  error.status = 400;
+  error.code = "PERSONNEL_INVALID_JSON";
+  throw error;
+}
+
 function assertOperationPersonnelAutomationEnabled() {
   if (process.env.OPERATION_CONSOLE_AUTOMATION_ENABLED === "1") return;
   const error = new Error(
@@ -5450,8 +5459,8 @@ async function handleOperationPersonnelTaskState(taskId, req, res) {
 async function handleOperationPersonnelTaskPreview(taskId, req, res) {
   try {
     await assertOperationPersonnelTaskVisible(taskId, req);
+    const payload = await readOperationPersonnelPayload(req);
     assertOperationPersonnelAutomationEnabled();
-    const payload = parseJsonSafe(await readBody(req)) || {};
     const result = await getOperationPersonnelTaskService().preview(
       taskId,
       operationPersonnelTaskActor(req),
@@ -5466,8 +5475,8 @@ async function handleOperationPersonnelTaskPreview(taskId, req, res) {
 async function handleOperationPersonnelTaskSend(taskId, req, res) {
   try {
     await assertOperationPersonnelTaskVisible(taskId, req);
+    const payload = await readOperationPersonnelPayload(req);
     assertOperationPersonnelAutomationEnabled();
-    const payload = parseJsonSafe(await readBody(req)) || {};
     const result = await getOperationPersonnelTaskService().send(
       taskId,
       operationPersonnelTaskActor(req),
@@ -5513,6 +5522,16 @@ function operationPersonnelAttemptResponse(result) {
   };
 }
 
+function operationPersonnelTaskRecheckResponse(result) {
+  return {
+    taskId: result.taskId,
+    ...operationPersonnelAttemptResponse({
+      state: result.state,
+      attempt: result.state?.activeAttempt,
+    }),
+  };
+}
+
 async function handleOperationPersonnelTaskAttempt(taskId, attemptId, req, res) {
   try {
     const result = await getOperationPersonnelTaskService().attempt(
@@ -5534,7 +5553,7 @@ async function handleOperationPersonnelTaskRecheck(taskId, req, res) {
       taskId,
       operationPersonnelTaskActor(req),
     );
-    return json(res, 200, result);
+    return json(res, 200, operationPersonnelTaskRecheckResponse(result));
   } catch (error) {
     return operationPersonnelTaskError(res, error);
   }

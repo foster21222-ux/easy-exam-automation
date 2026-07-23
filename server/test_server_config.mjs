@@ -54,6 +54,12 @@ test("server wires exact personnel task routes to one environment-bound service"
   );
   assert.ok(sendHandler.includes("return json(res, 202"));
   assert.equal(sendHandler.includes("payload.environment"), false);
+  const recheckHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationPersonnelTaskRecheck"),
+    serverSource.indexOf("async function operationBatchLockConflictResponse"),
+  );
+  assert.ok(recheckHandler.includes("operationPersonnelTaskRecheckResponse(result)"));
+  assert.equal(recheckHandler.includes("json(res, 200, result)"), false);
 });
 
 test("global email and operation environment mutations require administrators", () => {

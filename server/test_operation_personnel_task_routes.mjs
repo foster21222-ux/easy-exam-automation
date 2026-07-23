@@ -355,7 +355,33 @@ test("personnel preview blocks an unknown configured environment", async () => {
   });
 });
 
-test("personnel task routes hide a project from a different ordinary owner", async () => {
+test("personnel preview and send reject malformed JSON before service work", async () => {
+  await withRuntime(async (runtimeDir) => {
+    seedTask(runtimeDir, baseTask());
+    const runtime = await startServer(runtimeDir, {
+      OPERATION_CONSOLE_AUTOMATION_ENABLED: "1",
+      OPERATION_CONSOLE_ENVIRONMENT: "staging",
+    });
+    try {
+      for (const action of ["preview", "send"]) {
+        const response = await fetch(
+          `${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task/${action}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: '{"broken"',
+          },
+        );
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).errorCode, "PERSONNEL_INVALID_JSON");
+      }
+    } finally {
+      await runtime.close();
+    }
+  });
+});
+
+test("all personnel task routes hide a project from a different ordinary owner", async () => {
   await withRuntime(async (runtimeDir) => {
     seedTask(runtimeDir, baseTask("task-a", "owner@example.com"));
     writeFileSync(path.join(runtimeDir, "auth_sessions.json"), JSON.stringify([{
@@ -369,25 +395,32 @@ test("personnel task routes hide a project from a different ordinary owner", asy
       APP_LOGIN_PASSWORD: "password",
     });
     try {
-      const response = await fetch(`${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task`, {
-        headers: { Cookie: "easy_exam_session=other-session" },
-      });
-      assert.equal(response.status, 404);
-      assert.equal((await response.json()).errorCode, "PERSONNEL_TASK_NOT_FOUND");
-
-      const preview = await fetch(
-        `${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task/preview`,
-        {
-          method: "POST",
-          headers: {
-            Cookie: "easy_exam_session=other-session",
-            "Content-Type": "application/json",
+      const routes = [
+        { method: "GET", path: "" },
+        { method: "POST", path: "/preview" },
+        { method: "POST", path: "/send" },
+        { method: "GET", path: "/attempts/attempt-hidden" },
+        { method: "POST", path: "/recheck" },
+      ];
+      for (const route of routes) {
+        const response = await fetch(
+          `${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task${route.path}`,
+          {
+            method: route.method,
+            headers: {
+              Cookie: "easy_exam_session=other-session",
+              "Content-Type": "application/json",
+            },
+            ...(route.method === "POST" ? { body: '{"broken"' } : {}),
           },
-          body: "{}",
-        },
-      );
-      assert.equal(preview.status, 404);
-      assert.equal((await preview.json()).errorCode, "PERSONNEL_TASK_NOT_FOUND");
+        );
+        assert.equal(response.status, 404, `${route.method} ${route.path || "/"}`);
+        assert.equal(
+          (await response.json()).errorCode,
+          "PERSONNEL_TASK_NOT_FOUND",
+          `${route.method} ${route.path || "/"}`,
+        );
+      }
     } finally {
       await runtime.close();
     }
