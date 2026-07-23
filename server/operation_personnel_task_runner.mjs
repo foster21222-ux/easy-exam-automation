@@ -287,9 +287,12 @@ async function readVisibleOperationPersonnelSnapshot(page) {
         if (!requiredHeaders.every((header) => headers.includes(header))) continue;
         return {
           present: true,
-          rows: [...node.querySelectorAll("tbody tr")].map((row) => Object.fromEntries(
-            [...row.querySelectorAll("td")].map((cell, index) => [headers[index], clean(cell.textContent)]),
-          )),
+          rows: [...node.querySelectorAll("tbody tr")].map((row) => ({
+            ...Object.fromEntries(
+              [...row.querySelectorAll("td")].map((cell, index) => [headers[index], clean(cell.textContent)]),
+            ),
+            __scheduleEntryId: clean(row.getAttribute("data-schedule-entry-id")),
+          })),
         };
       }
       return { present: false, rows: [] };
@@ -312,6 +315,7 @@ async function readVisibleOperationPersonnelSnapshot(page) {
     const conditionTable = table(["发送条件"]);
     const sendRecordTable = table(["发送类型", "发送时间"]);
     const schedules = scheduleTable.rows.map((row) => ({
+      scheduleEntryId: row.__scheduleEntryId || row["日程条目ID"] || row["日程稳定ID"],
       scheduleCode: row["日程代码"],
       subjectCode: row["科目代码"],
       subjectName: row["科目名称"],
@@ -366,7 +370,12 @@ async function readVisibleOperationPersonnelSnapshot(page) {
       requirements,
       taskSheet: {
         type: fields["任务单类型"].value,
-        conditions: conditionTable.rows.map((row) => row["发送条件"]),
+        conditions: conditionTable.rows.map((row) => ({
+          name: row["发送条件"],
+          satisfied: ["已满足", "已完成", "通过", "是"].includes(
+            row["状态"] || row["是否满足"] || row["结果"],
+          ),
+        })),
         content: fields["任务单内容"].value,
       },
       sendRecords,
@@ -579,6 +588,387 @@ export async function runOperationPersonnelInspection(instruction, options = {})
   );
 }
 
+function operationControlError(label, count) {
+  const error = new Error(`运控可见页面控件“${label}”必须精确匹配 1 个，实际 ${count} 个`);
+  error.code = "PERSONNEL_OPERATION_CONTROL_AMBIGUOUS";
+  error.status = 409;
+  return error;
+}
+
+async function uniqueVisibleControl(locator, label) {
+  const count = typeof locator?.count === "function" ? await locator.count() : 0;
+  if (count !== 1) throw operationControlError(label, count);
+  return locator;
+}
+
+async function clickUniqueVisible(locator, label) {
+  const control = await uniqueVisibleControl(locator, label);
+  await control.click();
+  return control;
+}
+
+async function topVisibleDialog(page, label) {
+  const dialogs = typeof page?.getByRole === "function"
+    ? page.getByRole("dialog")
+    : null;
+  const count = typeof dialogs?.count === "function" ? await dialogs.count() : 0;
+  if (count < 1) throw operationControlError(label, count);
+  return dialogs.last();
+}
+
+async function exactVisibleRows(page, value) {
+  if (typeof page?.locator !== "function") return [];
+  const rows = page.locator("table:visible tbody tr");
+  const count = await rows.count();
+  const exact = [];
+  for (let index = 0; index < count; index += 1) {
+    const row = rows.nth(index);
+    const cells = (await row.locator("td").allInnerTexts()).map(text);
+    if (cells.includes(text(value))) exact.push(row);
+  }
+  return exact;
+}
+
+async function exactScheduleRows(page, schedule = {}) {
+  const code = text(numberOrText(schedule.scheduleCode));
+  const entryId = text(schedule.scheduleEntryId);
+  if (!code || !entryId) return [];
+  const rows = await exactVisibleRows(page, code);
+  const exact = [];
+  for (const row of rows) {
+    const actualEntryId = text(await row.getAttribute("data-schedule-entry-id"));
+    const cells = (await row.locator("td").allInnerTexts()).map(text);
+    if (actualEntryId === entryId || cells.includes(entryId)) exact.push(row);
+  }
+  return exact;
+}
+
+async function labeledVisibleControl(page, label, selector) {
+  const direct = typeof page?.getByLabel === "function"
+    ? page.getByLabel(label, { exact: true })
+    : null;
+  const directCount = typeof direct?.count === "function" ? await direct.count() : 0;
+  if (directCount > 1) throw operationControlError(label, directCount);
+  if (directCount === 1) return direct;
+  const labels = typeof page?.getByText === "function"
+    ? page.getByText(label, { exact: true })
+    : null;
+  const labelNode = await uniqueVisibleControl(labels, `${label}标签`);
+  const item = labelNode.locator(
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]",
+  );
+  const itemCount = await item.count();
+  if (itemCount !== 1) throw operationControlError(`${label}表单项`, itemCount);
+  return uniqueVisibleControl(item.locator(selector), label);
+}
+
+async function fillVisibleField(page, label, value) {
+  const control = await labeledVisibleControl(page, label, "input:visible, textarea:visible");
+  await control.fill(text(value));
+}
+
+async function chooseVisibleOption(page, label, value) {
+  const control = await labeledVisibleControl(
+    page,
+    label,
+    ".ant-select:visible, [role='combobox']:visible",
+  );
+  await control.click();
+  const option = typeof page?.getByRole === "function"
+    ? page.getByRole("option", { name: text(value), exact: true })
+    : null;
+  await clickUniqueVisible(option, `${label}选项 ${text(value)}`);
+}
+
+async function confirmTopVisibleDialog(page, buttonName = "确定") {
+  const dialog = await topVisibleDialog(page, "运控弹窗");
+  const button = dialog.getByRole("button", { name: buttonName, exact: true });
+  await clickUniqueVisible(button, `运控弹窗${buttonName}按钮`);
+}
+
+async function readVisibleSection(page, key) {
+  const snapshot = await readVisibleOperationPersonnelSnapshot(page);
+  assertVisibleSection(snapshot, key);
+  return snapshot[key];
+}
+
+async function editVisibleSchedule(page, schedule, existing) {
+  if (existing) {
+    const rows = await exactScheduleRows(page, schedule);
+    if (rows.length !== 1) throw scheduleNotUnique(schedule, rows.length);
+    await clickUniqueVisible(
+      rows[0].getByRole("button", { name: "编辑", exact: true }),
+      `日程 ${schedule.scheduleCode} 编辑按钮`,
+    );
+  } else {
+    await clickUniqueVisible(
+      page.getByRole("button", { name: "新增考试日程", exact: true }),
+      "新增考试日程按钮",
+    );
+  }
+  await fillVisibleField(page, "日程代码", schedule.scheduleCode);
+  await fillVisibleField(page, "科目代码", schedule.subjectCode);
+  await fillVisibleField(page, "科目名称", schedule.subjectName);
+  await fillVisibleField(page, "开始时间", schedule.start);
+  await fillVisibleField(page, "结束时间", schedule.end);
+  await fillVisibleField(page, "时长", schedule.durationMinutes);
+  await fillVisibleField(page, "提前登录分钟数", schedule.earlyLoginMinutes);
+  await confirmTopVisibleDialog(page);
+}
+
+async function syncVisibleRequirements(page, target = [], current = []) {
+  const targetNames = new Set(target.map((item) => item.name));
+  for (const item of current.filter((candidate) => !targetNames.has(candidate.name))) {
+    const rows = await exactVisibleRows(page, item.name);
+    if (rows.length !== 1) throw operationControlError(`考务需求 ${item.name} 行`, rows.length);
+    await clickUniqueVisible(
+      rows[0].getByRole("button", { name: "删除", exact: true }),
+      `考务需求 ${item.name} 删除按钮`,
+    );
+    await confirmTopVisibleDialog(page);
+  }
+  const currentByName = new Map(current.map((item) => [item.name, item]));
+  for (const item of target) {
+    const existing = currentByName.get(item.name);
+    if (existing && sameData(existing, item)) continue;
+    if (existing) {
+      const rows = await exactVisibleRows(page, item.name);
+      if (rows.length !== 1) throw operationControlError(`考务需求 ${item.name} 行`, rows.length);
+      await clickUniqueVisible(
+        rows[0].getByRole("button", { name: "编辑", exact: true }),
+        `考务需求 ${item.name} 编辑按钮`,
+      );
+    } else {
+      await clickUniqueVisible(
+        page.getByRole("button", { name: "新增考务需求", exact: true }),
+        "新增考务需求按钮",
+      );
+    }
+    await fillVisibleField(page, "考务需求", item.name);
+    await fillVisibleField(page, "需求内容", item.value);
+    await confirmTopVisibleDialog(page);
+  }
+}
+
+function cssAttribute(value) {
+  return text(value).replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+}
+
+async function selectVisiblePeople(dialog, groupName, people) {
+  await clickUniqueVisible(
+    dialog.getByText(groupName, { exact: true }),
+    `人员目录组 ${groupName}`,
+  );
+  for (const person of people) {
+    const candidate = dialog.locator(
+      `[data-person-id="${cssAttribute(person.id)}"]:visible`,
+    ).filter({ hasText: person.name });
+    const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
+    const actualName = text(
+      await exact.getAttribute("data-person-name") || await exact.innerText(),
+    );
+    if (actualName !== person.name) throw operationControlError(`人员 ${person.id}/${person.name}`, 0);
+    await exact.click();
+  }
+}
+
+async function readVisibleRecipientChips(page) {
+  const read = async (kind) => {
+    const chips = page.locator(
+      `[data-recipient-kind="${kind}"]:visible [data-person-id]:visible`,
+    );
+    const count = await chips.count();
+    const people = [];
+    for (let index = 0; index < count; index += 1) {
+      const chip = chips.nth(index);
+      people.push({
+        id: text(await chip.getAttribute("data-person-id")),
+        name: text(await chip.getAttribute("data-person-name") || await chip.innerText()),
+      });
+    }
+    return people;
+  };
+  return { to: await read("to"), cc: await read("cc") };
+}
+
+async function readVisibleTopRightSendRecords(page) {
+  const marked = page.locator("[data-operation-send-records]:visible");
+  const markedCount = await marked.count();
+  if (markedCount > 1) throw operationControlError("任务单右上角发送记录区", markedCount);
+  if (markedCount === 1) {
+    const records = marked.locator("[data-operation-send-record]:visible");
+    const count = await records.count();
+    const output = [];
+    for (let index = 0; index < count; index += 1) {
+      const record = records.nth(index);
+      output.push({
+        type: text(await record.getAttribute("data-send-type")),
+        sentAt: text(await record.getAttribute("data-sent-at")),
+      });
+    }
+    return output;
+  }
+
+  const tables = page.locator("table:visible");
+  const tableCount = await tables.count();
+  const matches = [];
+  for (let tableIndex = 0; tableIndex < tableCount; tableIndex += 1) {
+    const table = tables.nth(tableIndex);
+    const headers = (await table.locator("thead th").allInnerTexts()).map(text);
+    const typeIndex = headers.indexOf("发送类型");
+    const timeIndex = headers.indexOf("发送时间");
+    if (typeIndex >= 0 && timeIndex >= 0) matches.push({ table, typeIndex, timeIndex });
+  }
+  if (matches.length !== 1) {
+    throw operationControlError("任务单右上角发送记录表", matches.length);
+  }
+  const { table, typeIndex, timeIndex } = matches[0];
+  const rows = table.locator("tbody tr");
+  const rowCount = await rows.count();
+  const output = [];
+  for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+    const cells = (await rows.nth(rowIndex).locator("td").allInnerTexts()).map(text);
+    output.push({ type: cells[typeIndex], sentAt: cells[timeIndex] });
+  }
+  return output;
+}
+
+const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
+  readBatch: (page) => readVisibleSection(page, "batch"),
+  readSchedules: (page) => readVisibleSection(page, "schedules"),
+  readPersonnel: (page) => readVisibleSection(page, "personnel"),
+  readDates: (page) => readVisibleSection(page, "dates"),
+  readRequirements: (page) => readVisibleSection(page, "requirements"),
+  readTaskSheet: (page) => readVisibleSection(page, "taskSheet"),
+  readSendRecords: (page) => readVisibleTopRightSendRecords(page),
+  readDirectoryGroups: (page) => readVisibleSection(page, "directoryGroups"),
+
+  async publishBatch(page) {
+    await clickUniqueVisible(
+      page.getByRole("button", { name: "发布", exact: true }),
+      "发布按钮",
+    );
+    await confirmTopVisibleDialog(page);
+  },
+
+  async syncExamSchedules(page, target = [], current = []) {
+    const currentByCode = new Map(current.map((item) => [text(item.scheduleCode), item]));
+    for (const schedule of target) {
+      const existing = currentByCode.get(text(schedule.scheduleCode));
+      if (existing && sameData(existing, schedule)) continue;
+      await editVisibleSchedule(page, schedule, existing);
+    }
+  },
+
+  findScheduleRows: (page, schedule) => exactScheduleRows(page, schedule),
+
+  async deleteSchedule(_page, schedule, row) {
+    if (!row) throw scheduleNotUnique(schedule, 0);
+    await clickUniqueVisible(
+      row.getByRole("button", { name: "删除", exact: true }),
+      `日程 ${schedule.scheduleEntryId}/${schedule.scheduleCode} 删除按钮`,
+    );
+    await confirmTopVisibleDialog(_page);
+  },
+
+  async syncPersonnelConfig(page, personnel = {}) {
+    await chooseVisibleOption(page, "人员服务类型", personnel.serviceType);
+    await chooseVisibleOption(page, "人员落实平台", personnel.platform);
+    await chooseVisibleOption(page, "监考登录监控", personnel.loginMonitoring);
+    await chooseVisibleOption(page, "监考比例", personnel.monitorRatio);
+    await fillVisibleField(page, "监考人数计算基数", personnel.candidateBasis);
+    await fillVisibleField(page, "监考人数", personnel.monitorCount);
+    await fillVisibleField(page, "最早登录系统时间", personnel.earliestLoginMinutes);
+    await chooseVisibleOption(page, "试考监考", personnel.trialIncluded ? "是" : "否");
+    await clickUniqueVisible(
+      page.getByRole("button", { name: "保存人员配置", exact: true }),
+      "保存人员配置按钮",
+    );
+  },
+
+  async syncPersonnelDates(page, dates = {}) {
+    await fillVisibleField(page, "人员落实开始日期", dates.start);
+    await fillVisibleField(page, "人员落实结束日期", dates.end);
+    await fillVisibleField(page, "人员名单提交日期", dates.nameListDue);
+    await clickUniqueVisible(
+      page.getByRole("button", { name: "保存人员日期", exact: true }),
+      "保存人员日期按钮",
+    );
+  },
+
+  syncExamServiceRequirements: (page, target, current) => (
+    syncVisibleRequirements(page, target, current)
+  ),
+
+  async openTaskSheet(page, instruction = {}) {
+    await clickUniqueVisible(
+      page.getByRole("tab", { name: "任务单", exact: true }),
+      "任务单页签",
+    );
+    await clickUniqueVisible(
+      page.getByText("分散在线监考", { exact: true }),
+      "分散在线监考任务单",
+    );
+    const rows = await exactVisibleRows(page, instruction.batch?.code || instruction.batchCode);
+    if (rows.length !== 1) {
+      throw operationControlError(`批次 ${instruction.batch?.code || instruction.batchCode} 任务单行`, rows.length);
+    }
+    await clickUniqueVisible(
+      rows[0].getByRole("button", { name: "发送任务单", exact: true }),
+      "发送任务单按钮",
+    );
+  },
+
+  async selectRecipients(page, recipients, instruction = {}) {
+    const taskDialog = await topVisibleDialog(page, "任务单弹窗");
+    await clickUniqueVisible(
+      taskDialog.getByRole("button", { name: "发送", exact: true }),
+      "任务单内置发送按钮",
+    );
+    const directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
+    const rule = RECIPIENT_RULES[text(instruction.environment)];
+    if (!rule) throw new Error(`未知运控收件环境：${text(instruction.environment) || "空"}`);
+    if (recipients.to.length !== 1 || recipients.to[0].name !== rule.toName
+      || recipients.cc.length !== rule.ccCount) {
+      throw operationControlError("固定收件人与抄送人", 0);
+    }
+    await clickUniqueVisible(
+      directoryDialog.getByRole("tab", { name: "收件人", exact: true }),
+      "收件人页签",
+    );
+    await selectVisiblePeople(directoryDialog, rule.toGroup, recipients.to);
+    if (recipients.cc.length) {
+      await clickUniqueVisible(
+        directoryDialog.getByRole("tab", { name: "抄送人", exact: true }),
+        "抄送人页签",
+      );
+      await selectVisiblePeople(directoryDialog, rule.ccGroup, recipients.cc);
+    }
+    await clickUniqueVisible(
+      directoryDialog.getByRole("button", { name: "确定", exact: true }),
+      "人员目录确定按钮",
+    );
+  },
+
+  readSelectedRecipients: (page) => readVisibleRecipientChips(page),
+
+  async confirmSend(page) {
+    await confirmTopVisibleDialog(page);
+  },
+
+  async closeTaskSheet(page) {
+    const dialog = await topVisibleDialog(page, "任务单弹窗");
+    await clickUniqueVisible(
+      dialog.getByRole("button", { name: "关闭", exact: true }),
+      "任务单关闭按钮",
+    );
+  },
+
+  reopenTaskSheet: (page, instruction) => (
+    VISIBLE_OPERATION_PERSONNEL_ADAPTER.openTaskSheet(page, instruction)
+  ),
+});
+
 const OPERATION_PERSONNEL_CHECKPOINTS = Object.freeze([
   "inspect_batch",
   "publish_batch",
@@ -593,11 +983,14 @@ const OPERATION_PERSONNEL_CHECKPOINTS = Object.freeze([
 ]);
 
 function operationMethod(page, options, name) {
-  const method = options[name] || options.adapter?.[name] || page?.[name];
+  const owner = options[name]
+    ? options
+    : (options.adapter?.[name] ? options.adapter : VISIBLE_OPERATION_PERSONNEL_ADAPTER);
+  const method = options[name] || options.adapter?.[name] || VISIBLE_OPERATION_PERSONNEL_ADAPTER[name];
   if (typeof method !== "function") {
     throw new Error(`运控人员任务执行器缺少 ${name} 方法`);
   }
-  return method.bind(options[name] || options.adapter?.[name] ? options.adapter : page);
+  return method.bind(owner);
 }
 
 function sameData(left, right) {
@@ -615,12 +1008,21 @@ function checkpointDigest(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-async function personnelCheckpoint(name, targetDigest, action, verify, options) {
+async function personnelCheckpoint(
+  name,
+  targetDigest,
+  action,
+  verify,
+  options,
+  runningReadback,
+) {
   const now = options.now || Date.now;
   await options.onCheckpoint?.({
     name,
     status: "running",
     startedAt: new Date(now()).toISOString(),
+    targetDigest,
+    ...(runningReadback === undefined ? {} : { readback: runningReadback }),
   });
   const output = await action();
   const readback = await verify(output);
@@ -640,18 +1042,32 @@ async function runPersonnelCheckpoint({
   action,
   verify,
   verifyCompleted,
+  actionStartedIsIrreversible = false,
+  runningReadback,
   instruction,
   options,
 }) {
   const targetDigest = checkpointDigest(target);
-  const completed = instruction.checkpoints?.[name];
-  if (completed?.status === "completed") {
-    if (completed.targetDigest !== targetDigest) {
+  const saved = instruction.checkpoints?.[name];
+  const actionStarted = actionStartedIsIrreversible
+    && ["running", "submission_started", "completed"].includes(saved?.status);
+  if (saved?.status === "completed" || actionStarted) {
+    if (saved.targetDigest && saved.targetDigest !== targetDigest) {
       throw operationConflict(`${name} 的已保存目标摘要与当前目标不一致`);
     }
-    return verifyCompleted(completed);
+    if (saved.status === "completed" && !saved.targetDigest) {
+      throw operationConflict(`${name} 的已保存目标摘要缺失`);
+    }
+    return verifyCompleted(saved);
   }
-  return personnelCheckpoint(name, targetDigest, action, verify, options);
+  return personnelCheckpoint(
+    name,
+    targetDigest,
+    action,
+    verify,
+    options,
+    runningReadback,
+  );
 }
 
 function targetRecipients(target = {}) {
@@ -675,12 +1091,11 @@ function assertReadback(name, expected, actual) {
 export function findAttemptSendRecord(records = [], attempt = {}) {
   const expectedType = attempt.kind === "resend" ? "再次发送" : "首次发送";
   const startedAt = Date.parse(attempt.startedAt);
-  return normalizeSendRecords(records).find((record) => {
-    if (record.type !== expectedType) return false;
-    if (attempt.kind !== "resend") return true;
-    const sentAt = Date.parse(record.sentAt);
-    return Number.isFinite(sentAt) && Number.isFinite(startedAt) && sentAt > startedAt;
-  }) || null;
+  const record = normalizeSendRecords(records)[0];
+  if (!record || record.type !== expectedType) return null;
+  const sentAt = Date.parse(record.sentAt);
+  if (!Number.isFinite(sentAt) || !Number.isFinite(startedAt) || sentAt <= startedAt) return null;
+  return record;
 }
 
 async function waitForNewSendRecord(readRecords, attempt, options = {}) {
@@ -882,14 +1297,16 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   });
 
   const submitTarget = { kind, recipients };
+  const pendingAttempt = {
+    kind,
+    startedAt: new Date((options.now || Date.now)()).toISOString(),
+  };
   const attempt = await runPersonnelCheckpoint({
     name: OPERATION_PERSONNEL_CHECKPOINTS[8],
     target: submitTarget,
     action: async () => {
-      const startedAt = new Date((options.now || Date.now)()).toISOString();
-      const value = { kind, startedAt };
-      await operationMethod(page, options, "confirmSend")(page, value, instruction);
-      return value;
+      await operationMethod(page, options, "confirmSend")(page, pendingAttempt, instruction);
+      return pendingAttempt;
     },
     verify: async (value) => value,
     verifyCompleted: async (completed) => {
@@ -899,6 +1316,8 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
       }
       return value;
     },
+    actionStartedIsIrreversible: true,
+    runningReadback: pendingAttempt,
     instruction,
     options,
   });

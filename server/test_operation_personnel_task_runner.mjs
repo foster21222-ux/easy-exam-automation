@@ -96,6 +96,66 @@ function fakeOperationContext(page = fakeOperationPage()) {
   };
 }
 
+function simulatedVisibleOperationPage(overrides = {}) {
+  const page = fakeOperationPage({
+    published: overrides.published,
+    sendRecordsAfterReopen: overrides.sendRecordsAfterReopen,
+  });
+  let dialogPurpose = "";
+  const locator = (count, click, nested = {}) => ({
+    count: async () => count,
+    click: async () => click?.(),
+    getByRole: (role, options = {}) => (
+      nested[`${role}:${options.name}`] || locator(0)
+    ),
+    last() {
+      return this;
+    },
+  });
+  const confirm = locator(overrides.confirmCount ?? 1, () => {
+    if (dialogPurpose === "publish") {
+      page.events.push("publish:confirm:visible");
+      page.state.batch.published = true;
+    } else {
+      page.events.push("send:confirm:visible");
+      page.state.sendRecords = [{
+        type: "首次发送",
+        sentAt: "2026-07-23T03:00:00.000Z",
+      }];
+    }
+    dialogPurpose = "";
+  });
+  const dialog = locator(1, undefined, { "button:确定": confirm });
+  const sendRecordLocator = (records) => ({
+    count: async () => records.length,
+    nth: (index) => ({
+      getAttribute: async (name) => (
+        name === "data-send-type" ? records[index].type : records[index].sentAt
+      ),
+    }),
+  });
+  const sendRecordContainer = {
+    count: async () => overrides.sendRecordContainerCount ?? 1,
+    locator: () => sendRecordLocator(overrides.visibleSendRecords || []),
+  };
+  page.getByRole = (role, options = {}) => {
+    if (role === "button" && options.name === "发布") {
+      return locator(overrides.publishCount ?? 1, () => {
+        page.events.push("publish:click:visible");
+        dialogPurpose = "publish";
+      });
+    }
+    if (role === "dialog") return dialog;
+    return locator(0);
+  };
+  page.locator = (selector) => (
+    selector === "[data-operation-send-records]:visible"
+      ? sendRecordContainer
+      : locator(0)
+  );
+  return page;
+}
+
 function advancingClock(start = Date.parse("2026-07-23T02:00:00.000Z")) {
   let current = start;
   return () => {
@@ -248,6 +308,73 @@ test("published batches skip the publish click but still complete the checkpoint
   assert.equal(page.events.filter((item) => item === "publish:click").length, 0);
 });
 
+test("normal pages use the concrete visible adapter for publish and final confirm", async () => {
+  const page = simulatedVisibleOperationPage();
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      publishBatch: undefined,
+      confirmSend: undefined,
+    }),
+  );
+  assert.equal(result.status, "sent");
+  assert.deepEqual(page.events.filter((item) => item.endsWith(":visible")), [
+    "publish:click:visible",
+    "publish:confirm:visible",
+    "send:confirm:visible",
+  ]);
+});
+
+test("default visible adapter blocks missing or ambiguous publish controls before clicking", async () => {
+  for (const publishCount of [0, 2]) {
+    const page = simulatedVisibleOperationPage({ publishCount });
+    await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelAttempt(
+      validInstruction(),
+      attemptOptions(page, { publishBatch: undefined }),
+    ), { code: "PERSONNEL_OPERATION_CONTROL_AMBIGUOUS" });
+    assert.equal(page.events.includes("publish:click:visible"), false);
+    assert.equal(page.events.includes("send:confirm"), false);
+  }
+});
+
+test("default visible adapter blocks an ambiguous final confirm before clicking", async () => {
+  const page = simulatedVisibleOperationPage({ published: true, confirmCount: 2 });
+  await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, { confirmSend: undefined }),
+  ), { code: "PERSONNEL_OPERATION_CONTROL_AMBIGUOUS" });
+  assert.equal(page.events.includes("send:confirm:visible"), false);
+});
+
+test("default visible adapter reads top-right send records in visible DOM order", async () => {
+  const page = simulatedVisibleOperationPage({
+    visibleSendRecords: [
+      { type: "首次发送", sentAt: "2026-07-23T02:00:01.000Z" },
+      { type: "首次发送", sentAt: "2026-07-23T02:00:02.000Z" },
+    ],
+  });
+  const result = await operationPersonnelRunner.runOperationPersonnelRecheck(
+    {
+      ...validInstruction(),
+      attempt: { kind: "initial", startedAt: "2026-07-23T02:00:00.000Z" },
+    },
+    attemptOptions(page, { readSendRecords: undefined }),
+  );
+  assert.equal(result.status, "sent");
+  assert.equal(result.sendRecord.sentAt, "2026-07-23T02:00:01.000Z");
+});
+
+test("default visible adapter blocks an ambiguous send-record container", async () => {
+  const page = simulatedVisibleOperationPage({ sendRecordContainerCount: 2 });
+  await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelRecheck(
+    {
+      ...validInstruction(),
+      attempt: { kind: "initial", startedAt: "2026-07-23T02:00:00.000Z" },
+    },
+    attemptOptions(page, { readSendRecords: undefined }),
+  ), { code: "PERSONNEL_OPERATION_CONTROL_AMBIGUOUS" });
+});
+
 test("never retries the final send click when the send record is delayed", async () => {
   const page = fakeOperationPage({ sendRecordsAfterReopen: [] });
   const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
@@ -272,6 +399,70 @@ test("resend only accepts a record later than attempt start", () => {
     kind: "resend",
     startedAt: "2026-07-23T02:00:00.000Z",
   }).sentAt, "2026-07-23T02:00:01.000Z");
+});
+
+test("send record matching only accepts a fresh top-right record for both attempt kinds", () => {
+  const startedAt = "2026-07-23T02:00:00.000Z";
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "首次发送", sentAt: "2026-07-23T01:59:59.000Z" },
+  ], { kind: "initial", startedAt }), null);
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "其它记录", sentAt: "2026-07-23T02:00:02.000Z" },
+    { type: "首次发送", sentAt: "2026-07-23T02:00:01.000Z" },
+  ], { kind: "initial", startedAt }), null);
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "首次发送", sentAt: "not-a-time" },
+  ], { kind: "initial", startedAt }), null);
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "首次发送", sentAt: "2026-07-23T02:00:01.000Z" },
+  ], { kind: "initial", startedAt }).sentAt, "2026-07-23T02:00:01.000Z");
+});
+
+test("completed checkpoint persistence failure after the click resumes without another click", async () => {
+  const page = fakeOperationPage();
+  let durableSubmit;
+  await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      onCheckpoint: async (update) => {
+        if (update.name !== "submit_send") return;
+        if (update.status === "running") durableSubmit = structuredClone(update);
+        if (update.status === "completed") throw new Error("checkpoint persistence failed");
+      },
+    }),
+  ), /checkpoint persistence failed/);
+  assert.equal(page.events.filter((item) => item === "send:confirm").length, 1);
+  assert.equal(durableSubmit.status, "running");
+  assert.equal(durableSubmit.readback.kind, "initial");
+  assert.match(durableSubmit.readback.startedAt, /^2026-07-23T/);
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({ checkpoints: { submit_send: durableSubmit } }),
+    attemptOptions(page),
+  );
+  assert.equal(page.events.filter((item) => item === "send:confirm").length, 1);
+  assert.equal(result.status, "sent");
+});
+
+test("a durable running submit checkpoint never clicks during resume", async () => {
+  const page = fakeOperationPage({ sendRecordsAfterReopen: [] });
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({
+      checkpoints: {
+        submit_send: {
+          name: "submit_send",
+          status: "running",
+          readback: {
+            kind: "initial",
+            startedAt: "2026-07-23T02:00:00.000Z",
+          },
+        },
+      },
+    }),
+    attemptOptions(page),
+  );
+  assert.equal(page.events.includes("send:confirm"), false);
+  assert.equal(result.status, "result_unknown");
 });
 
 test("recheck is read-only", async () => {
@@ -327,9 +518,12 @@ test("resume after submit never clicks final confirmation again", async () => {
       },
     }),
   );
+  const resumedRecordAt = new Date(
+    Date.parse(captured.submit_send.readback.startedAt) + 1000,
+  ).toISOString();
   const page = fakeOperationPage({
     published: true,
-    sendRecords: [{ type: "首次发送", sentAt: "2026-07-23T02:00:10.000Z" }],
+    sendRecords: [{ type: "首次发送", sentAt: resumedRecordAt }],
   });
   const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
     validInstruction({
