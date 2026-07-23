@@ -1,4 +1,5 @@
 import { operationBatchCodeIsValid, operationBatchNeedsReconciliation } from "./operation_batch.mjs";
+import { buildOperationPersonnelTaskDraft, buildOperationPersonnelTaskStatus } from "./operation_personnel_task.mjs";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -198,9 +199,9 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
   const examRequirement = examRequirements[0] || {};
   const batchCode = first(task.config?.operationBatchCode, task.config?.operationBatch?.code);
   const hasBatchCode = operationBatchCodeIsValid(batchCode);
-  const personnelDraft = buildPersonnelTaskDraft(task);
+  const personnelDraft = buildOperationPersonnelTaskDraft(task);
+  const personnelStatus = buildOperationPersonnelTaskStatus(task, personnelDraft);
   const archiveDraft = buildOperationArchiveDraft(task);
-  const personnelNotRequired = text(business.ata_invigilator_arrangement).includes("不需要");
   const contentReady = examRequirements.length > 0 && examRequirements.every((requirement) => Boolean(requirement.fields?.["考试名称"] && requirement.fields?.["考试日期时间"]));
   const hasActualSession = (task.sessions || []).some((session) => text(session.session_id));
   return {
@@ -218,7 +219,7 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
             : (batchDraft?.warnings?.length ? "needs_review" : "ready"),
         code: batchCode,
       },
-      personnel: { status: personnelNotRequired ? "skipped" : (hasBatchCode ? (personnelDraft.warnings.length ? "needs_review" : "ready") : "waiting_batch") },
+      personnel: { status: personnelStatus.status, actions: personnelStatus.actions },
       content: { status: hasBatchCode ? (contentReady ? "ready" : "needs_review") : "waiting_batch" },
       archive: { status: hasBatchCode && hasActualSession ? (archiveDraft.warnings.length ? "needs_review" : "ready") : "waiting_execution" },
     },

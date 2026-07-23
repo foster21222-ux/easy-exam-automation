@@ -8,6 +8,7 @@ import {
   buildProjectWorkflow,
   normalizeFanweiBusinessRequirement,
 } from "./project_workflow.mjs";
+import { buildOperationPersonnelTaskDraft, operationPersonnelTaskFingerprint } from "./operation_personnel_task.mjs";
 
 const fanwei = {
   requestid: "1505614",
@@ -96,7 +97,17 @@ test("personnel and archive drafts keep their source boundaries", () => {
 });
 
 test("workflow opens personnel and content after batch and archive after actual execution", () => {
-  const config = buildFanweiProjectConfig({ fanwei, model, parsed: { config: {} } });
+  const config = buildFanweiProjectConfig({
+    fanwei,
+    model,
+    parsed: {
+      config: {
+        startTimeDisplay: "2026/07/20 09:30",
+        endTimeDisplay: "2026/07/20 11:30",
+        courses: [{ code: "C001", name: "综合能力" }],
+      },
+    },
+  });
   const waiting = buildProjectWorkflow({ config, sessions: [] }, { warnings: [] });
   assert.equal(waiting.steps.batch.status, "ready");
   assert.equal(waiting.steps.personnel.status, "waiting_batch");
@@ -104,9 +115,31 @@ test("workflow opens personnel and content after batch and archive after actual 
   assert.equal(waiting.steps.archive.status, "waiting_execution");
 
   const ready = buildProjectWorkflow({ config: { ...config, operationBatchCode: "EZT260003" }, sessions: [{ session_id: "1001" }] }, { warnings: [] });
-  assert.equal(ready.steps.personnel.status, "ready");
+  assert.equal(ready.steps.personnel.status, "needs_review");
   assert.equal(ready.steps.content.status, "ready");
   assert.equal(ready.steps.archive.status, "ready");
+});
+
+test("workflow exposes the stable personnel-task status and actions", () => {
+  const config = buildFanweiProjectConfig({
+    fanwei,
+    model,
+    parsed: {
+      config: {
+        startTimeDisplay: "2026/08/20 09:30",
+        endTimeDisplay: "2026/08/20 11:30",
+        courses: [{ code: "C001", name: "综合能力" }],
+      },
+    },
+  });
+  const task = { config: { ...config, operationBatchCode: "EZT260003" }, sessions: [] };
+  const draft = buildOperationPersonnelTaskDraft(task, { now: "2026-07-23T02:00:00.000Z" });
+  task.config.operationPersonnelTask = { lastSuccessfulFingerprint: operationPersonnelTaskFingerprint(draft) };
+
+  const workflow = buildProjectWorkflow(task, { warnings: [] });
+
+  assert.equal(workflow.steps.personnel.status, "sent");
+  assert.deepEqual(workflow.steps.personnel.actions, []);
 });
 
 test("workflow does not mark an unresolved external batch as creatable", () => {
