@@ -5416,6 +5416,15 @@ function operationPersonnelTaskError(res, error) {
   });
 }
 
+async function assertOperationPersonnelTaskVisible(taskId, req) {
+  const task = await runTaskState("get", { taskId });
+  if (task && visibleByOwner(auth, req, task)) return;
+  const error = new Error("人员任务不存在");
+  error.status = 404;
+  error.code = "PERSONNEL_TASK_NOT_FOUND";
+  throw error;
+}
+
 function assertOperationPersonnelAutomationEnabled() {
   if (process.env.OPERATION_CONSOLE_AUTOMATION_ENABLED === "1") return;
   const error = new Error(
@@ -5440,6 +5449,7 @@ async function handleOperationPersonnelTaskState(taskId, req, res) {
 
 async function handleOperationPersonnelTaskPreview(taskId, req, res) {
   try {
+    await assertOperationPersonnelTaskVisible(taskId, req);
     assertOperationPersonnelAutomationEnabled();
     const payload = parseJsonSafe(await readBody(req)) || {};
     const result = await getOperationPersonnelTaskService().preview(
@@ -5455,6 +5465,7 @@ async function handleOperationPersonnelTaskPreview(taskId, req, res) {
 
 async function handleOperationPersonnelTaskSend(taskId, req, res) {
   try {
+    await assertOperationPersonnelTaskVisible(taskId, req);
     assertOperationPersonnelAutomationEnabled();
     const payload = parseJsonSafe(await readBody(req)) || {};
     const result = await getOperationPersonnelTaskService().send(
@@ -5517,6 +5528,7 @@ async function handleOperationPersonnelTaskAttempt(taskId, attemptId, req, res) 
 
 async function handleOperationPersonnelTaskRecheck(taskId, req, res) {
   try {
+    await assertOperationPersonnelTaskVisible(taskId, req);
     assertOperationPersonnelAutomationEnabled();
     const result = await getOperationPersonnelTaskService().recheck(
       taskId,

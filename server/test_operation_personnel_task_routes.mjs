@@ -374,6 +374,20 @@ test("personnel task routes hide a project from a different ordinary owner", asy
       });
       assert.equal(response.status, 404);
       assert.equal((await response.json()).errorCode, "PERSONNEL_TASK_NOT_FOUND");
+
+      const preview = await fetch(
+        `${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task/preview`,
+        {
+          method: "POST",
+          headers: {
+            Cookie: "easy_exam_session=other-session",
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        },
+      );
+      assert.equal(preview.status, 404);
+      assert.equal((await preview.json()).errorCode, "PERSONNEL_TASK_NOT_FOUND");
     } finally {
       await runtime.close();
     }
