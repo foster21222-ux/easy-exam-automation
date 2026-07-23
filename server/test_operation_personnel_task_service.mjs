@@ -115,6 +115,7 @@ function serviceHarness(options = {}) {
   const task = baseTask();
   const requirement = options.requirement || { requestId: "requirement-a", version: 3, changeRequests: [] };
   const runnerCalls = [];
+  const inspectionInstructions = [];
   const attemptInstructions = [];
   const recheckInstructions = [];
   const deferredJobs = [];
@@ -252,9 +253,24 @@ function serviceHarness(options = {}) {
     },
     runInspection: async (instruction) => {
       runnerCalls.push("inspection");
+      inspectionInstructions.push(structuredClone(instruction));
       assert.equal(instruction.environment, options.environment || "test");
       options.onInspection?.(task);
-      return structuredClone(inspection);
+      const result = structuredClone(
+        typeof options.inspectionResult === "function"
+          ? options.inspectionResult(instruction, inspection)
+          : inspection,
+      );
+      if (options.externalBaseline) {
+        result.sendRecords = structuredClone(options.externalSendRecords || [{
+          type: "首次发送",
+          sentAt: "2026-07-23 10:09:34",
+        }]);
+        if (!instruction.directoryProbeSummary) {
+          result.directoryMatch = { to: [], cc: [] };
+        }
+      }
+      return result;
     },
     runAttempt: async (instruction, runnerOptions) => {
       runnerCalls.push("attempt");
@@ -281,6 +297,7 @@ function serviceHarness(options = {}) {
     task,
     requirement,
     runnerCalls,
+    inspectionInstructions,
     attemptInstructions,
     recheckInstructions,
     deferredJobs,
@@ -317,6 +334,143 @@ test("preview token binds requirement, draft, operation snapshot and directory",
     }),
     { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
   );
+});
+
+test("visible prior send record adopts an external resend baseline in two inspections", async () => {
+  const harness = serviceHarness({ externalBaseline: true });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const state = harness.task.config.operationPersonnelTask;
+
+  assert.equal(harness.inspectionInstructions.length, 2);
+  assert.equal(harness.inspectionInstructions[0].directoryProbeSummary, undefined);
+  assert.match(
+    harness.inspectionInstructions[1].directoryProbeSummary,
+    /personnel|dates|schedules/,
+  );
+  assert.equal(state.activePreview.kind, "resend");
+  assert.equal(state.activePreview.externalBaseline, true);
+  assert.deepEqual(state.activePreview.baselineSendRecord, {
+    type: "首次发送",
+    sentAt: "2026-07-23 10:09:34",
+  });
+  assert.match(state.activePreview.baselineSnapshotFingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(state.lastSuccessfulFingerprint, "");
+  assert.equal(state.sendHistory.length, 0);
+  assert.equal(
+    state.events.some((item) => (
+      item.type === "operation_personnel_external_send_baseline_adopted"
+    )),
+    true,
+  );
+  assert.equal(preview.state.activePreview.kind, "resend");
+});
+
+test("unchanged external baseline blocks before directory inspection", async () => {
+  const harness = serviceHarness({ externalBaseline: true });
+  const draft = buildOperationPersonnelTaskDraft(harness.task, {
+    environment: "test",
+    now: new Date(START).toISOString(),
+  });
+  const current = inspectionFor(harness.task, "test");
+  current.batch.published = true;
+  current.schedules = structuredClone(draft.schedules);
+  current.personnel = structuredClone(draft.personnel);
+  current.dates = structuredClone(draft.dates);
+  harness.setInspection(current);
+
+  await assert.rejects(
+    harness.service.preview("task-a", owner(), {}),
+    { code: "PERSONNEL_CONTENT_UNCHANGED", status: 409 },
+  );
+  assert.equal(harness.inspectionInstructions.length, 1);
+  assert.equal(harness.task.config.operationPersonnelTask, undefined);
+});
+
+test("external baseline blocks drift between snapshot and directory inspection", async () => {
+  const harness = serviceHarness({
+    externalBaseline: true,
+    inspectionResult: (instruction, current) => {
+      const result = structuredClone(current);
+      if (instruction.directoryProbeSummary) {
+        result.dates.end = "2099-01-01";
+      }
+      return result;
+    },
+  });
+
+  await assert.rejects(
+    harness.service.preview("task-a", owner(), {}),
+    {
+      code: "PERSONNEL_OPERATION_CONFLICT",
+      status: 409,
+    },
+  );
+  assert.equal(harness.inspectionInstructions.length, 2);
+  assert.equal(harness.task.config.operationPersonnelTask, undefined);
+});
+
+test("external resend preview binds the adopted baseline against tampering", async () => {
+  const harness = serviceHarness({ externalBaseline: true });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  harness.task.config.operationPersonnelTask.draft.previewBaselineSnapshot.dates.end = "2099-01-01";
+
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "人员日期调整",
+    }),
+    { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
+  );
+});
+
+test("external resend requires a reviewed change summary", async () => {
+  const harness = serviceHarness({ externalBaseline: true });
+  const preview = await harness.service.preview("task-a", owner(), {});
+
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_CHANGE_SUMMARY_REQUIRED", status: 400 },
+  );
+  assert.equal(harness.deferredJobs.length, 0);
+});
+
+test("external resend writes local success only after the new send record", async () => {
+  const harness = serviceHarness({
+    externalBaseline: true,
+    runnerResult: successfulAttemptResult({
+      sendRecord: {
+        type: "再次发送",
+        sentAt: "2026-07-23T02:00:20.000Z",
+      },
+    }),
+  });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const accepted = await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "人员日期调整",
+  });
+  const queued = harness.task.config.operationPersonnelTask;
+
+  assert.equal(accepted.statusCode, 202);
+  assert.equal(queued.activeAttempt.kind, "resend");
+  assert.deepEqual(
+    queued.activeAttempt.baseline,
+    queued.draft.previewBaselineSnapshot,
+  );
+  assert.equal(queued.lastSuccessfulFingerprint, "");
+  assert.equal(queued.sendHistory.length, 0);
+
+  await harness.runDeferred();
+  const completed = harness.task.config.operationPersonnelTask;
+  assert.match(completed.lastSuccessfulFingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(completed.sendHistory.length, 1);
+  assert.equal(completed.sendHistory[0].attemptId, accepted.attemptId);
 });
 
 test("preview token expires after ten minutes", async () => {

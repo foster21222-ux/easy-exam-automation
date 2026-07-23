@@ -237,6 +237,26 @@ function operationSnapshotChanges(before = {}, after = {}, prefix = "") {
     .sort((left, right) => left.path.localeCompare(right.path));
 }
 
+function changeValue(value) {
+  if (value === undefined || value === null || value === "") return "空";
+  return value && typeof value === "object" ? stableJson(value) : text(value);
+}
+
+function suggestedChangeSummary(changes = []) {
+  return changes
+    .map((item) => (
+      `${item.path}：${changeValue(item.before)} → ${changeValue(item.after)}`
+    ))
+    .join("；");
+}
+
+function withoutDirectory(snapshot = {}) {
+  return {
+    ...structuredClone(snapshot),
+    directoryMatch: { to: [], cc: [] },
+  };
+}
+
 function irreversibleBoundaryReached(checkpoints = {}) {
   const submit = checkpoints.submit_send;
   return ["running", "submission_started", "completed"].includes(submit?.status)
@@ -278,6 +298,11 @@ function attemptHistory(attempt, result, completedAt) {
 }
 
 function attemptMatchesPreview(attempt, preview) {
+  const binding = (value = {}, baseline = {}) => ({
+    ...value,
+    baselineSnapshotFingerprint: value.baselineSnapshotFingerprint
+      || fingerprint(baseline),
+  });
   return attempt
     && attempt.environment === preview.environment
     && attempt.kind === preview.kind
@@ -287,7 +312,8 @@ function attemptMatchesPreview(attempt, preview) {
     && stableJson(attempt.recipients) === stableJson(preview.recipients)
     && stableJson(attempt.target) === stableJson(preview.target)
     && stableJson(attempt.baseline) === stableJson(preview.baseline)
-    && stableJson(attempt.previewBinding) === stableJson(preview.previewBinding);
+    && stableJson(binding(attempt.previewBinding, attempt.baseline))
+      === stableJson(binding(preview.previewBinding, preview.baseline));
 }
 
 function recheckedOperationSnapshot(state, result) {
@@ -445,25 +471,77 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
 
     const releaseProfile = coordinator.acquireProfile();
     let snapshot;
+    let kind;
+    let externalBaseline;
+    let target;
+    let baseline;
+    let operationChanges;
     try {
       snapshot = normalizeOperationPersonnelSnapshot(await runInspection({
         environment,
         batch: draft.batch,
         batchCode: draft.batch.code,
       }));
+      externalBaseline = !existing.lastSuccessfulFingerprint
+        && snapshot.sendRecords.length > 0;
+      kind = existing.lastSuccessfulFingerprint || externalBaseline
+        ? "resend"
+        : "initial";
+      target = targetFromDraft(draft, snapshot);
+      baseline = existing.lastSuccessfulFingerprint
+        ? normalizeOperationPersonnelSnapshot(existing.lastOperationSnapshot || {})
+        : externalBaseline
+          ? structuredClone(snapshot)
+          : structuredClone(target);
+      if (kind === "initial") baseline.batch.published = snapshot.batch.published;
+      operationChanges = operationSnapshotChanges(snapshot, target);
+      if (externalBaseline) {
+        if (!operationChanges.length) {
+          throw serviceError(
+            "PERSONNEL_CONTENT_UNCHANGED",
+            409,
+            "人员任务内容未变化，不允许重复发送",
+          );
+        }
+        const directoryProbeSummary = suggestedChangeSummary(operationChanges);
+        const fullSnapshot = normalizeOperationPersonnelSnapshot(await runInspection({
+          environment,
+          batch: draft.batch,
+          batchCode: draft.batch.code,
+          directoryProbeSummary,
+        }));
+        const drift = operationSnapshotChanges(
+          withoutDirectory(snapshot),
+          withoutDirectory(fullSnapshot),
+        );
+        if (drift.length) {
+          const error = serviceError(
+            "PERSONNEL_OPERATION_CONFLICT",
+            409,
+            `运控人员任务状态冲突：${drift.map((item) => item.path).join("、")}`,
+          );
+          error.conflicts = drift;
+          throw error;
+        }
+        snapshot = fullSnapshot;
+        baseline = structuredClone(fullSnapshot);
+        target = targetFromDraft(draft, fullSnapshot);
+        operationChanges = operationSnapshotChanges(snapshot, target);
+        if (!operationChanges.length) {
+          throw serviceError(
+            "PERSONNEL_CONTENT_UNCHANGED",
+            409,
+            "人员任务内容未变化，不允许重复发送",
+          );
+        }
+      }
     } finally {
       releaseProfile();
     }
-    const mode = existing.lastSuccessfulFingerprint ? "resend" : "initial";
-    const target = targetFromDraft(draft, snapshot);
-    const baseline = mode === "resend"
-      ? normalizeOperationPersonnelSnapshot(existing.lastOperationSnapshot || {})
-      : structuredClone(target);
-    if (mode === "initial") baseline.batch.published = snapshot.batch.published;
     const conflicts = operationPersonnelConflicts(
       baseline || target,
       snapshot,
-      mode,
+      kind,
     );
     if (conflicts.length) {
       const error = serviceError(
@@ -504,6 +582,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       draft.operationBatch = structuredClone(snapshot.batch);
       draft.directoryMatch = structuredClone(snapshot.directoryMatch);
       draft.previewOperationSnapshot = structuredClone(snapshot);
+      const previewBaseline = kind === "initial" ? target : baseline;
+      draft.previewBaselineSnapshot = structuredClone(previewBaseline);
       const sourceFingerprint = draftSourceFingerprint(draft);
       const token = text(makeToken());
       const createdAt = nowIso(now);
@@ -513,6 +593,12 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         expiresAt,
         requirementVersion: currentRequirementVersion,
         draftVersion,
+        kind,
+        externalBaseline,
+        baselineSendRecord: externalBaseline
+          ? structuredClone(baseline.sendRecords[0] || null)
+          : null,
+        baselineSnapshotFingerprint: fingerprint(previewBaseline),
         operationSnapshotFingerprint: fingerprint(snapshot),
         directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
       };
@@ -523,6 +609,12 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           actor: text(actor?.email),
           createdAt,
         },
+        ...(externalBaseline ? [{
+          type: "operation_personnel_external_send_baseline_adopted",
+          actor: text(actor?.email),
+          sendRecord: structuredClone(activePreview.baselineSendRecord),
+          createdAt,
+        }] : []),
         ...(edited.changes.length ? [{
           type: "operation_personnel_draft_auto_confirmed",
           actor: text(actor?.email),
@@ -550,7 +642,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         draftVersion,
         state: next,
         changes: diffOperationPersonnelTaskDrafts(freshState.draft || {}, draft),
-        operationChanges: operationSnapshotChanges(snapshot, target),
+        operationChanges,
       };
     });
   }
@@ -671,6 +763,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         batch: attempt.target.batch,
         target: attempt.target,
         baseline: attempt.baseline,
+        changeSummary: attempt.changeSummary,
         checkpoints: running.checkpoints,
       }, {
         now,
@@ -728,6 +821,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         || state.environment !== environment
         || state.draft.environment !== environment
         || state.sourceFingerprint !== draftSourceFingerprint(state.draft)
+        || preview.baselineSnapshotFingerprint
+          !== fingerprint(state.draft.previewBaselineSnapshot || {})
         || preview.operationSnapshotFingerprint
           !== fingerprint(state.draft.previewOperationSnapshot || {})
         || preview.directoryMatchFingerprint !== fingerprint(state.draft.directoryMatch || {});
@@ -747,7 +842,14 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           "人员任务内容未变化，不允许重复发送",
         );
       }
-      const kind = state.lastSuccessfulFingerprint ? "resend" : "initial";
+      const kind = preview.kind;
+      if (!["initial", "resend"].includes(kind)) {
+        throw serviceError(
+          "PERSONNEL_PREVIEW_STALE",
+          409,
+          "人员任务预览已失效，请重新检查",
+        );
+      }
       const changeSummary = text(input.changeSummary);
       if (kind === "resend" && !changeSummary) {
         throw serviceError(
@@ -757,6 +859,15 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         );
       }
       const target = targetFromDraft(state.draft);
+      const baseline = structuredClone(state.draft.previewBaselineSnapshot || {});
+      if (kind === "resend"
+        && !operationSnapshotChanges(baseline, target).length) {
+        throw serviceError(
+          "PERSONNEL_CONTENT_UNCHANGED",
+          409,
+          "人员任务内容未变化，不允许重复发送",
+        );
+      }
       const previous = state.activeAttempt?.status === "failed_resumable"
         ? state.activeAttempt
         : null;
@@ -764,10 +875,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         to: structuredClone(state.draft.directoryMatch?.to || []),
         cc: structuredClone(state.draft.directoryMatch?.cc || []),
       };
-      const baseline = structuredClone(
-        kind === "resend" ? state.lastOperationSnapshot : target,
-      );
       const previewBinding = {
+        baselineSnapshotFingerprint: preview.baselineSnapshotFingerprint,
         operationSnapshotFingerprint: preview.operationSnapshotFingerprint,
         directoryMatchFingerprint: preview.directoryMatchFingerprint,
       };
