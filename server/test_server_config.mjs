@@ -29,6 +29,33 @@ test("server wires operation collaboration and content email endpoints", () => {
   assert.match(serverSource, /content-requirement-email/);
 });
 
+test("server wires exact personnel task routes to one environment-bound service", () => {
+  assert.match(serverSource, /from "\.\/operation_personnel_task_service\.mjs"/);
+  assert.match(serverSource, /from "\.\/operation_personnel_task_runner\.mjs"/);
+  assert.match(
+    serverSource,
+    /environment: process\.env\.OPERATION_CONSOLE_ENVIRONMENT \|\| ""/,
+  );
+  assert.match(serverSource, /coordinator: operationBatchCoordinator/);
+  assert.match(serverSource, /updateTaskConfig: \(taskId, config\) => runTaskState\("update_config"/);
+  assert.match(serverSource, /readRequirement: \(requestId\) => requestId/);
+  for (const route of [
+    "operation-personnel-task$/",
+    "operation-personnel-task\\/preview$/",
+    "operation-personnel-task\\/send$/",
+    "operation-personnel-task\\/attempts\\/([^/]+)$/",
+    "operation-personnel-task\\/recheck$/",
+  ]) {
+    assert.ok(serverSource.includes(route), `missing exact personnel route: ${route}`);
+  }
+  const sendHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationPersonnelTaskSend"),
+    serverSource.indexOf("const operationPersonnelCheckpointOrder"),
+  );
+  assert.ok(sendHandler.includes("return json(res, 202"));
+  assert.equal(sendHandler.includes("payload.environment"), false);
+});
+
 test("global email and operation environment mutations require administrators", () => {
   const requestHandler = serverSource.slice(
     serverSource.indexOf("async function requestHandler"),

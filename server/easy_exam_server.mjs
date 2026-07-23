@@ -76,6 +76,12 @@ import {
   runOperationBatchCreation,
   runOperationBatchReconciliation,
 } from "./operation_batch_runner.mjs";
+import { createOperationPersonnelTaskService } from "./operation_personnel_task_service.mjs";
+import {
+  runOperationPersonnelAttempt,
+  runOperationPersonnelInspection,
+  runOperationPersonnelRecheck,
+} from "./operation_personnel_task_runner.mjs";
 import { deleteTaskSessionsFromTenant } from "./session_deletion.mjs";
 import { calculateRoomSizes } from "./room_assignment.mjs";
 import {
@@ -5370,6 +5376,157 @@ const operationBatchCoordinator = createOperationBatchCoordinator({
   taskInFlight: operationBatchResultInFlight,
   profileKey: operationBatchAutomationLockKey,
 });
+const operationPersonnelTaskActiveAttempts = new Set();
+let operationPersonnelTaskService;
+
+function getOperationPersonnelTaskService() {
+  if (operationPersonnelTaskService) return operationPersonnelTaskService;
+  const runnerOptions = () => ({
+    baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
+    userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
+  });
+  operationPersonnelTaskService = createOperationPersonnelTaskService({
+    readTask: (taskId) => runTaskState("get", { taskId }),
+    updateTaskConfig: (taskId, config) => runTaskState("update_config", { taskId, config }),
+    readRequirement: (requestId) => requestId
+      ? runRequirementState("get", { requestId })
+      : null,
+    coordinator: operationBatchCoordinator,
+    activeAttemptIds: operationPersonnelTaskActiveAttempts,
+    runInspection: (instruction) => runOperationPersonnelInspection(instruction, runnerOptions()),
+    runAttempt: (instruction, options) => runOperationPersonnelAttempt(
+      instruction,
+      { ...options, ...runnerOptions() },
+    ),
+    runRecheck: (instruction) => runOperationPersonnelRecheck(instruction, runnerOptions()),
+    environment: process.env.OPERATION_CONSOLE_ENVIRONMENT || "",
+  });
+  return operationPersonnelTaskService;
+}
+
+function operationPersonnelTaskActor(req) {
+  if (!auth.enabled) return { email: "", role: "admin" };
+  return getAuthUserFromRequest(auth, req);
+}
+
+function operationPersonnelTaskError(res, error) {
+  return json(res, Number(error?.status || 500), {
+    error: error instanceof Error ? error.message : String(error),
+    ...(error?.code ? { errorCode: error.code } : {}),
+  });
+}
+
+function assertOperationPersonnelAutomationEnabled() {
+  if (process.env.OPERATION_CONSOLE_AUTOMATION_ENABLED === "1") return;
+  const error = new Error(
+    "运营控制台浏览器自动化未启用。请先确认测试环境已登录，并设置 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 后重启服务。",
+  );
+  error.status = 409;
+  error.code = "PERSONNEL_AUTOMATION_DISABLED";
+  throw error;
+}
+
+async function handleOperationPersonnelTaskState(taskId, req, res) {
+  try {
+    const result = await getOperationPersonnelTaskService().get(
+      taskId,
+      operationPersonnelTaskActor(req),
+    );
+    return json(res, 200, result);
+  } catch (error) {
+    return operationPersonnelTaskError(res, error);
+  }
+}
+
+async function handleOperationPersonnelTaskPreview(taskId, req, res) {
+  try {
+    assertOperationPersonnelAutomationEnabled();
+    const payload = parseJsonSafe(await readBody(req)) || {};
+    const result = await getOperationPersonnelTaskService().preview(
+      taskId,
+      operationPersonnelTaskActor(req),
+      payload,
+    );
+    return json(res, 200, result);
+  } catch (error) {
+    return operationPersonnelTaskError(res, error);
+  }
+}
+
+async function handleOperationPersonnelTaskSend(taskId, req, res) {
+  try {
+    assertOperationPersonnelAutomationEnabled();
+    const payload = parseJsonSafe(await readBody(req)) || {};
+    const result = await getOperationPersonnelTaskService().send(
+      taskId,
+      operationPersonnelTaskActor(req),
+      payload,
+    );
+    return json(res, 202, { attemptId: result.attemptId });
+  } catch (error) {
+    return operationPersonnelTaskError(res, error);
+  }
+}
+
+const operationPersonnelCheckpointOrder = [
+  "inspect_batch",
+  "publish_batch",
+  "sync_exam_schedules",
+  "sync_personnel_config",
+  "sync_personnel_dates",
+  "sync_exam_service_requirements",
+  "verify_task_sheet",
+  "select_recipients",
+  "submit_send",
+  "verify_send_record",
+];
+
+function operationPersonnelAttemptResponse(result) {
+  const attempt = result.attempt || {};
+  const checkpoints = result.state?.checkpoints || {};
+  const checkpoint = operationPersonnelCheckpointOrder
+    .filter((name) => checkpoints[name])
+    .at(-1) || "";
+  const deadline = Date.parse(attempt.verification?.deadlineAt);
+  const remainingSeconds = Number.isFinite(deadline)
+    ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+    : 0;
+  return {
+    attemptId: attempt.attemptId,
+    status: attempt.status,
+    checkpoint,
+    verificationPhase: attempt.verification?.phase || "",
+    remainingSeconds,
+    completed: ["sent", "failed_resumable", "result_unknown"].includes(attempt.status),
+    error: attempt.error || null,
+  };
+}
+
+async function handleOperationPersonnelTaskAttempt(taskId, attemptId, req, res) {
+  try {
+    const result = await getOperationPersonnelTaskService().attempt(
+      taskId,
+      operationPersonnelTaskActor(req),
+      attemptId,
+    );
+    return json(res, 200, operationPersonnelAttemptResponse(result));
+  } catch (error) {
+    return operationPersonnelTaskError(res, error);
+  }
+}
+
+async function handleOperationPersonnelTaskRecheck(taskId, req, res) {
+  try {
+    assertOperationPersonnelAutomationEnabled();
+    const result = await getOperationPersonnelTaskService().recheck(
+      taskId,
+      operationPersonnelTaskActor(req),
+    );
+    return json(res, 200, result);
+  } catch (error) {
+    return operationPersonnelTaskError(res, error);
+  }
+}
 
 async function operationBatchLockConflictResponse(taskId, task, res, error) {
   const currentTask = await readFreshOperationBatchTask(
@@ -6375,6 +6532,31 @@ async function requestHandler(req, res) {
     const operationBatchResultMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/result$/);
     if (req.method === "POST" && operationBatchResultMatch) {
       return await handleOperationBatchResult(decodeURIComponent(operationBatchResultMatch[1]), req, res);
+    }
+    const personnelStateMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-personnel-task$/);
+    if (req.method === "GET" && personnelStateMatch) {
+      return await handleOperationPersonnelTaskState(decodeURIComponent(personnelStateMatch[1]), req, res);
+    }
+    const personnelPreviewMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-personnel-task\/preview$/);
+    if (req.method === "POST" && personnelPreviewMatch) {
+      return await handleOperationPersonnelTaskPreview(decodeURIComponent(personnelPreviewMatch[1]), req, res);
+    }
+    const personnelSendMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-personnel-task\/send$/);
+    if (req.method === "POST" && personnelSendMatch) {
+      return await handleOperationPersonnelTaskSend(decodeURIComponent(personnelSendMatch[1]), req, res);
+    }
+    const personnelAttemptMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-personnel-task\/attempts\/([^/]+)$/);
+    if (req.method === "GET" && personnelAttemptMatch) {
+      return await handleOperationPersonnelTaskAttempt(
+        decodeURIComponent(personnelAttemptMatch[1]),
+        decodeURIComponent(personnelAttemptMatch[2]),
+        req,
+        res,
+      );
+    }
+    const personnelRecheckMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-personnel-task\/recheck$/);
+    if (req.method === "POST" && personnelRecheckMatch) {
+      return await handleOperationPersonnelTaskRecheck(decodeURIComponent(personnelRecheckMatch[1]), req, res);
     }
     const contentRequirementEmailMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/content-requirement-email$/);
     if (req.method === "POST" && contentRequirementEmailMatch) {
