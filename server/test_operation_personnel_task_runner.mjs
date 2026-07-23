@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as operationPersonnelRunner from "./operation_personnel_task_runner.mjs";
 import {
   inspectOperationPersonnelTask,
   matchOperationPersonnelRecipients,
@@ -8,6 +9,164 @@ import {
   operationPersonnelConflicts,
   runOperationPersonnelInspection,
 } from "./operation_personnel_task_runner.mjs";
+
+function validInstruction(overrides = {}) {
+  const target = {
+    batch: {
+      code: "EZT260003",
+      projectCode: "P001",
+      projectName: "项目一",
+      batchName: "批次一",
+      projectDepartment: "交付一部",
+      projectManager: "项目经理",
+      systemType: "易考",
+      published: true,
+    },
+    schedules: [{
+      scheduleEntryId: "schedule-1",
+      scheduleCode: 1,
+      subjectCode: "SUB-1",
+      subjectName: "科目一",
+      start: "2026-08-22 10:00",
+      end: "2026-08-22 11:00",
+      durationMinutes: 60,
+      earlyLoginMinutes: 30,
+    }],
+    personnel: {
+      serviceType: "ATA 监考－分散在线监考",
+      platform: "悦站",
+      loginMonitoring: "是",
+      monitorRatio: "1:50",
+      candidateBasis: 60,
+      monitorCount: 2,
+      earliestLoginMinutes: 30,
+      trialIncluded: false,
+    },
+    dates: {
+      start: "2026-07-23",
+      end: "2026-08-19",
+      nameListDue: "2026-08-19",
+    },
+    requirements: [{ name: "在线监考", value: "需要" }],
+    taskSheet: {
+      type: "分散在线监考",
+      conditions: [{ name: "人员配置", satisfied: true }],
+      content: "任务内容",
+    },
+    directoryMatch: {
+      to: [{ group: "演示组", id: "u1", name: "张乐翔" }],
+      cc: [],
+    },
+  };
+  return {
+    environment: "test",
+    kind: "initial",
+    batch: target.batch,
+    target,
+    checkpoints: {},
+    ...overrides,
+  };
+}
+
+function fakeOperationPage(overrides = {}) {
+  const target = validInstruction().target;
+  return {
+    events: [],
+    state: {
+      batch: { ...target.batch, published: overrides.published === true },
+      schedules: overrides.schedules ?? [],
+      personnel: {
+        ...target.personnel,
+        platform: overrides.personnelPlatform ?? "",
+      },
+      dates: overrides.dates ?? {},
+      requirements: overrides.requirements ?? [],
+      taskSheet: overrides.taskSheet ?? target.taskSheet,
+      sendRecords: overrides.sendRecords ?? [],
+      selectedRecipients: { to: [], cc: [] },
+    },
+    sendRecordsAfterReopen: overrides.sendRecordsAfterReopen,
+  };
+}
+
+function fakeOperationContext(page = fakeOperationPage()) {
+  return {
+    pages: () => [page],
+    close: async () => page.events.push("context:close"),
+  };
+}
+
+function advancingClock(start = Date.parse("2026-07-23T02:00:00.000Z")) {
+  let current = start;
+  return () => {
+    const value = current;
+    current += 1000;
+    return value;
+  };
+}
+
+function attemptOptions(page = fakeOperationPage(), overrides = {}) {
+  return {
+    context: fakeOperationContext(page),
+    readBatchPages: async () => exactBatchPages(),
+    openBatchRow: async () => page.events.push("batch:open"),
+    readBatch: async () => ({ ...page.state.batch }),
+    readSchedules: async () => page.state.schedules,
+    readPersonnel: async () => page.state.personnel,
+    readDates: async () => page.state.dates,
+    readRequirements: async () => page.state.requirements,
+    readTaskSheet: async () => page.state.taskSheet,
+    readSendRecords: async () => page.state.sendRecords,
+    readDirectoryGroups: async () => [
+      { name: "演示组", people: [{ id: "u1", name: "张乐翔" }] },
+    ],
+    publishBatch: async () => {
+      page.events.push("publish:click");
+      page.state.batch.published = true;
+    },
+    syncExamSchedules: async (_actualPage, schedules) => {
+      page.events.push("schedules:fill");
+      page.state.schedules = structuredClone(schedules);
+    },
+    syncPersonnelConfig: async (_actualPage, personnel) => {
+      page.events.push("personnel:fill");
+      page.state.personnel = structuredClone(personnel);
+    },
+    syncPersonnelDates: async (_actualPage, dates) => {
+      page.events.push("dates:fill");
+      page.state.dates = structuredClone(dates);
+    },
+    syncExamServiceRequirements: async (_actualPage, requirements) => {
+      page.events.push("requirements:fill");
+      page.state.requirements = structuredClone(requirements);
+    },
+    openTaskSheet: async () => page.events.push("task-sheet:open"),
+    selectRecipients: async (_actualPage, recipients) => {
+      page.events.push("recipients:select");
+      page.state.selectedRecipients = structuredClone(recipients);
+    },
+    readSelectedRecipients: async () => page.state.selectedRecipients,
+    confirmSend: async (_actualPage, attempt) => {
+      page.events.push("send:confirm");
+      if (page.sendRecordsAfterReopen === undefined) {
+        page.state.sendRecords.push({
+          type: attempt.kind === "resend" ? "再次发送" : "首次发送",
+          sentAt: new Date(Date.parse(attempt.startedAt) + 1000).toISOString(),
+        });
+      }
+    },
+    closeTaskSheet: async () => page.events.push("task-sheet:close"),
+    reopenTaskSheet: async () => {
+      page.events.push("task-sheet:reopen");
+      if (page.sendRecordsAfterReopen !== undefined) {
+        page.state.sendRecords = structuredClone(page.sendRecordsAfterReopen);
+      }
+    },
+    sleep: async () => {},
+    now: advancingClock(),
+    ...overrides,
+  };
+}
 
 function exactBatchPages(rows = [{ cells: ["EZT260003"], rowId: "target" }]) {
   return {
@@ -60,6 +219,162 @@ function visibleSnapshot(evidence = {}) {
   };
 }
 
+test("attempt applies checkpoints in the approved order", async () => {
+  const observed = [];
+  await operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), attemptOptions(
+    fakeOperationPage(),
+    { onCheckpoint: async ({ name, status }) => observed.push(`${name}:${status}`) },
+  ));
+  assert.deepEqual(observed.filter((item) => item.endsWith(":completed")), [
+    "inspect_batch:completed",
+    "publish_batch:completed",
+    "sync_exam_schedules:completed",
+    "sync_personnel_config:completed",
+    "sync_personnel_dates:completed",
+    "sync_exam_service_requirements:completed",
+    "verify_task_sheet:completed",
+    "select_recipients:completed",
+    "submit_send:completed",
+    "verify_send_record:completed",
+  ]);
+});
+
+test("published batches skip the publish click but still complete the checkpoint", async () => {
+  const page = fakeOperationPage({ published: true });
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page),
+  );
+  assert.equal(page.events.filter((item) => item === "publish:click").length, 0);
+});
+
+test("never retries the final send click when the send record is delayed", async () => {
+  const page = fakeOperationPage({ sendRecordsAfterReopen: [] });
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page),
+  );
+  assert.equal(page.events.filter((item) => item === "send:confirm").length, 1);
+  assert.equal(page.events.filter((item) => item === "task-sheet:reopen").length, 1);
+  assert.equal(result.status, "result_unknown");
+});
+
+test("resend only accepts a record later than attempt start", () => {
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "再次发送", sentAt: "2026-07-23T01:59:59.000Z" },
+  ], {
+    kind: "resend",
+    startedAt: "2026-07-23T02:00:00.000Z",
+  }), null);
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "再次发送", sentAt: "2026-07-23T02:00:01.000Z" },
+  ], {
+    kind: "resend",
+    startedAt: "2026-07-23T02:00:00.000Z",
+  }).sentAt, "2026-07-23T02:00:01.000Z");
+});
+
+test("recheck is read-only", async () => {
+  const page = fakeOperationPage({ sendRecords: [] });
+  await operationPersonnelRunner.runOperationPersonnelRecheck(
+    {
+      ...validInstruction(),
+      attempt: { kind: "initial", startedAt: "2026-07-23T02:00:00.000Z" },
+    },
+    attemptOptions(page),
+  );
+  assert.equal(page.events.some((item) => (
+    /publish|fill|delete|send:confirm|recipients:select/.test(item)
+  )), false);
+});
+
+test("resume skips a verified checkpoint and blocks drift before continuing", async () => {
+  const captured = {};
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(fakeOperationPage(), {
+      onCheckpoint: async (update) => {
+        if (update.status === "completed") captured[update.name] = update;
+      },
+    }),
+  );
+
+  const matching = fakeOperationPage({ personnelPlatform: "悦站" });
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({
+      checkpoints: { sync_personnel_config: captured.sync_personnel_config },
+    }),
+    attemptOptions(matching),
+  );
+  assert.equal(matching.events.includes("personnel:fill"), false);
+
+  const drifted = fakeOperationPage({ personnelPlatform: "其他平台" });
+  await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({
+      checkpoints: { sync_personnel_config: captured.sync_personnel_config },
+    }),
+    attemptOptions(drifted),
+  ), { code: "PERSONNEL_OPERATION_CONFLICT" });
+});
+
+test("resume after submit never clicks final confirmation again", async () => {
+  const captured = {};
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(fakeOperationPage(), {
+      onCheckpoint: async (update) => {
+        if (update.status === "completed") captured[update.name] = update;
+      },
+    }),
+  );
+  const page = fakeOperationPage({
+    published: true,
+    sendRecords: [{ type: "首次发送", sentAt: "2026-07-23T02:00:10.000Z" }],
+  });
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({
+      checkpoints: { submit_send: captured.submit_send },
+    }),
+    attemptOptions(page),
+  );
+  assert.equal(page.events.includes("send:confirm"), false);
+  assert.equal(result.status, "sent");
+});
+
+test("schedule deletion requires one exact schedule entry id and code row", async () => {
+  const baseline = validInstruction().target;
+  const target = { ...structuredClone(baseline), schedules: [] };
+  const page = fakeOperationPage({
+    published: true,
+    schedules: baseline.schedules,
+    personnelPlatform: "悦站",
+    dates: baseline.dates,
+    requirements: baseline.requirements,
+  });
+  await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({ kind: "resend", baseline, target }),
+    attemptOptions(page, {
+      findScheduleRows: async () => [{ id: "row-a" }, { id: "row-b" }],
+      deleteSchedule: async () => page.events.push("schedule:delete"),
+    }),
+  ), { code: "PERSONNEL_SCHEDULE_NOT_UNIQUE" });
+  assert.equal(page.events.includes("schedule:delete"), false);
+});
+
+test("task sheet conditions must all be satisfied before recipients are selected", async () => {
+  const page = fakeOperationPage({
+    taskSheet: {
+      ...validInstruction().target.taskSheet,
+      conditions: [{ name: "人员配置", satisfied: false }],
+    },
+  });
+  await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page),
+  ), { code: "PERSONNEL_TASK_SHEET_BLOCKED" });
+  assert.equal(page.events.includes("recipients:select"), false);
+});
+
 test("recipient matching requires the exact environment directory result", () => {
   assert.deepEqual(matchOperationPersonnelRecipients({
     environment: "test",
@@ -107,6 +422,7 @@ test("snapshot normalization is stable and keeps only matched directory people",
     },
     schedules: [
       {
+        scheduleEntryId: "",
         scheduleCode: 1,
         subjectCode: "",
         subjectName: "科目一",
@@ -116,6 +432,7 @@ test("snapshot normalization is stable and keeps only matched directory people",
         earlyLoginMinutes: "",
       },
       {
+        scheduleEntryId: "",
         scheduleCode: 2,
         subjectCode: "",
         subjectName: "科目二",

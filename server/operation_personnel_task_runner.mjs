@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   advanceOperationBatchListPage,
@@ -25,6 +26,7 @@ function numberOrText(value) {
 
 function normalizeSchedule(raw = {}) {
   return {
+    scheduleEntryId: text(raw.scheduleEntryId),
     scheduleCode: numberOrText(raw.scheduleCode),
     subjectCode: text(raw.subjectCode),
     subjectName: text(raw.subjectName),
@@ -79,9 +81,14 @@ function normalizeRequirements(raw = []) {
 }
 
 function normalizeTaskSheet(raw = {}) {
+  const condition = (item) => (
+    item && typeof item === "object"
+      ? { name: text(item.name), satisfied: item.satisfied === true }
+      : text(item)
+  );
   return {
     type: text(raw.type),
-    conditions: [...(raw.conditions || [])].map(text),
+    conditions: [...(raw.conditions || [])].map(condition),
     content: text(raw.content),
   };
 }
@@ -406,7 +413,7 @@ function assertVisibleSection(snapshot, key) {
   throw error;
 }
 
-export async function inspectOperationPersonnelTask(page, instruction = {}, options = {}) {
+async function locateOperationPersonnelBatch(page, instruction = {}, options = {}) {
   const batchCode = text(instruction.batch?.code || instruction.batchCode);
   if (!batchCode) throw new Error("缺少运控批次代码");
   const baseUrl = text(options.baseUrl || process.env.OPERATION_CONSOLE_BASE_URL || "http://172.16.18.198:8020");
@@ -421,6 +428,11 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     batchCode,
     options,
   });
+  return { batchCode };
+}
+
+export async function inspectOperationPersonnelTask(page, instruction = {}, options = {}) {
+  const { batchCode } = await locateOperationPersonnelBatch(page, instruction, options);
 
   let visibleSnapshot;
   const visible = async () => {
@@ -565,4 +577,402 @@ export async function runOperationPersonnelInspection(instruction, options = {})
     context,
     (page) => inspectOperationPersonnelTask(page, instruction, options),
   );
+}
+
+const OPERATION_PERSONNEL_CHECKPOINTS = Object.freeze([
+  "inspect_batch",
+  "publish_batch",
+  "sync_exam_schedules",
+  "sync_personnel_config",
+  "sync_personnel_dates",
+  "sync_exam_service_requirements",
+  "verify_task_sheet",
+  "select_recipients",
+  "submit_send",
+  "verify_send_record",
+]);
+
+function operationMethod(page, options, name) {
+  const method = options[name] || options.adapter?.[name] || page?.[name];
+  if (typeof method !== "function") {
+    throw new Error(`运控人员任务执行器缺少 ${name} 方法`);
+  }
+  return method.bind(options[name] || options.adapter?.[name] ? options.adapter : page);
+}
+
+function sameData(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function operationConflict(detail) {
+  const error = new Error(`运控人员任务状态冲突：${detail}`);
+  error.code = "PERSONNEL_OPERATION_CONFLICT";
+  error.status = 409;
+  return error;
+}
+
+function checkpointDigest(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+async function personnelCheckpoint(name, targetDigest, action, verify, options) {
+  const now = options.now || Date.now;
+  await options.onCheckpoint?.({
+    name,
+    status: "running",
+    startedAt: new Date(now()).toISOString(),
+  });
+  const output = await action();
+  const readback = await verify(output);
+  await options.onCheckpoint?.({
+    name,
+    status: "completed",
+    completedAt: new Date(now()).toISOString(),
+    targetDigest,
+    readback,
+  });
+  return readback;
+}
+
+async function runPersonnelCheckpoint({
+  name,
+  target,
+  action,
+  verify,
+  verifyCompleted,
+  instruction,
+  options,
+}) {
+  const targetDigest = checkpointDigest(target);
+  const completed = instruction.checkpoints?.[name];
+  if (completed?.status === "completed") {
+    if (completed.targetDigest !== targetDigest) {
+      throw operationConflict(`${name} 的已保存目标摘要与当前目标不一致`);
+    }
+    return verifyCompleted(completed);
+  }
+  return personnelCheckpoint(name, targetDigest, action, verify, options);
+}
+
+function targetRecipients(target = {}) {
+  const people = (items) => [...(items || [])].map((item) => ({
+    id: text(item?.id),
+    name: text(item?.name),
+  }));
+  return {
+    to: people(target.directoryMatch?.to),
+    cc: people(target.directoryMatch?.cc),
+  };
+}
+
+function assertReadback(name, expected, actual) {
+  if (!sameData(expected, actual)) {
+    throw operationConflict(`${name} 回读结果与已确认目标不一致`);
+  }
+  return actual;
+}
+
+export function findAttemptSendRecord(records = [], attempt = {}) {
+  const expectedType = attempt.kind === "resend" ? "再次发送" : "首次发送";
+  const startedAt = Date.parse(attempt.startedAt);
+  return normalizeSendRecords(records).find((record) => {
+    if (record.type !== expectedType) return false;
+    if (attempt.kind !== "resend") return true;
+    const sentAt = Date.parse(record.sentAt);
+    return Number.isFinite(sentAt) && Number.isFinite(startedAt) && sentAt > startedAt;
+  }) || null;
+}
+
+async function waitForNewSendRecord(readRecords, attempt, options = {}) {
+  const sleep = options.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const now = options.now || Date.now;
+  const deadline = now() + 30_000;
+  await options.onVerification?.({
+    phase: options.phase,
+    deadlineAt: new Date(deadline).toISOString(),
+  });
+  while (now() < deadline) {
+    const match = findAttemptSendRecord(await readRecords(), attempt);
+    if (match) return match;
+    await sleep(Math.min(1000, Math.max(0, deadline - now())));
+  }
+  return null;
+}
+
+function taskSheetBlocked(detail) {
+  const error = new Error(`运控任务单发送条件阻断：${detail}`);
+  error.code = "PERSONNEL_TASK_SHEET_BLOCKED";
+  error.status = 409;
+  return error;
+}
+
+function assertTaskSheetReady(expected, actual) {
+  if (!actual.conditions.length || actual.conditions.some((condition) => (
+    !condition || typeof condition !== "object" || condition.satisfied !== true
+  ))) {
+    throw taskSheetBlocked("页面发送条件未全部满足");
+  }
+  return assertReadback("verify_task_sheet", expected, actual);
+}
+
+function scheduleNotUnique(schedule, count) {
+  const error = new Error(
+    `考试日程 ${schedule.scheduleEntryId || "缺少稳定 ID"}/${schedule.scheduleCode || "缺少代码"}`
+    + ` 必须精确匹配 1 行，实际 ${count} 行`,
+  );
+  error.code = "PERSONNEL_SCHEDULE_NOT_UNIQUE";
+  error.status = 409;
+  return error;
+}
+
+async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
+  const target = normalizeOperationPersonnelSnapshot(instruction.target || {});
+  const baseline = normalizeOperationPersonnelSnapshot(instruction.baseline || instruction.target || {});
+  const kind = instruction.kind === "resend" ? "resend" : "initial";
+  const inspect = async () => {
+    const actual = await inspectOperationPersonnelTask(page, instruction, options);
+    const expected = structuredClone(baseline);
+    if (kind === "initial") {
+      expected.batch.published = actual.batch.published;
+    }
+    const conflicts = operationPersonnelConflicts(expected, actual, kind);
+    if (conflicts.length) {
+      throw operationConflict(conflicts.map((item) => item.path).join("、"));
+    }
+    return actual;
+  };
+  let snapshot = await runPersonnelCheckpoint({
+    name: OPERATION_PERSONNEL_CHECKPOINTS[0],
+    target: { kind, baseline },
+    action: inspect,
+    verify: async (actual) => actual,
+    verifyCompleted: inspect,
+    instruction,
+    options,
+  });
+
+  const readPublishedBatch = async () => {
+    const batch = normalizeOperationPersonnelSnapshot({
+      batch: await operationMethod(page, options, "readBatch")(page, instruction),
+    }).batch;
+    if (!batch.published) throw operationConflict("批次发布后回读仍为未发布");
+    return batch;
+  };
+  snapshot.batch = await runPersonnelCheckpoint({
+    name: OPERATION_PERSONNEL_CHECKPOINTS[1],
+    target: { ...target.batch, published: true },
+    action: async () => {
+      if (kind === "initial" && !snapshot.batch.published) {
+        await operationMethod(page, options, "publishBatch")(page, instruction);
+      }
+    },
+    verify: readPublishedBatch,
+    verifyCompleted: readPublishedBatch,
+    instruction,
+    options,
+  });
+
+  const readSection = async (readName, key) => {
+    const raw = await operationMethod(page, options, readName)(page, instruction);
+    return normalizeOperationPersonnelSnapshot({ [key]: raw })[key];
+  };
+  const sync = async (checkpointName, optionName, readName, key, action) => {
+    const readAndVerify = async () => assertReadback(
+      checkpointName,
+      target[key],
+      await readSection(readName, key),
+    );
+    snapshot[key] = await runPersonnelCheckpoint({
+      name: checkpointName,
+      target: target[key],
+      action: action || (async () => {
+        if (!sameData(snapshot[key], target[key])) {
+          await operationMethod(page, options, optionName)(page, target[key], snapshot[key], instruction);
+        }
+      }),
+      verify: readAndVerify,
+      verifyCompleted: readAndVerify,
+      instruction,
+      options,
+    });
+  };
+
+  await sync(
+    OPERATION_PERSONNEL_CHECKPOINTS[2],
+    "syncExamSchedules",
+    "readSchedules",
+    "schedules",
+    async () => {
+      const targetCodes = new Set(target.schedules.map((item) => text(item.scheduleCode)));
+      const deletions = snapshot.schedules.filter(
+        (item) => !targetCodes.has(text(item.scheduleCode)),
+      );
+      for (const schedule of deletions) {
+        if (!schedule.scheduleEntryId || !text(schedule.scheduleCode)) {
+          throw scheduleNotUnique(schedule, 0);
+        }
+        const rows = await operationMethod(page, options, "findScheduleRows")(
+          page,
+          {
+            scheduleEntryId: schedule.scheduleEntryId,
+            scheduleCode: schedule.scheduleCode,
+          },
+          instruction,
+        );
+        const count = Array.isArray(rows) ? rows.length : Number(rows);
+        if (count !== 1) throw scheduleNotUnique(schedule, Number.isFinite(count) ? count : 0);
+        await operationMethod(page, options, "deleteSchedule")(
+          page,
+          schedule,
+          Array.isArray(rows) ? rows[0] : undefined,
+          instruction,
+        );
+      }
+      if (!sameData(snapshot.schedules, target.schedules)) {
+        await operationMethod(page, options, "syncExamSchedules")(
+          page,
+          target.schedules,
+          snapshot.schedules,
+          instruction,
+        );
+      }
+    },
+  );
+  await sync(OPERATION_PERSONNEL_CHECKPOINTS[3], "syncPersonnelConfig", "readPersonnel", "personnel");
+  await sync(OPERATION_PERSONNEL_CHECKPOINTS[4], "syncPersonnelDates", "readDates", "dates");
+  await sync(
+    OPERATION_PERSONNEL_CHECKPOINTS[5],
+    "syncExamServiceRequirements",
+    "readRequirements",
+    "requirements",
+  );
+
+  const readAndVerifyTaskSheet = async () => assertTaskSheetReady(
+    target.taskSheet,
+    normalizeTaskSheet(await operationMethod(page, options, "readTaskSheet")(page, instruction)),
+  );
+  await runPersonnelCheckpoint({
+    name: OPERATION_PERSONNEL_CHECKPOINTS[6],
+    target: target.taskSheet,
+    action: () => operationMethod(page, options, "openTaskSheet")(page, instruction),
+    verify: readAndVerifyTaskSheet,
+    verifyCompleted: async () => {
+      await operationMethod(page, options, "openTaskSheet")(page, instruction);
+      return readAndVerifyTaskSheet();
+    },
+    instruction,
+    options,
+  });
+
+  const recipients = targetRecipients(target);
+  const readAndVerifyRecipients = async () => {
+    const actual = targetRecipients({
+      directoryMatch: await operationMethod(page, options, "readSelectedRecipients")(page, instruction),
+    });
+    return assertReadback("select_recipients", recipients, actual);
+  };
+  await runPersonnelCheckpoint({
+    name: OPERATION_PERSONNEL_CHECKPOINTS[7],
+    target: recipients,
+    action: () => operationMethod(page, options, "selectRecipients")(page, recipients, instruction),
+    verify: readAndVerifyRecipients,
+    verifyCompleted: readAndVerifyRecipients,
+    instruction,
+    options,
+  });
+
+  const submitTarget = { kind, recipients };
+  const attempt = await runPersonnelCheckpoint({
+    name: OPERATION_PERSONNEL_CHECKPOINTS[8],
+    target: submitTarget,
+    action: async () => {
+      const startedAt = new Date((options.now || Date.now)()).toISOString();
+      const value = { kind, startedAt };
+      await operationMethod(page, options, "confirmSend")(page, value, instruction);
+      return value;
+    },
+    verify: async (value) => value,
+    verifyCompleted: async (completed) => {
+      const value = completed.readback;
+      if (!value?.startedAt || value.kind !== kind) {
+        throw operationConflict("submit_send 已完成但缺少本次发送开始时间");
+      }
+      return value;
+    },
+    instruction,
+    options,
+  });
+
+  const readRecords = () => operationMethod(page, options, "readSendRecords")(page, instruction);
+  const verifyRecord = async () => {
+    const record = findAttemptSendRecord(await readRecords(), attempt);
+    if (!record) throw operationConflict("verify_send_record 已完成但发送记录无法回读");
+    return record;
+  };
+  const sendRecord = await runPersonnelCheckpoint({
+    name: OPERATION_PERSONNEL_CHECKPOINTS[9],
+    target: attempt,
+    action: async () => {
+      const first = await waitForNewSendRecord(readRecords, attempt, {
+        ...options,
+        phase: "initial",
+      });
+      if (first) return first;
+      await operationMethod(page, options, "closeTaskSheet")(page, instruction);
+      await operationMethod(page, options, "reopenTaskSheet")(page, instruction);
+      return waitForNewSendRecord(readRecords, attempt, {
+        ...options,
+        phase: "reopened",
+      });
+    },
+    verify: async (record) => record,
+    verifyCompleted: verifyRecord,
+    instruction,
+    options,
+  });
+
+  const finalRecords = normalizeSendRecords(await readRecords());
+  return {
+    status: sendRecord ? "sent" : "result_unknown",
+    sendRecord,
+    attemptStartedAt: attempt.startedAt,
+    completedAt: new Date((options.now || Date.now)()).toISOString(),
+    operationSnapshot: normalizeOperationPersonnelSnapshot({
+      ...target,
+      batch: snapshot.batch,
+      sendRecords: finalRecords,
+    }),
+  };
+}
+
+export async function runOperationPersonnelAttempt(instruction, options = {}) {
+  const userDataDir = text(options.userDataDir || process.env.OPERATION_CONSOLE_USER_DATA_DIR
+    || path.join(process.cwd(), ".easy_exam_runtime", "operation-console-profile"));
+  const context = options.context || await launchOperationBatchContext(userDataDir, false, options);
+  return runWithOperationBatchContext(
+    context,
+    (page) => runOperationPersonnelAttemptOnPage(page, instruction, options),
+  );
+}
+
+export async function runOperationPersonnelRecheck(instruction, options = {}) {
+  const userDataDir = text(options.userDataDir || process.env.OPERATION_CONSOLE_USER_DATA_DIR
+    || path.join(process.cwd(), ".easy_exam_runtime", "operation-console-profile"));
+  const context = options.context || await launchOperationBatchContext(userDataDir, false, options);
+  return runWithOperationBatchContext(context, async (page) => {
+    await locateOperationPersonnelBatch(page, instruction, options);
+    const records = normalizeSendRecords(
+      await operationMethod(page, options, "readSendRecords")(page, instruction),
+    );
+    const attempt = instruction.attempt || {
+      kind: instruction.kind === "resend" ? "resend" : "initial",
+      startedAt: instruction.attemptStartedAt,
+    };
+    const sendRecord = findAttemptSendRecord(records, attempt);
+    return {
+      status: sendRecord ? "sent" : "result_unknown",
+      sendRecord,
+      sendRecords: records,
+    };
+  });
 }
