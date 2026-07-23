@@ -781,6 +781,76 @@ test("inspection rejects a detail identity that differs from the selected batch"
   ), /批次详情身份不一致.*EZT260003.*EZT260004/);
 });
 
+test("test inspection ignores only project code and project name mismatches", async () => {
+  const snapshot = await inspectOperationPersonnelTask(
+    {},
+    {
+      environment: "test",
+      batch: {
+        code: "EZT260003",
+        projectCode: "F0012094",
+        projectName: "平台项目",
+        batchName: "目标批次",
+      },
+    },
+    inspectionReaders({
+      readBatch: async () => ({
+        code: "EZT260003",
+        projectCode: "4473-26",
+        projectName: "测试运控项目",
+        batchName: "目标批次",
+      }),
+    }),
+  );
+
+  assert.equal(snapshot.batch.code, "EZT260003");
+  assert.equal(snapshot.batch.projectCode, "4473-26");
+  assert.equal(snapshot.batch.projectName, "测试运控项目");
+});
+
+test("test inspection still rejects a batch name mismatch", async () => {
+  await assert.rejects(
+    () => inspectOperationPersonnelTask(
+      {},
+      {
+        environment: "test",
+        batch: { code: "EZT260003", batchName: "目标批次" },
+      },
+      inspectionReaders({
+        readBatch: async () => ({
+          code: "EZT260003",
+          batchName: "其它批次",
+        }),
+      }),
+    ),
+    /批次详情身份不一致.*batchName/,
+  );
+});
+
+test("production inspection rejects project identity mismatches", async () => {
+  await assert.rejects(
+    () => inspectOperationPersonnelTask(
+      {},
+      {
+        environment: "production",
+        batch: {
+          code: "EZT260003",
+          projectCode: "F0012094",
+          projectName: "平台项目",
+        },
+      },
+      inspectionReaders({
+        readBatch: async () => ({
+          code: "EZT260003",
+          projectCode: "4473-26",
+          projectName: "测试运控项目",
+        }),
+      }),
+    ),
+    /批次详情身份不一致.*projectCode.*projectName/,
+  );
+});
+
 test("missing DOM controls, tables, and task sections block inspection", async () => {
   const instruction = { environment: "test", batch: { code: "EZT260003" } };
   for (const [section, missing] of [

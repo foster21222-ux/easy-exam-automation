@@ -267,8 +267,17 @@ const BATCH_IDENTITY_FIELDS = [
   "systemType",
 ];
 
-function verifyBatchDetailIdentity(expected = {}, actual = {}) {
+const TEST_IGNORED_BATCH_IDENTITY_FIELDS = new Set([
+  "projectCode",
+  "projectName",
+]);
+
+function verifyBatchDetailIdentity(expected = {}, actual = {}, environment = "") {
   const conflicts = BATCH_IDENTITY_FIELDS
+    .filter((key) => !(
+      environment === "test"
+      && TEST_IGNORED_BATCH_IDENTITY_FIELDS.has(key)
+    ))
     .filter((key) => key === "code" || text(expected[key]))
     .filter((key) => text(expected[key]) !== text(actual[key]))
     .map((key) => `${key} 期望 ${text(expected[key]) || "空"}，实际 ${text(actual[key]) || "空"}`);
@@ -567,6 +576,7 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
   verifyBatchDetailIdentity(
     { ...(instruction.batch || {}), code: batchCode },
     batch,
+    text(instruction.environment),
   );
   const groups = await read("readDirectoryGroups", "directoryGroups", []);
   const environment = text(instruction.environment);
