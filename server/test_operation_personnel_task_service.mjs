@@ -821,6 +821,11 @@ test("changed resumable target gets a new attempt id and clears old checkpoints"
 
 test("queued attempt retains the exact previewed batch identity", async () => {
   const harness = serviceHarness();
+  harness.task.config.operationBatch.draft = {
+    fields: {
+      batchName: { value: "2026 秋季批次" },
+    },
+  };
   const inspected = inspectionFor(harness.task);
   inspected.batch.batchName = "2026 秋季批次";
   inspected.batch.projectDepartment = "交付一部";
