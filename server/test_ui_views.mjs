@@ -622,6 +622,288 @@ test("project and system views expose the selective PR 5 collaboration controls"
   assert.ok(html.includes('id="fanweiRequirementTable"'));
 });
 
+test("personnel operation panel exposes one confirmation and recovery controls", () => {
+  assert.ok(html.includes('id="operationPersonnelTaskState"'));
+  assert.ok(html.includes('id="operationPersonnelTaskActionBtn"'));
+  assert.ok(html.includes('id="operationPersonnelTaskRecheckBtn"'));
+  assert.ok(html.includes('id="operationPersonnelConfirmDialog"'));
+  assert.ok(html.includes('id="operationPersonnelProgress"'));
+  assert.equal(html.includes("人员任务接口待接入"), false);
+});
+
+test("personnel task labels and visible countdown follow server state", () => {
+  const operationPersonnelActionLabel = compileInlineFunction(
+    "      function operationPersonnelActionLabel(state = {}) {",
+    "\n      function operationPersonnelRemainingSeconds",
+  );
+  const operationPersonnelRemainingSeconds = compileInlineFunction(
+    "      function operationPersonnelRemainingSeconds(deadlineAt, now = Date.now()) {",
+    "\n      function operationPersonnelVerificationCopy",
+  );
+  const operationPersonnelVerificationCopy = compileInlineFunction(
+    "      function operationPersonnelVerificationCopy(attempt = {}) {",
+    "\n      function renderOperationPersonnelTaskState",
+    { operationPersonnelRemainingSeconds },
+  );
+
+  assert.equal(
+    operationPersonnelActionLabel({ status: "sent", canResend: false }),
+    "内容未变化，不允许重复发送",
+  );
+  assert.equal(
+    operationPersonnelActionLabel({ status: "changes_pending" }),
+    "检查变更并重新发送",
+  );
+  assert.equal(
+    operationPersonnelActionLabel({ status: "failed_resumable" }),
+    "继续未完成流程",
+  );
+  assert.equal(
+    operationPersonnelActionLabel({ status: "result_unknown" }),
+    "重新核对发送记录",
+  );
+  assert.equal(
+    operationPersonnelRemainingSeconds(
+      "2026-07-23T02:00:30.000Z",
+      Date.parse("2026-07-23T02:00:05.100Z"),
+    ),
+    25,
+  );
+  assert.equal(
+    operationPersonnelVerificationCopy({ verificationPhase: "initial", remainingSeconds: 24 }),
+    "正在等待运控发送记录（第一阶段），剩余 24 秒",
+  );
+  assert.equal(
+    operationPersonnelVerificationCopy({ verificationPhase: "reopened", remainingSeconds: 17 }),
+    "正在重新进入任务单核对发送记录（第二阶段），剩余 17 秒",
+  );
+});
+
+test("personnel confirmation keeps environment and recipients read only with one final send action", () => {
+  const dialog = html.slice(
+    html.indexOf('id="operationPersonnelConfirmDialog"'),
+    html.indexOf('id="sourceDetailModal"'),
+  );
+  assert.ok(dialog.includes('id="operationPersonnelConfirmContent"'));
+  assert.ok(dialog.includes('id="operationPersonnelConfirmSendBtn"'));
+  assert.equal((dialog.match(/确认配置并发送任务单/g) || []).length, 1);
+  assert.equal(dialog.includes('data-operation-personnel-environment-input'), false);
+  assert.equal(dialog.includes('data-operation-personnel-recipient-input'), false);
+
+  const renderer = sourceBetween(
+    "      function renderOperationPersonnelConfirmation(preview = {}) {",
+    "\n      function collectOperationPersonnelPreviewEdits",
+  );
+  for (const content of [
+    "运控环境",
+    "项目",
+    "批次",
+    "需求版本",
+    "阻断条件",
+    "本次将发布运控批次",
+    "运控修改前后",
+    "完整考试日程",
+    "人员配置",
+    "计算依据",
+    "固定收件人",
+    "固定抄送人",
+  ]) {
+    assert.ok(renderer.includes(content), `confirmation missing ${content}`);
+  }
+  for (const field of ["start", "end", "nameListDue", "monitorCount", "monitorRatio"]) {
+    assert.ok(renderer.includes(`data-operation-personnel-edit="${field}"`));
+  }
+  assert.ok(renderer.includes('data-operation-personnel-change-summary'));
+  assert.ok(renderer.includes('type="date"'));
+  assert.equal(renderer.includes('data-operation-personnel-edit="environment"'), false);
+  assert.equal(renderer.includes('data-operation-personnel-edit="recipients"'), false);
+});
+
+test("personnel send payload contains only the server preview binding and resend summary", () => {
+  const operationPersonnelSendPayload = compileInlineFunction(
+    "      function operationPersonnelSendPayload(preview = {}, changeSummary = \"\") {",
+    "\n      function operationPersonnelRequestIsCurrent",
+  );
+  assert.deepEqual(
+    operationPersonnelSendPayload({
+      previewToken: "token-a",
+      draftVersion: 7,
+      environment: "production",
+      state: { draft: { personnel: { monitorCount: 2 } } },
+    }, "新增下午场"),
+    {
+      previewToken: "token-a",
+      draftVersion: 7,
+      changeSummary: "新增下午场",
+    },
+  );
+});
+
+test("personnel state disables unchanged resend and only exposes recheck for unknown result", () => {
+  const operationPersonnelActionState = compileInlineFunction(
+    "      function operationPersonnelActionState(state = {}) {",
+    "\n      function operationPersonnelActionLabel",
+  );
+  assert.deepEqual(operationPersonnelActionState({ status: "sent" }), {
+    action: "preview",
+    disabled: true,
+    showRecheck: false,
+  });
+  assert.deepEqual(operationPersonnelActionState({ status: "result_unknown" }), {
+    action: "recheck",
+    disabled: true,
+    showRecheck: true,
+  });
+  assert.deepEqual(operationPersonnelActionState({ status: "failed_resumable" }), {
+    action: "preview",
+    disabled: false,
+    showRecheck: false,
+  });
+  assert.deepEqual(operationPersonnelActionState({
+    status: "applying_config",
+    activeAttempt: { status: "running" },
+  }), {
+    action: "preview",
+    disabled: true,
+    showRecheck: false,
+  });
+});
+
+test("personnel resend requires a reviewed change summary before calling send", () => {
+  const operationPersonnelSubmitError = compileInlineFunction(
+    "      function operationPersonnelSubmitError(preview = {}, changeSummary = \"\") {",
+    "\n      function invalidateOperationPersonnelRequests",
+  );
+  assert.equal(operationPersonnelSubmitError({
+    state: { lastSuccessfulFingerprint: "" },
+  }, ""), "");
+  assert.equal(operationPersonnelSubmitError({
+    state: { lastSuccessfulFingerprint: "sent-fingerprint" },
+  }, ""), "重新发送人员任务必须填写变化摘要");
+  assert.equal(operationPersonnelSubmitError({
+    state: { lastSuccessfulFingerprint: "sent-fingerprint" },
+  }, "新增下午场"), "");
+});
+
+test("stale personnel attempt response cannot render into a newly selected project", async () => {
+  const deferred = Promise.withResolvers();
+  const renders = [];
+  const taskViewState = {
+    currentProjectId: "project-a",
+    currentProject: { taskId: "project-a" },
+    operationPersonnelRequestToken: 3,
+    operationPersonnelPollTimer: null,
+  };
+  const pollOperationPersonnelAttempt = compileInlineFunction(
+    "      async function pollOperationPersonnelAttempt(taskId, attemptId, requestToken) {",
+    "\n      async function recheckOperationPersonnelTask",
+    {
+      taskViewState,
+      fetchJson: async () => deferred.promise,
+      operationPersonnelRequestIsCurrent: (taskId, token) => (
+        taskViewState.currentProjectId === taskId
+        && taskViewState.operationPersonnelRequestToken === token
+      ),
+      renderOperationPersonnelAttempt: (attempt) => renders.push(attempt.status),
+      loadOperationPersonnelTaskState: async () => {},
+      loadProjectOperationBatchDraft: async () => {},
+    },
+  );
+
+  const pending = pollOperationPersonnelAttempt("project-a", "attempt-a", 3);
+  taskViewState.currentProjectId = "project-b";
+  taskViewState.operationPersonnelRequestToken = 4;
+  deferred.resolve({ status: "sent", completed: true });
+  await pending;
+
+  assert.deepEqual(renders, []);
+});
+
+test("project switching invalidates personnel requests and clears their polling timer", () => {
+  const cleared = [];
+  const taskViewState = {
+    currentProjectId: "project-a",
+    operationPersonnelRequestToken: 8,
+    operationPersonnelPollTimer: 41,
+  };
+  const beginOperationPersonnelProjectRequest = compileInlineFunction(
+    "      function beginOperationPersonnelProjectRequest(projectId) {",
+    "\n      function operationPersonnelSendPayload",
+    {
+      taskViewState,
+      invalidateOperationPersonnelRequests: () => {
+        if (taskViewState.operationPersonnelPollTimer) cleared.push(taskViewState.operationPersonnelPollTimer);
+        taskViewState.operationPersonnelPollTimer = null;
+        taskViewState.operationPersonnelRequestToken += 1;
+        return taskViewState.operationPersonnelRequestToken;
+      },
+    },
+  );
+
+  const token = beginOperationPersonnelProjectRequest("project-b");
+  assert.equal(token, 9);
+  assert.equal(taskViewState.currentProjectId, "project-b");
+  assert.equal(taskViewState.operationPersonnelPollTimer, null);
+  assert.deepEqual(cleared, [41]);
+});
+
+test("each personnel preview invalidates older responses from the same project", () => {
+  const taskViewState = {
+    currentProjectId: "project-a",
+    operationPersonnelRequestToken: 9,
+    operationPersonnelPollTimer: null,
+  };
+  const invalidateOperationPersonnelRequests = compileInlineFunction(
+    "      function invalidateOperationPersonnelRequests() {",
+    "\n      function beginOperationPersonnelProjectRequest",
+    { taskViewState, clearTimeout: () => {} },
+  );
+  assert.equal(invalidateOperationPersonnelRequests(), 10);
+  assert.equal(invalidateOperationPersonnelRequests(), 11);
+  assert.equal(taskViewState.currentProjectId, "project-a");
+});
+
+test("personnel UI reads server remainingSeconds instead of deriving poll countdown locally", () => {
+  const attemptRenderer = sourceBetween(
+    "      function renderOperationPersonnelAttempt(attempt = {}) {",
+    "\n      async function pollOperationPersonnelAttempt",
+  );
+  assert.ok(attemptRenderer.includes("operationPersonnelVerificationCopy(attempt)"));
+  assert.ok(attemptRenderer.includes("attempt.remainingSeconds"));
+  assert.ok(attemptRenderer.includes('attempt.status === "sent" ? "人员任务单发送成功"'));
+  assert.equal(attemptRenderer.includes("deadlineAt"), false);
+  const poller = sourceBetween(
+    "      async function pollOperationPersonnelAttempt(taskId, attemptId, requestToken) {",
+    "\n      async function recheckOperationPersonnelTask",
+  );
+  assert.ok(poller.includes("operationPersonnelRequestIsCurrent(taskId, requestToken)"));
+});
+
+test("personnel UI connects the five service APIs without an environment override", () => {
+  for (const suffix of [
+    "operation-personnel-task?_=",
+    "operation-personnel-task/preview",
+    "operation-personnel-task/send",
+    "operation-personnel-task/attempts/",
+    "operation-personnel-task/recheck",
+  ]) {
+    assert.ok(html.includes(suffix), `missing personnel endpoint ${suffix}`);
+  }
+  const preview = sourceBetween(
+    "      async function previewOperationPersonnelTask(edits = {}) {",
+    "\n      async function refreshOperationPersonnelPreviewFromDialog",
+  );
+  const send = sourceBetween(
+    "      async function sendOperationPersonnelTask() {",
+    "\n      function renderOperationPersonnelAttempt",
+  );
+  assert.ok(preview.includes("invalidateOperationPersonnelRequests()"));
+  assert.ok(preview.includes("operationPersonnelRequestIsCurrent(taskId, requestToken)"));
+  assert.ok(send.includes("operationPersonnelSendPayload(preview, changeSummary)"));
+  assert.ok(send.includes("operationPersonnelSubmitError(preview, changeSummary)"));
+  assert.equal(send.includes("environment:"), false);
+});
+
 test("requirement edit payload includes only dirty fields and preserves intentional clears", () => {
   assert.ok(html.includes("data-requirement-edit-original="));
   assert.ok(html.includes('input.dataset.requirementEditDirty = "true"'));
@@ -685,12 +967,19 @@ test("project detail loads ignore stale project responses", async () => {
     loadProjectOperationBatchDraft: async (task) => {
       loadedPanels.push(`draft:${task.taskId}`);
     },
+    loadOperationPersonnelTaskState: async (task) => loadedPanels.push(`personnel:${task.taskId}`),
     loadProjectRequirementForDetail: async (task) => loadedPanels.push(`requirement:${task.taskId}`),
     loadProjectWechatBinding: async (task = taskViewState.currentProject) => loadedPanels.push(`wechat:${task.taskId}`),
+    beginOperationPersonnelProjectRequest: (projectId) => {
+      taskViewState.currentProjectId = projectId;
+      taskViewState.operationPersonnelRequestToken = Number(taskViewState.operationPersonnelRequestToken || 0) + 1;
+      return taskViewState.operationPersonnelRequestToken;
+    },
     isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
     setProjectOverviewExpanded: () => {},
     setProjectActionControlsDisabled: () => {},
     projectOperationBatchState: panelState(),
+    operationPersonnelTaskState: panelState(),
     projectRequirementInlineState: panelState(),
     projectWechatBindingState: panelState(),
   };
@@ -706,7 +995,7 @@ test("project detail loads ignore stale project responses", async () => {
   await loadA;
 
   assert.deepEqual(rendered, ["project-b"]);
-  assert.deepEqual(loadedPanels.sort(), ["draft:project-b", "requirement:project-b", "wechat:project-b"]);
+  assert.deepEqual(loadedPanels.sort(), ["draft:project-b", "personnel:project-b", "requirement:project-b", "wechat:project-b"]);
 });
 
 test("project detail follow-up panel failures are isolated", async () => {
@@ -724,12 +1013,19 @@ test("project detail follow-up panel failures are isolated", async () => {
       loadedPanels.push(`draft:${task.taskId}`);
       throw new Error("draft unavailable");
     },
+    loadOperationPersonnelTaskState: async (task) => loadedPanels.push(`personnel:${task.taskId}`),
     loadProjectRequirementForDetail: async (task) => loadedPanels.push(`requirement:${task.taskId}`),
     loadProjectWechatBinding: async (task = taskViewState.currentProject) => loadedPanels.push(`wechat:${task.taskId}`),
+    beginOperationPersonnelProjectRequest: (projectId) => {
+      taskViewState.currentProjectId = projectId;
+      taskViewState.operationPersonnelRequestToken = Number(taskViewState.operationPersonnelRequestToken || 0) + 1;
+      return taskViewState.operationPersonnelRequestToken;
+    },
     isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
     setProjectOverviewExpanded: () => {},
     setProjectActionControlsDisabled: () => {},
     projectOperationBatchState: panelState(),
+    operationPersonnelTaskState: panelState(),
     projectRequirementInlineState: panelState(),
     projectWechatBindingState: panelState(),
   };
@@ -741,7 +1037,7 @@ test("project detail follow-up panel failures are isolated", async () => {
 
   await assert.doesNotReject(loadProjectDetail("project-b"));
 
-  assert.deepEqual(loadedPanels.sort(), ["draft:project-b", "requirement:project-b", "wechat:project-b"]);
+  assert.deepEqual(loadedPanels.sort(), ["draft:project-b", "personnel:project-b", "requirement:project-b", "wechat:project-b"]);
   assert.equal(dependencies.projectOperationBatchState.textContent, "无法加载运营批次参数：draft unavailable");
 });
 
@@ -805,6 +1101,7 @@ test("project navigation clears stale state and disables actions until current r
     currentProjectId: "project-a",
     currentProject: { taskId: "project-a" },
     currentProjectWorkflow: { steps: { batch: { status: "ready" } } },
+    operationPersonnelRequestToken: 0,
   };
   const dependencies = {
     taskViewState,
@@ -816,10 +1113,17 @@ test("project navigation clears stale state and disables actions until current r
       taskViewState.currentProject = task;
       dependencies.setProjectActionControlsDisabled(false);
     },
+    beginOperationPersonnelProjectRequest: (projectId) => {
+      taskViewState.currentProjectId = projectId;
+      taskViewState.operationPersonnelRequestToken += 1;
+      return taskViewState.operationPersonnelRequestToken;
+    },
     loadProjectOperationBatchDraft: async () => {},
+    loadOperationPersonnelTaskState: async () => {},
     loadProjectRequirementForDetail: async () => {},
     loadProjectWechatBinding: async () => {},
     projectOperationBatchState: { textContent: "" },
+    operationPersonnelTaskState: { textContent: "" },
     projectRequirementInlineState: { textContent: "" },
     projectWechatBindingState: { textContent: "" },
   };
@@ -852,6 +1156,8 @@ test("project navigation clears stale state and disables actions until current r
     "operationBatchCreateBtn",
     "operationBatchReconcileBtn",
     "operationBatchRecordBtn",
+    "operationPersonnelTaskActionBtn",
+    "operationPersonnelTaskRecheckBtn",
     "contentRequirementEmailSendBtn",
     "projectWechatBindingRefreshBtn",
     "projectWechatBindingSaveBtn",
@@ -866,6 +1172,7 @@ test("operation batch automation lock survives A to B to A navigation", async ()
     currentProject: { taskId: "project-a" },
     currentProjectWorkflow: null,
     operationBatchAutomationTaskIds: new Set(["project-a"]),
+    operationPersonnelRequestToken: 0,
   };
   const dependencies = {
     taskViewState,
@@ -874,10 +1181,17 @@ test("operation batch automation lock survives A to B to A navigation", async ()
     setProjectOverviewExpanded: () => {},
     setProjectActionControlsDisabled: () => {},
     renderProjectDetail: (task) => { taskViewState.currentProject = task; },
+    beginOperationPersonnelProjectRequest: (projectId) => {
+      taskViewState.currentProjectId = projectId;
+      taskViewState.operationPersonnelRequestToken += 1;
+      return taskViewState.operationPersonnelRequestToken;
+    },
     loadProjectOperationBatchDraft: async () => {},
+    loadOperationPersonnelTaskState: async () => {},
     loadProjectRequirementForDetail: async () => {},
     loadProjectWechatBinding: async () => {},
     projectOperationBatchState: { textContent: "" },
+    operationPersonnelTaskState: { textContent: "" },
     projectRequirementInlineState: { textContent: "" },
     projectWechatBindingState: { textContent: "" },
   };
