@@ -170,7 +170,12 @@ export function buildOperationPersonnelTaskDraft(task = {}, options = {}) {
   const formalSchedules = schedules.filter((item) => item.sessionType === "formal");
   const peak = simultaneousCandidatePeak((Array.isArray(task.sessions) ? task.sessions : [])
     .filter((session) => text(session.sessionType || "formal") === "formal"));
-  const estimated = Number(task.config?.operationBatch?.estimatedMaxSubjectCount || task.config?.estimatedMaxSubjectCount || 0);
+  const estimated = Number(
+    task.config?.operationBatch?.estimatedMaxSubjectCount
+    || task.config?.operationBatch?.draft?.fields?.estimatedMaxSubjectCount?.value
+    || task.config?.estimatedMaxSubjectCount
+    || 0,
+  );
   const candidateBasis = peak || (estimated > 0 ? estimated : "");
   if (!candidateBasis) warnings.push({ code: "MONITOR_COUNT_REQUIRED" });
   const earliestStart = formalSchedules.map((item) => item.start).sort((left, right) => dateValue(left) - dateValue(right))[0] || "";

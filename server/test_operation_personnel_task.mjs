@@ -98,6 +98,23 @@ test("uses simultaneous actual candidate peak before estimated concurrency", () 
   assert.equal(draft.personnel.monitorRatio, "1:50");
 });
 
+test("uses the persisted operation batch draft estimate when actual candidate counts are unavailable", () => {
+  const task = structuredClone(baseTask);
+  task.sessions = [];
+  task.config.operationBatch.draft = {
+    fields: {
+      estimatedMaxSubjectCount: { value: "4000" },
+    },
+  };
+  const draft = buildOperationPersonnelTaskDraft(task, {
+    environment: "test",
+    now: "2026-07-23T02:00:00.000Z",
+  });
+  assert.equal(draft.personnel.candidateBasis, 4000);
+  assert.equal(draft.personnel.monitorCount, 80);
+  assert.ok(!draft.warnings.some((item) => item.code === "MONITOR_COUNT_REQUIRED"));
+});
+
 test("does not prefill invalid past personnel dates", () => {
   const draft = buildOperationPersonnelTaskDraft(baseTask, {
     environment: "test",
