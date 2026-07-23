@@ -516,6 +516,62 @@ test("invalid edited dates and monitor count keep their resolvable warnings", as
   );
 });
 
+test("monitor count accepts only positive integer numbers or digit strings", async () => {
+  for (const [value, expected] of [[2, 2], ["3", 3]]) {
+    const harness = serviceHarness();
+    const preview = await harness.service.preview("task-a", owner(), { monitorCount: value });
+    assert.equal(preview.state.draft.personnel.monitorCount, expected);
+    assert.equal(
+      preview.state.draft.warnings.some((item) => item.code === "MONITOR_COUNT_REQUIRED"),
+      false,
+    );
+  }
+
+  for (const value of [1.5, "1.5", 0, -1, true, [1], { value: 1 }, "", " "]) {
+    const harness = serviceHarness();
+    const preview = await harness.service.preview("task-a", owner(), { monitorCount: value });
+    assert.equal(
+      preview.state.draft.warnings.some((item) => item.code === "MONITOR_COUNT_REQUIRED"),
+      true,
+      `monitorCount=${JSON.stringify(value)}`,
+    );
+  }
+});
+
+test("monitor ratio requires a positive integer ratio and keeps one stable warning", async () => {
+  for (const value of ["1:50", "2:75"]) {
+    const harness = serviceHarness();
+    const preview = await harness.service.preview("task-a", owner(), {
+      personnel: { monitorRatio: value },
+    });
+    assert.equal(preview.state.draft.personnel.monitorRatio, value);
+    assert.equal(
+      preview.state.draft.warnings.some((item) => item.code === "MONITOR_RATIO_REQUIRED"),
+      false,
+    );
+  }
+
+  for (const value of ["", " ", "abc", "0:50", "1:0", "1.5:50", true, ["1:50"], { ratio: "1:50" }]) {
+    const harness = serviceHarness();
+    const first = await harness.service.preview("task-a", owner(), {
+      personnel: { monitorRatio: value },
+    });
+    assert.equal(
+      first.state.draft.warnings.filter((item) => item.code === "MONITOR_RATIO_REQUIRED").length,
+      1,
+      `monitorRatio=${JSON.stringify(value)}`,
+    );
+    const second = await harness.service.preview("task-a", owner(), {
+      personnel: { monitorRatio: value },
+    });
+    assert.equal(
+      second.state.draft.warnings.filter((item) => item.code === "MONITOR_RATIO_REQUIRED").length,
+      1,
+      `repeat monitorRatio=${JSON.stringify(value)}`,
+    );
+  }
+});
+
 test("preview returns actual operation to target changes separately from draft edits", async () => {
   const harness = serviceHarness();
   const preview = await harness.service.preview("task-a", owner(), {

@@ -158,6 +158,19 @@ function targetFromDraft(draft = {}, snapshot = {}) {
 function editableDraft(base, input = {}) {
   const draft = structuredClone(base);
   const changes = [];
+  const positiveIntegerValue = (value) => {
+    if (typeof value === "number") {
+      return Number.isSafeInteger(value) && value > 0 ? value : null;
+    }
+    if (typeof value !== "string" || !/^[1-9]\d*$/.test(value.trim())) return null;
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  };
+  const monitorRatioValue = (value) => (
+    typeof value === "string" && /^[1-9]\d*:[1-9]\d*$/.test(value.trim())
+      ? value.trim()
+      : null
+  );
   const set = (path, value) => {
     const keys = path.split(".");
     let owner = draft;
@@ -171,14 +184,14 @@ function editableDraft(base, input = {}) {
   for (const key of ["start", "end", "nameListDue"]) {
     if (Object.hasOwn(dates, key)) set(`dates.${key}`, text(dates[key]));
   }
-  const personnel = input.draft?.personnel || input.personnel || {};
+  const personnel = { ...(input.draft?.personnel || input.personnel || {}) };
   if (Object.hasOwn(input, "monitorCount")) personnel.monitorCount = input.monitorCount;
   if (Object.hasOwn(input, "monitorRatio")) personnel.monitorRatio = input.monitorRatio;
   if (Object.hasOwn(personnel, "monitorCount")) {
-    set("personnel.monitorCount", Number(personnel.monitorCount) || text(personnel.monitorCount));
+    set("personnel.monitorCount", positiveIntegerValue(personnel.monitorCount) ?? "");
   }
   if (Object.hasOwn(personnel, "monitorRatio")) {
-    set("personnel.monitorRatio", text(personnel.monitorRatio));
+    set("personnel.monitorRatio", monitorRatioValue(personnel.monitorRatio) ?? "");
   }
   const validIsoDate = (value) => {
     const match = text(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -190,11 +203,12 @@ function editableDraft(base, input = {}) {
   };
   const datesValid = ["start", "end", "nameListDue"].every((key) => validIsoDate(draft.dates?.[key]))
     && draft.dates.start <= draft.dates.end;
-  const monitorCountValid = Number.isFinite(Number(draft.personnel?.monitorCount))
-    && Number(draft.personnel.monitorCount) > 0;
+  const monitorCountValid = positiveIntegerValue(draft.personnel?.monitorCount) !== null;
+  const monitorRatioValid = monitorRatioValue(draft.personnel?.monitorRatio) !== null;
   const resolvable = new Map([
     ["PERSONNEL_DATES_REQUIRED", datesValid],
     ["MONITOR_COUNT_REQUIRED", monitorCountValid],
+    ["MONITOR_RATIO_REQUIRED", monitorRatioValid],
   ]);
   const warnings = (draft.warnings || []).filter(
     (item) => !(resolvable.has(item.code) && resolvable.get(item.code)),

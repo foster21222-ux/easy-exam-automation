@@ -738,7 +738,7 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
       safeText: (value) => String(value ?? ""),
     },
   );
-  renderOperationPersonnelConfirmation({
+  const previewDto = {
     previewToken: "preview-a",
     operationChanges: [{
       path: "dates.start",
@@ -777,7 +777,8 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
       },
       lastSuccessfulFingerprint: "",
     },
-  });
+  };
+  renderOperationPersonnelConfirmation(previewDto);
   assert.match(operationPersonnelConfirmContent.innerHTML, /真实运控批次/);
   assert.match(operationPersonnelConfirmContent.innerHTML, />7</);
   assert.match(operationPersonnelConfirmContent.innerHTML, /计算依据：81/);
@@ -785,6 +786,9 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
   assert.match(operationPersonnelConfirmContent.innerHTML, /TARGET_DATE/);
   assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /DRAFT_OLD|DRAFT_NEW/);
   assert.equal(operationPersonnelConfirmSendBtn.disabled, false);
+  previewDto.state.draft.warnings = [{ code: "MONITOR_RATIO_REQUIRED" }];
+  renderOperationPersonnelConfirmation(previewDto);
+  assert.equal(operationPersonnelConfirmSendBtn.disabled, true);
 });
 
 test("personnel send payload contains only the server preview binding and resend summary", () => {
