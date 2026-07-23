@@ -567,7 +567,7 @@ function reconciliationRequiredError(error) {
   return wrapped;
 }
 
-async function launchOperationBatchContext(userDataDir, headless, options = {}) {
+export async function launchOperationBatchContext(userDataDir, headless, options = {}) {
   if (typeof options.launchPersistentContext === "function") {
     return options.launchPersistentContext(userDataDir, { headless, viewport: null });
   }

@@ -21,8 +21,17 @@ export function createOperationBatchCoordinator(options = {}) {
     return once(() => releaseLock(taskInFlight, taskId));
   }
 
-  function acquireAutomation(taskId) {
+  function acquireProfileLock() {
+    if (profileInFlight.has(profileKey)) {
+      const conflict = new Error("运营控制台浏览器自动化正在执行，请稍后重试");
+      conflict.status = 409;
+      throw conflict;
+    }
     acquireLock(profileInFlight, profileKey);
+  }
+
+  function acquireAutomation(taskId) {
+    acquireProfileLock();
     let releaseTask;
     try {
       releaseTask = acquireTask(taskId);
@@ -36,7 +45,12 @@ export function createOperationBatchCoordinator(options = {}) {
     });
   }
 
-  return { acquireAutomation, acquireTask };
+  function acquireProfile() {
+    acquireProfileLock();
+    return once(() => releaseLock(profileInFlight, profileKey));
+  }
+
+  return { acquireAutomation, acquireProfile, acquireTask };
 }
 
 export async function withFreshOperationBatchTask(options = {}) {

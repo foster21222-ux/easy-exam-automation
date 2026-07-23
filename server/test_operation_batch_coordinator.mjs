@@ -52,6 +52,16 @@ test("automation locks profile then task and releases task then profile", () => 
   ]);
 });
 
+test("profile-only lock excludes batch and personnel browser sessions", () => {
+  const events = [];
+  const { value } = coordinator(events);
+  const release = value.acquireProfile();
+  assert.deepEqual(events, ["acquire:persistent-profile"]);
+  assert.throws(() => value.acquireAutomation("task-a"), /正在执行/);
+  release();
+  assert.deepEqual(events, ["acquire:persistent-profile", "release:persistent-profile"]);
+});
+
 test("task lock failure immediately releases the profile lock", () => {
   const events = [];
   const { profileInFlight, taskInFlight, value } = coordinator(events);
