@@ -142,6 +142,18 @@ test("workflow exposes the stable personnel-task status and actions", () => {
   assert.deepEqual(workflow.steps.personnel.actions, []);
 });
 
+test("workflow keeps no-personnel arrangements skipped", () => {
+  const config = buildFanweiProjectConfig({ fanwei, model, parsed: { config: {} } });
+  config.businessRequirement.ata_invigilator_arrangement = "不需要安排人工监考";
+
+  const workflow = buildProjectWorkflow({
+    config: { ...config, operationBatchCode: "EZT260003" },
+    sessions: [],
+  }, { warnings: [] });
+
+  assert.deepEqual(workflow.steps.personnel, { status: "skipped", actions: [] });
+});
+
 test("workflow does not mark an unresolved external batch as creatable", () => {
   const workflow = buildProjectWorkflow({
     config: { operationBatch: { status: "reconciliation_required" } },

@@ -11,6 +11,10 @@ function text(value) {
   return String(value ?? "").trim();
 }
 
+function confirmedTruthy(value) {
+  return value === true || ["是", "需要", "true", "1"].includes(text(value).toLowerCase());
+}
+
 function taskRequirements(task) {
   const items = task.config?.examRequirements;
   return Array.isArray(items) && items.length
@@ -143,8 +147,8 @@ function unsupported(task) {
   const business = task.config?.businessRequirement || {};
   const service = text(business.ata_invigilator_arrangement);
   return !service.includes("分散人工监考")
-    || business.highEndSupplementRequired === true
-    || business.high_end_supplement_required === true;
+    || confirmedTruthy(business.highEndSupplementRequired)
+    || confirmedTruthy(business.high_end_supplement_required);
 }
 
 function sourceVersion(task) {
@@ -209,11 +213,18 @@ export function buildOperationPersonnelTaskDraft(task = {}, options = {}) {
 
 export function operationPersonnelTaskFingerprint(draft) {
   const material = {
+    environment: draft.environment,
     batch: draft.batch,
     schedules: draft.schedules,
     personnel: draft.personnel,
     dates: draft.dates,
-    recipientsRuleVersion: draft.recipients.ruleVersion,
+    recipients: {
+      ruleVersion: draft.recipients.ruleVersion,
+      toGroup: draft.recipients.toGroup,
+      toNames: draft.recipients.toNames,
+      ccGroup: draft.recipients.ccGroup,
+      ccCount: draft.recipients.ccCount,
+    },
   };
   return createHash("sha256").update(stableJson(material)).digest("hex");
 }
@@ -259,6 +270,7 @@ export function buildOperationPersonnelTaskStatus(task = {}, draft = {}) {
   const state = task.config?.operationPersonnelTask || {};
   const persistent = text(state.status);
   const actions = (id, label) => [{ id, label }];
+  if ((draft.warnings || []).some((item) => item.code === "INVALID_RECIPIENT_ENVIRONMENT")) return { status: "unsupported", actions: [] };
   if (["operation_conflict", "result_unknown", "failed_resumable"].includes(persistent)) {
     return {
       status: persistent,

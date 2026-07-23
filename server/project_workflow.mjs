@@ -201,6 +201,7 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
   const hasBatchCode = operationBatchCodeIsValid(batchCode);
   const personnelDraft = buildOperationPersonnelTaskDraft(task);
   const personnelStatus = buildOperationPersonnelTaskStatus(task, personnelDraft);
+  const personnelNotRequired = text(business.ata_invigilator_arrangement).includes("不需要");
   const archiveDraft = buildOperationArchiveDraft(task);
   const contentReady = examRequirements.length > 0 && examRequirements.every((requirement) => Boolean(requirement.fields?.["考试名称"] && requirement.fields?.["考试日期时间"]));
   const hasActualSession = (task.sessions || []).some((session) => text(session.session_id));
@@ -219,7 +220,7 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
             : (batchDraft?.warnings?.length ? "needs_review" : "ready"),
         code: batchCode,
       },
-      personnel: { status: personnelStatus.status, actions: personnelStatus.actions },
+      personnel: personnelNotRequired ? { status: "skipped", actions: [] } : { status: personnelStatus.status, actions: personnelStatus.actions },
       content: { status: hasBatchCode ? (contentReady ? "ready" : "needs_review") : "waiting_batch" },
       archive: { status: hasBatchCode && hasActualSession ? (archiveDraft.warnings.length ? "needs_review" : "ready") : "waiting_execution" },
     },

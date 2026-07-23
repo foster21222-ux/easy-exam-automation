@@ -158,3 +158,30 @@ test("keeps an explicitly persisted sent status non-repeatable", () => {
   task.config.operationPersonnelTask = { status: "sent" };
   assert.deepEqual(buildOperationPersonnelTaskStatus(task, draft), { status: "sent", actions: [] });
 });
+
+test("blocks every confirmed high-end supplement indication", () => {
+  for (const field of ["highEndSupplementRequired", "high_end_supplement_required"]) {
+    for (const value of [true, "是", "需要", "true", "1"]) {
+      const task = structuredClone(baseTask);
+      task.config.businessRequirement[field] = value;
+      const draft = buildOperationPersonnelTaskDraft(task, { environment: "test", now: "2026-07-23T02:00:00.000Z" });
+      assert.ok(draft.warnings.some((item) => item.code === "UNSUPPORTED_PERSONNEL_TASK"), `${field}=${value}`);
+      assert.deepEqual(buildOperationPersonnelTaskStatus(task, draft), { status: "unsupported", actions: [] }, `${field}=${value}`);
+    }
+  }
+});
+
+test("fingerprint separates trusted environments but excludes source versions", () => {
+  const testDraft = buildOperationPersonnelTaskDraft(baseTask, { environment: "test", now: "2026-07-23T02:00:00.000Z" });
+  const productionDraft = buildOperationPersonnelTaskDraft(baseTask, { environment: "production", now: "2026-07-23T02:00:00.000Z" });
+  const changedSourceVersion = structuredClone(testDraft);
+  changedSourceVersion.sourceVersion.requirements[0].version += 1;
+  assert.notEqual(operationPersonnelTaskFingerprint(testDraft), operationPersonnelTaskFingerprint(productionDraft));
+  assert.equal(operationPersonnelTaskFingerprint(testDraft), operationPersonnelTaskFingerprint(changedSourceVersion));
+});
+
+test("unknown trusted environment blocks without a preview action", () => {
+  const draft = buildOperationPersonnelTaskDraft(baseTask, { environment: "preview", now: "2026-07-23T02:00:00.000Z" });
+  assert.ok(draft.warnings.some((item) => item.code === "INVALID_RECIPIENT_ENVIRONMENT"));
+  assert.deepEqual(buildOperationPersonnelTaskStatus(baseTask, draft), { status: "unsupported", actions: [] });
+});
