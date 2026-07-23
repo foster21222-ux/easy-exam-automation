@@ -278,6 +278,54 @@ test("initial conflicts project only expected fields from a normalized actual sn
   ), []);
 });
 
+test("initial conflicts reject an extra actual schedule by stable code membership", () => {
+  const conflicts = operationPersonnelConflicts(
+    { schedules: [{ scheduleCode: 1, start: "2026-08-22 10:00" }] },
+    {
+      schedules: [
+        { scheduleCode: 1, start: "2026-08-22 10:00" },
+        { scheduleCode: 2, start: "2026-08-23 10:00" },
+      ],
+    },
+    "initial",
+  );
+  assert.deepEqual(conflicts.map((item) => item.path), ["schedules.2"]);
+});
+
+test("initial conflicts reject actual-only non-empty target configuration", () => {
+  assert.deepEqual(operationPersonnelConflicts(
+    { personnel: {} },
+    { personnel: { platform: "其他平台", trialIncluded: false } },
+    "initial",
+  ).map((item) => item.path), ["personnel.platform"]);
+  assert.deepEqual(operationPersonnelConflicts(
+    { dates: {} },
+    { dates: { start: "2026-07-23" } },
+    "initial",
+  ).map((item) => item.path), ["dates.start"]);
+  assert.deepEqual(operationPersonnelConflicts(
+    { requirements: [] },
+    { requirements: [{ name: "在线监考", value: "需要" }] },
+    "initial",
+  ).map((item) => item.path), ["requirements.0"]);
+});
+
+test("initial conflicts ignore observational actual-only records and unrelated batch fields", () => {
+  const actual = normalizeOperationPersonnelSnapshot({
+    batch: {
+      code: "EZT260003",
+      projectCode: "P001",
+      projectName: "不参与本次局部比较",
+    },
+    sendRecords: [{ type: "首次发送", sentAt: "2026-07-23 11:00" }],
+  });
+  assert.deepEqual(operationPersonnelConflicts(
+    { batch: { projectCode: "P001" } },
+    actual,
+    "initial",
+  ), []);
+});
+
 test("resend blocks any drift from the last successful operation snapshot", () => {
   const conflicts = operationPersonnelConflicts(
     { schedules: [{ scheduleCode: 1, start: "2026-08-22 10:00" }] },

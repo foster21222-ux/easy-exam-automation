@@ -484,16 +484,69 @@ function empty(value) {
   return value === undefined || value === null || value === "";
 }
 
+const INITIAL_TARGET_ROOTS = new Set(["schedules", "personnel", "dates", "requirements"]);
+
+function pathRoot(fieldPath) {
+  return text(fieldPath).split(".")[0];
+}
+
+function configured(value) {
+  return !empty(value) && value !== false;
+}
+
+function membershipMap(root, value = {}) {
+  if (root === "schedules") {
+    return new Map((value.schedules || []).map((item) => [
+      text(numberOrText(item.scheduleCode)),
+      item,
+    ]));
+  }
+  return new Map((value.requirements || []).map((item, index) => [String(index), item]));
+}
+
+function membershipConflicts(expected, actual, mode) {
+  const conflicts = [];
+  for (const root of ["schedules", "requirements"]) {
+    const expectedItems = membershipMap(root, expected);
+    const actualItems = membershipMap(root, actual);
+    const keys = mode === "initial"
+      ? [...actualItems.keys()].filter((key) => !expectedItems.has(key))
+      : [...new Set([...expectedItems.keys(), ...actualItems.keys()])]
+        .filter((key) => !expectedItems.has(key) || !actualItems.has(key));
+    for (const key of keys) {
+      conflicts.push({
+        path: `${root}.${key}`,
+        expected: expectedItems.get(key) ?? "",
+        actual: actualItems.get(key) ?? "",
+      });
+    }
+  }
+  return conflicts;
+}
+
 export function operationPersonnelConflicts(expected = {}, actual = {}, mode = "initial") {
   if (!["initial", "resend"].includes(mode)) throw new Error(`未知人员任务冲突模式：${mode}`);
   assertScheduleCodes(expected.schedules || []);
   assertScheduleCodes(actual.schedules || []);
   const expectedFields = flatten(expected);
   const actualFields = flatten(actual);
+  const memberships = membershipConflicts(expected, actual, mode);
+  const membershipPaths = new Set(memberships.map((item) => item.path));
+  const hidesMembershipChild = (fieldPath) => [...membershipPaths]
+    .some((membershipPath) => fieldPath.startsWith(`${membershipPath}.`));
   const paths = mode === "initial"
-    ? [...expectedFields.keys()].sort()
-    : [...new Set([...expectedFields.keys(), ...actualFields.keys()])].sort();
-  return paths.flatMap((fieldPath) => {
+    ? [...new Set([
+      ...[...expectedFields.keys()].filter((fieldPath) => (
+        pathRoot(fieldPath) === "batch" || INITIAL_TARGET_ROOTS.has(pathRoot(fieldPath))
+      )),
+      ...[...actualFields].filter(([fieldPath, value]) => (
+        INITIAL_TARGET_ROOTS.has(pathRoot(fieldPath)) && configured(value)
+      )).map(([fieldPath]) => fieldPath),
+    ])].filter((fieldPath) => !hidesMembershipChild(fieldPath)).sort()
+    : [...new Set([...expectedFields.keys(), ...actualFields.keys()])]
+      .filter((fieldPath) => !hidesMembershipChild(fieldPath))
+      .sort();
+  const fieldConflicts = paths.flatMap((fieldPath) => {
     const expectedValue = expectedFields.get(fieldPath);
     const actualValue = actualFields.get(fieldPath);
     if (sameValue(expectedValue, actualValue)) return [];
@@ -501,6 +554,7 @@ export function operationPersonnelConflicts(expected = {}, actual = {}, mode = "
     if (mode === "initial" && !batchIdentity && empty(actualValue)) return [];
     return [{ path: fieldPath, expected: expectedValue ?? "", actual: actualValue ?? "" }];
   });
+  return [...memberships, ...fieldConflicts].sort((left, right) => left.path.localeCompare(right.path));
 }
 
 export async function runOperationPersonnelInspection(instruction, options = {}) {
