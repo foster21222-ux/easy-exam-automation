@@ -133,7 +133,7 @@ test("workflow exposes the stable personnel-task status and actions", () => {
     },
   });
   const task = { config: { ...config, operationBatchCode: "EZT260003" }, sessions: [] };
-  const draft = buildOperationPersonnelTaskDraft(task, { now: "2026-07-23T02:00:00.000Z" });
+  const draft = buildOperationPersonnelTaskDraft(task);
   task.config.operationPersonnelTask = { lastSuccessfulFingerprint: operationPersonnelTaskFingerprint(draft) };
 
   const workflow = buildProjectWorkflow(task, { warnings: [] });
