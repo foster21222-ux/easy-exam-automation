@@ -485,7 +485,7 @@ export async function operationBatchListSnapshot(page) {
 
 async function waitForStableOperationBatchRows(page, options = {}) {
   const stablePollMs = Math.max(0, Number(options.tableStablePollMs ?? 100));
-  const maxChecks = Math.max(2, Number(options.tableStableMaxChecks || 10));
+  const maxChecks = Math.max(2, Number(options.tableStableMaxChecks || 50));
   let previousSignature = "";
   for (let attempt = 0; attempt < maxChecks; attempt += 1) {
     const snapshot = await operationBatchListSnapshot(page);

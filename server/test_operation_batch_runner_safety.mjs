@@ -121,7 +121,7 @@ test("batch list snapshot blocks ambiguous or malformed card identity", async ()
   }
 });
 
-test("table action waits through the current card list empty render frame", async () => {
+test("table action waits through a delayed card list render", async () => {
   const cardPage = fakeBatchCardsPage([
     { code: "EZT260004", name: "目标批次" },
   ], { listCount: 3 });
@@ -143,7 +143,7 @@ test("table action waits through the current card list empty render frame", asyn
     url: () => "http://operation/batch/batchList",
     locator(selector) {
       if (selector === ".ant-list:has(.same-batch-title)") {
-        return { count: async () => (++identityReads === 1 ? 0 : 1) };
+        return { count: async () => (++identityReads <= 12 ? 0 : 1) };
       }
       if (selector === ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning") {
         return { first: () => ({ waitFor: async () => {} }) };
