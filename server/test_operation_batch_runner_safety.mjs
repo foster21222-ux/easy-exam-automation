@@ -16,6 +16,7 @@ import {
 
 function fakeBatchCardsPage(cards, {
   listCount = 1,
+  identityListCount = listCount,
   tableHeaders = [],
   tableRows = [],
 } = {}) {
@@ -57,7 +58,10 @@ function fakeBatchCardsPage(cards, {
       if (selector === ".ant-list") {
         return { count: async () => listCount };
       }
-      if (selector === ".ant-list .ant-list-item") {
+      if (selector === ".ant-list:has(.same-batch-title)") {
+        return { count: async () => identityListCount };
+      }
+      if (selector === ".ant-list:has(.same-batch-title) .ant-list-item") {
         return { all: async () => cardLocators };
       }
       throw new Error(`unexpected selector: ${selector}`);
@@ -68,7 +72,7 @@ function fakeBatchCardsPage(cards, {
 test("batch list snapshot reads the current card layout from dedicated code and name nodes", async () => {
   assert.deepEqual(await operationBatchListSnapshot(fakeBatchCardsPage([
     { code: "EZT260004", name: "目标项目_2026年8月" },
-  ])), {
+  ], { listCount: 3, identityListCount: 1 })), {
     layout: "cards",
     headers: ["批次代码", "批次名称"],
     rows: [["EZT260004", "目标项目_2026年8月"]],
@@ -221,6 +225,8 @@ function fakeBatchListPage(pages, {
       }
       if (selector === ".ant-list") return { count: async () => 0 };
       if (selector === ".ant-list .ant-list-item") return { all: async () => [] };
+      if (selector === ".ant-list:has(.same-batch-title)") return { count: async () => 0 };
+      if (selector === ".ant-list:has(.same-batch-title) .ant-list-item") return { all: async () => [] };
       if (selector === ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning") {
         return {
           first: () => ({

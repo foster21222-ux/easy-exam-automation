@@ -402,7 +402,7 @@ export async function operationBatchTableRows(page) {
 }
 
 async function operationBatchCardEntries(page) {
-  const cards = await page.locator(".ant-list .ant-list-item").all();
+  const cards = await page.locator(".ant-list:has(.same-batch-title) .ant-list-item").all();
   return Promise.all(cards.map(async (card) => {
     const code = card.locator(":scope > div:first-child > div:first-child > span:first-child");
     const name = card.locator(".same-batch-title");
@@ -435,7 +435,7 @@ export async function openExactOperationBatchCard(page, batchCode) {
 export async function operationBatchListSnapshot(page) {
   const headers = (await page.locator("thead th").allInnerTexts()).map(text);
   const rows = await operationBatchTableRows(page);
-  const listCount = await page.locator(".ant-list").count();
+  const listCount = await page.locator(".ant-list:has(.same-batch-title)").count();
   const cards = await operationBatchCardEntries(page);
   if (headers.length && cards.length) {
     throw reconciliationRequiredError(new Error("批次列表同时出现表格和卡片结果，无法确认唯一列表布局"));
