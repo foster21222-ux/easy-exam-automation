@@ -107,6 +107,46 @@ test("batch list snapshot blocks ambiguous or malformed card identity", async ()
   }
 });
 
+test("table action waits through the current card list empty render frame", async () => {
+  const cardPage = fakeBatchCardsPage([
+    { code: "EZT260004", name: "目标批次" },
+  ], { listCount: 3 });
+  let identityReads = 0;
+  const responseUrl = "http://operation/api/batch/list";
+  const response = {
+    url: () => responseUrl,
+    request: () => ({
+      resourceType: () => "xhr",
+      method: () => "POST",
+      url: () => responseUrl,
+      postData: () => "",
+    }),
+    ok: () => true,
+    finished: async () => null,
+  };
+  const page = {
+    ...cardPage,
+    url: () => "http://operation/batch/batchList",
+    locator(selector) {
+      if (selector === ".ant-list:has(.same-batch-title)") {
+        return { count: async () => (++identityReads === 1 ? 0 : 1) };
+      }
+      if (selector === ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning") {
+        return { first: () => ({ waitFor: async () => {} }) };
+      }
+      return cardPage.locator(selector);
+    },
+    waitForResponse: async () => response,
+    waitForTimeout: async () => {},
+  };
+  assert.deepEqual(await performOperationBatchTableAction(
+    page,
+    async () => {},
+    { tableStablePollMs: 0 },
+    { batchListUrl: "http://operation/batch/batchList" },
+  ), [["EZT260004", "目标批次"]]);
+});
+
 test("card detail opening clicks only one exact dedicated batch code", async () => {
   const page = fakeBatchCardsPage([
     { code: "EZT260040", name: "相似批次" },

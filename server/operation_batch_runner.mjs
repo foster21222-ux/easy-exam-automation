@@ -436,14 +436,19 @@ export async function operationBatchListSnapshot(page) {
   const headers = (await page.locator("thead th").allInnerTexts()).map(text);
   const rows = await operationBatchTableRows(page);
   const listCount = await page.locator(".ant-list:has(.same-batch-title)").count();
-  const cards = await operationBatchCardEntries(page);
-  if (headers.length && cards.length) {
-    throw reconciliationRequiredError(new Error("批次列表同时出现表格和卡片结果，无法确认唯一列表布局"));
+  if (headers.length) {
+    if (listCount) {
+      throw reconciliationRequiredError(new Error("批次列表同时出现表格和卡片结果，无法确认唯一列表布局"));
+    }
+    return { layout: "table", headers, rows };
   }
-  if (headers.length) return { layout: "table", headers, rows };
+  if (!listCount && await page.locator(".ant-list").count()) {
+    return { layout: "pending", headers: [], rows: [] };
+  }
   if (listCount !== 1) {
     throw reconciliationRequiredError(new Error(`批次卡片列表必须有唯一容器，实际 ${listCount} 个`));
   }
+  const cards = await operationBatchCardEntries(page);
   return {
     layout: "cards",
     headers: ["批次代码", "批次名称"],
@@ -457,6 +462,11 @@ async function waitForStableOperationBatchRows(page, options = {}) {
   let previousSignature = "";
   for (let attempt = 0; attempt < maxChecks; attempt += 1) {
     const snapshot = await operationBatchListSnapshot(page);
+    if (snapshot.layout === "pending") {
+      previousSignature = "";
+      await page.waitForTimeout(stablePollMs);
+      continue;
+    }
     const signature = JSON.stringify(snapshot);
     if (attempt > 0 && signature === previousSignature) return snapshot.rows;
     previousSignature = signature;
