@@ -355,7 +355,7 @@ test("personnel preview blocks an unknown configured environment", async () => {
   });
 });
 
-test("personnel preview and send reject malformed JSON before service work", async () => {
+test("personnel preview and send reject malformed or non-object JSON before service work", async () => {
   await withRuntime(async (runtimeDir) => {
     seedTask(runtimeDir, baseTask());
     const runtime = await startServer(runtimeDir, {
@@ -364,16 +364,49 @@ test("personnel preview and send reject malformed JSON before service work", asy
     });
     try {
       for (const action of ["preview", "send"]) {
-        const response = await fetch(
-          `${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task/${action}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: '{"broken"',
-          },
-        );
-        assert.equal(response.status, 400);
-        assert.equal((await response.json()).errorCode, "PERSONNEL_INVALID_JSON");
+        for (const body of ['{"broken"', "[]", "null", '"value"', "1"]) {
+          const response = await fetch(
+            `${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task/${action}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+            },
+          );
+          assert.equal(response.status, 400);
+          assert.equal((await response.json()).errorCode, "PERSONNEL_INVALID_JSON");
+        }
+      }
+    } finally {
+      await runtime.close();
+    }
+  });
+});
+
+test("personnel preview and send treat empty request bodies as empty objects", async () => {
+  await withRuntime(async (runtimeDir) => {
+    seedTask(runtimeDir, baseTask());
+    const runtime = await startServer(runtimeDir, {
+      OPERATION_CONSOLE_AUTOMATION_ENABLED: "1",
+      OPERATION_CONSOLE_ENVIRONMENT: "staging",
+    });
+    try {
+      for (const action of ["preview", "send"]) {
+        for (const body of ["", " \n\t "]) {
+          const response = await fetch(
+            `${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task/${action}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+            },
+          );
+          assert.equal(response.status, 409);
+          assert.equal(
+            (await response.json()).errorCode,
+            "PERSONNEL_ENVIRONMENT_INVALID",
+          );
+        }
       }
     } finally {
       await runtime.close();

@@ -5426,7 +5426,9 @@ async function assertOperationPersonnelTaskVisible(taskId, req) {
 }
 
 async function readOperationPersonnelPayload(req) {
-  const payload = parseJsonSafe(await readBody(req));
+  const body = await readBody(req);
+  if (!body.toString("utf8").trim()) return {};
+  const payload = parseJsonSafe(body);
   if (payload && typeof payload === "object" && !Array.isArray(payload)) return payload;
   const error = new Error("请求 JSON 格式无效");
   error.status = 400;
