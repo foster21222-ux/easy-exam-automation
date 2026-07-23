@@ -9317,6 +9317,12 @@
         operationPersonnelTaskRecheckBtn.disabled = !action.showRecheck;
       }
 
+      function operationPersonnelPreviewKind(preview = {}) {
+        const kind = preview.state?.activePreview?.kind;
+        if (kind === "initial" || kind === "resend") return kind;
+        return preview.state?.lastSuccessfulFingerprint ? "resend" : "initial";
+      }
+
       function renderOperationPersonnelConfirmation(preview = {}) {
         const state = preview.state || {};
         const draft = state.draft || {};
@@ -9326,8 +9332,9 @@
         const requirementVersion = state.activePreview?.requirementVersion ?? "--";
         const warnings = draft.warnings || [];
         const conditions = draft.operationTaskSheet?.conditions || [];
-        const willPublishBatch = !draft.previewOperationSnapshot?.batch?.published
-          && !state.lastSuccessfulFingerprint;
+        const previewKind = operationPersonnelPreviewKind(preview);
+        const willPublishBatch = previewKind === "initial"
+          && !draft.previewOperationSnapshot?.batch?.published;
         const scheduleRows = (draft.schedules || []).map((item) => `<tr><td>${safeText(item.scheduleCode || "--")}</td><td>${safeText(item.subjectName || item.subject || "--")}</td><td>${safeText(item.start || "--")}</td><td>${safeText(item.end || "--")}</td><td>${safeText(item.earlyLoginMinutes ?? "--")}</td></tr>`).join("");
         const displayValue = (value) => {
           if (value === "" || value === null || value === undefined) return "空";
@@ -9341,7 +9348,11 @@
           || draft.previewOperationSnapshot?.batch?.batchName
           || "--";
         const recipientNames = (items = []) => items.map((item) => `${item.group ? `${item.group} / ` : ""}${item.name || item.id || "--"}`).join("；") || "无";
-        const isResend = Boolean(state.lastSuccessfulFingerprint);
+        const isResend = previewKind === "resend";
+        const baselineSendRecord = state.activePreview?.baselineSendRecord;
+        const externalBaseline = state.activePreview?.externalBaseline && baselineSendRecord
+          ? `<div class="operation-detail-subsection"><h4>发送基线</h4><div class="task-meta">已接管运控发送记录：${safeText(baselineSendRecord.type || "--")} · ${safeText(baselineSendRecord.sentAt || "--")}</div></div>`
+          : "";
         operationPersonnelConfirmContent.innerHTML = `
           <div class="operation-param-list">
             <div class="operation-param-item"><div class="operation-param-label">运控环境</div><div class="operation-param-value">${safeText(state.environment || "--")}</div></div>
@@ -9361,6 +9372,7 @@
             <label class="field"><span class="field-label">监考比例</span><input class="field-input" data-operation-personnel-edit="monitorRatio" value="${safeText(personnel.monitorRatio || "")}" /></label>
           </div><div class="task-meta">人员服务：${safeText(personnel.serviceType || "--")} · 平台：${safeText(personnel.platform || "--")} · 计算依据：${safeText(personnel.candidateBasis || "--")}</div></div>
           <div class="operation-detail-subsection"><h4>固定收件人</h4><div class="task-meta">To：${safeText(recipientNames(recipients.to))}</div><h4>固定抄送人</h4><div class="task-meta">CC：${safeText(recipientNames(recipients.cc))}</div></div>
+          ${externalBaseline}
           <label class="field" ${isResend ? "" : "hidden"}><span class="field-label">重发变化摘要</span><textarea class="field-input" data-operation-personnel-change-summary>${safeText(state.changeSummary || preview.changes?.summary || "")}</textarea></label>
         `;
         operationPersonnelConfirmSendBtn.disabled = warnings.length > 0
@@ -9385,7 +9397,8 @@
       }
 
       function operationPersonnelSubmitError(preview = {}, changeSummary = "") {
-        return preview.state?.lastSuccessfulFingerprint && !String(changeSummary || "").trim()
+        return operationPersonnelPreviewKind(preview) === "resend"
+          && !String(changeSummary || "").trim()
           ? "重新发送人员任务必须填写变化摘要"
           : "";
       }

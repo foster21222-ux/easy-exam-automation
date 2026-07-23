@@ -727,6 +727,10 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
   const operationPersonnelConfirmContent = { innerHTML: "" };
   const operationPersonnelConfirmSendBtn = { disabled: false };
   const operationPersonnelProgress = { textContent: "" };
+  const operationPersonnelPreviewKind = compileInlineFunction(
+    "      function operationPersonnelPreviewKind(preview = {}) {",
+    "\n      function renderOperationPersonnelConfirmation",
+  );
   const renderOperationPersonnelConfirmation = compileInlineFunction(
     "      function renderOperationPersonnelConfirmation(preview = {}) {",
     "\n      function collectOperationPersonnelPreviewEdits",
@@ -735,6 +739,7 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
       operationPersonnelConfirmContent,
       operationPersonnelConfirmSendBtn,
       operationPersonnelProgress,
+      operationPersonnelPreviewKind,
       safeText: (value) => String(value ?? ""),
     },
   );
@@ -789,6 +794,74 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
   previewDto.state.draft.warnings = [{ code: "MONITOR_RATIO_REQUIRED" }];
   renderOperationPersonnelConfirmation(previewDto);
   assert.equal(operationPersonnelConfirmSendBtn.disabled, true);
+});
+
+test("personnel confirmation renders an adopted operation send record as a resend", () => {
+  const operationPersonnelConfirmContent = { innerHTML: "" };
+  const operationPersonnelConfirmSendBtn = { disabled: false };
+  const operationPersonnelProgress = { textContent: "" };
+  const operationPersonnelPreviewKind = compileInlineFunction(
+    "      function operationPersonnelPreviewKind(preview = {}) {",
+    "\n      function renderOperationPersonnelConfirmation",
+  );
+  const renderOperationPersonnelConfirmation = compileInlineFunction(
+    "      function renderOperationPersonnelConfirmation(preview = {}) {",
+    "\n      function collectOperationPersonnelPreviewEdits",
+    {
+      taskViewState: { currentProject: { taskId: "task-a", projectName: "示例考试" } },
+      operationPersonnelConfirmContent,
+      operationPersonnelConfirmSendBtn,
+      operationPersonnelProgress,
+      operationPersonnelPreviewKind,
+      safeText: (value) => String(value ?? ""),
+    },
+  );
+  const previewDto = {
+    previewToken: "preview-a",
+    operationChanges: [{
+      path: "dates.end",
+      before: "2026-08-18",
+      after: "2026-08-19",
+    }],
+    state: {
+      environment: "test",
+      activePreview: {
+        kind: "resend",
+        externalBaseline: true,
+        baselineSendRecord: {
+          type: "首次发送",
+          sentAt: "2026-07-23 10:09:34",
+        },
+      },
+      draft: {
+        batch: { code: "EZT260003" },
+        operationBatch: { batchName: "真实运控批次" },
+        previewOperationSnapshot: { batch: { published: false, batchName: "真实运控批次" } },
+        schedules: [],
+        personnel: {},
+        dates: {},
+        operationTaskSheet: { conditions: [] },
+        directoryMatch: { to: [], cc: [] },
+        warnings: [],
+      },
+      lastSuccessfulFingerprint: "",
+    },
+  };
+
+  assert.equal(operationPersonnelPreviewKind(previewDto), "resend");
+  renderOperationPersonnelConfirmation(previewDto);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /已接管运控发送记录/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /首次发送/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /2026-07-23 10:09:34/);
+  assert.match(
+    operationPersonnelConfirmContent.innerHTML,
+    /data-operation-personnel-change-summary/,
+  );
+  assert.doesNotMatch(
+    operationPersonnelConfirmContent.innerHTML,
+    /data-operation-personnel-change-summary[^>]*hidden/,
+  );
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /本次将发布运控批次/);
 });
 
 test("personnel send payload contains only the server preview binding and resend summary", () => {
@@ -850,9 +923,14 @@ test("personnel state disables unchanged resend and only exposes recheck for unk
 });
 
 test("personnel resend requires a reviewed change summary before calling send", () => {
+  const operationPersonnelPreviewKind = compileInlineFunction(
+    "      function operationPersonnelPreviewKind(preview = {}) {",
+    "\n      function renderOperationPersonnelConfirmation",
+  );
   const operationPersonnelSubmitError = compileInlineFunction(
     "      function operationPersonnelSubmitError(preview = {}, changeSummary = \"\") {",
     "\n      function invalidateOperationPersonnelRequests",
+    { operationPersonnelPreviewKind },
   );
   assert.equal(operationPersonnelSubmitError({
     state: { lastSuccessfulFingerprint: "" },
@@ -863,6 +941,18 @@ test("personnel resend requires a reviewed change summary before calling send", 
   assert.equal(operationPersonnelSubmitError({
     state: { lastSuccessfulFingerprint: "sent-fingerprint" },
   }, "新增下午场"), "");
+  assert.equal(operationPersonnelSubmitError({
+    state: {
+      lastSuccessfulFingerprint: "",
+      activePreview: { kind: "resend", externalBaseline: true },
+    },
+  }, ""), "重新发送人员任务必须填写变化摘要");
+  assert.equal(operationPersonnelSubmitError({
+    state: {
+      lastSuccessfulFingerprint: "",
+      activePreview: { kind: "resend", externalBaseline: true },
+    },
+  }, "人员落实结束日期调整"), "");
 });
 
 test("stale personnel attempt response cannot render into a newly selected project", async () => {
