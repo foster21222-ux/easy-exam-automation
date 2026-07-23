@@ -341,7 +341,7 @@ function assertOperationBatchListPage(page, batchListUrl) {
 
 function operationBatchListEndpoint(urlValue, pageUrl) {
   const pathname = new URL(urlValue, pageUrl).pathname;
-  return /^\/(?:api\/)?batch\/(?:list|query|search|page|getBatchList|queryBatchList|batchList)\/?$/i
+  return /^\/(?:api\/)?batch\/(?:list|query|search|page|getBatchList|get_batch_list|queryBatchList|batchList)\/?$/i
     .test(pathname);
 }
 

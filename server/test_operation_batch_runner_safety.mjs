@@ -488,6 +488,11 @@ test("batch search response requires a list endpoint and an exact accepted searc
     options,
   ), true);
   assert.equal(operationBatchTableResponseMatches(
+    response({ path: "/api/batch/get_batch_list", postData: JSON.stringify({ condition: expectedBatchName }) }),
+    "http://operation/batch/batchList",
+    options,
+  ), true);
+  assert.equal(operationBatchTableResponseMatches(
     response({ postData: '{"heartbeat":true}' }),
     "http://operation/batch/batchList",
     options,
