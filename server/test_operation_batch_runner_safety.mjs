@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   OPERATION_BATCH_RECONCILIATION_REQUIRED,
   findCreatedBatchFromList,
+  openExactOperationBatchCard,
+  operationBatchListSnapshot,
   operationBatchListResultFromRows,
   operationBatchTableResponseMatches,
   performOperationBatchTableAction,
@@ -11,6 +13,116 @@ import {
   runOperationBatchReconciliation,
   runWithOperationBatchContext,
 } from "./operation_batch_runner.mjs";
+
+function fakeBatchCardsPage(cards, {
+  listCount = 1,
+  tableHeaders = [],
+  tableRows = [],
+} = {}) {
+  const events = [];
+  const cardLocators = cards.map((card) => ({
+    click: async () => events.push(`click:${card.code}`),
+    locator(selector) {
+      if (selector === ":scope > div:first-child > div:first-child > span:first-child") {
+        return {
+          count: async () => card.codeCount ?? 1,
+          innerText: async () => card.code,
+        };
+      }
+      if (selector === ".same-batch-title") {
+        return {
+          count: async () => card.nameCount ?? 1,
+          innerText: async () => card.name,
+        };
+      }
+      throw new Error(`unexpected card selector: ${selector}`);
+    },
+  }));
+  return {
+    events,
+    locator(selector) {
+      if (selector === "thead th") {
+        return { allInnerTexts: async () => tableHeaders };
+      }
+      if (selector === "tbody tr") {
+        return {
+          all: async () => tableRows.map((cells) => ({
+            locator: (childSelector) => {
+              assert.equal(childSelector, "td");
+              return { allInnerTexts: async () => cells };
+            },
+          })),
+        };
+      }
+      if (selector === ".ant-list") {
+        return { count: async () => listCount };
+      }
+      if (selector === ".ant-list .ant-list-item") {
+        return { all: async () => cardLocators };
+      }
+      throw new Error(`unexpected selector: ${selector}`);
+    },
+  };
+}
+
+test("batch list snapshot reads the current card layout from dedicated code and name nodes", async () => {
+  assert.deepEqual(await operationBatchListSnapshot(fakeBatchCardsPage([
+    { code: "EZT260004", name: "目标项目_2026年8月" },
+  ])), {
+    layout: "cards",
+    headers: ["批次代码", "批次名称"],
+    rows: [["EZT260004", "目标项目_2026年8月"]],
+  });
+});
+
+test("batch list snapshot preserves the legacy table layout", async () => {
+  assert.deepEqual(await operationBatchListSnapshot(fakeBatchCardsPage([], {
+    listCount: 0,
+    tableHeaders: ["批次代码", "批次名称"],
+    tableRows: [["EZT260004", "目标项目_2026年8月"]],
+  })), {
+    layout: "table",
+    headers: ["批次代码", "批次名称"],
+    rows: [["EZT260004", "目标项目_2026年8月"]],
+  });
+});
+
+test("batch list snapshot blocks ambiguous or malformed card identity", async () => {
+  for (const page of [
+    fakeBatchCardsPage([{ code: "EZT260004", name: "目标", codeCount: 2 }]),
+    fakeBatchCardsPage([{ code: "EZT260004", name: "目标", nameCount: 0 }]),
+    fakeBatchCardsPage([{ code: "EZT260004", name: "目标" }], {
+      tableHeaders: ["批次代码"],
+      tableRows: [["EZT260004"]],
+    }),
+  ]) {
+    await assert.rejects(
+      () => operationBatchListSnapshot(page),
+      (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED,
+    );
+  }
+});
+
+test("card detail opening clicks only one exact dedicated batch code", async () => {
+  const page = fakeBatchCardsPage([
+    { code: "EZT260040", name: "相似批次" },
+    { code: "EZT260004", name: "目标批次" },
+  ]);
+  await openExactOperationBatchCard(page, "EZT260004");
+  assert.deepEqual(page.events, ["click:EZT260004"]);
+});
+
+test("card detail opening blocks duplicate exact batch codes before clicking", async () => {
+  const page = fakeBatchCardsPage([
+    { code: "EZT260004", name: "目标批次一" },
+    { code: "EZT260004", name: "目标批次二" },
+  ]);
+  await assert.rejects(
+    () => openExactOperationBatchCard(page, "EZT260004"),
+    /批次代码 EZT260004 精确匹配到 2 张卡片/,
+  );
+  assert.deepEqual(page.events, []);
+});
 
 function fakeBatchListPage(pages, {
   advancePage = true,
@@ -104,6 +216,11 @@ function fakeBatchListPage(pages, {
         };
       }
       if (selector === "tbody tr") return rowLocator;
+      if (selector === "thead th") {
+        return { allInnerTexts: async () => ["批次代码", "批次名称"] };
+      }
+      if (selector === ".ant-list") return { count: async () => 0 };
+      if (selector === ".ant-list .ant-list-item") return { all: async () => [] };
       if (selector === ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning") {
         return {
           first: () => ({

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   advanceOperationBatchListPage,
   launchOperationBatchContext,
+  openExactOperationBatchCard,
   runWithOperationBatchContext,
   searchOperationBatchListPages,
   startOperationBatchListSearch,
@@ -213,7 +214,11 @@ function exactBatchRow(result = {}, batchCode) {
 
 async function openOperationPersonnelBatchRow(page, row, context = {}) {
   const { batchListUrl, batchCode, options = {} } = context;
-  let { headers, rows } = await startOperationBatchListSearch(page, batchListUrl, batchCode, options);
+  let {
+    headers,
+    layout,
+    rows,
+  } = await startOperationBatchListSearch(page, batchListUrl, batchCode, options);
   const codeColumn = batchCodeColumn(headers);
   for (let pageNumber = 1; pageNumber < Number(row.pageNumber || 1); pageNumber += 1) {
     rows = await advanceOperationBatchListPage(
@@ -224,6 +229,13 @@ async function openOperationPersonnelBatchRow(page, row, context = {}) {
       options,
     );
     if (!rows) throw new Error(`未能重新定位批次代码 ${batchCode} 所在的第 ${row.pageNumber} 页`);
+  }
+  if (layout === "cards") {
+    await openExactOperationBatchCard(page, batchCode);
+    if (typeof page.waitForLoadState === "function") {
+      await page.waitForLoadState("domcontentloaded");
+    }
+    return;
   }
   const locators = await page.locator("tbody tr").all();
   const exact = [];
