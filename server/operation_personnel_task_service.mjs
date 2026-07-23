@@ -180,7 +180,47 @@ function editableDraft(base, input = {}) {
   if (Object.hasOwn(personnel, "monitorRatio")) {
     set("personnel.monitorRatio", text(personnel.monitorRatio));
   }
+  const validIsoDate = (value) => {
+    const match = text(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return false;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return date.getUTCFullYear() === Number(match[1])
+      && date.getUTCMonth() === Number(match[2]) - 1
+      && date.getUTCDate() === Number(match[3]);
+  };
+  const datesValid = ["start", "end", "nameListDue"].every((key) => validIsoDate(draft.dates?.[key]))
+    && draft.dates.start <= draft.dates.end;
+  const monitorCountValid = Number.isFinite(Number(draft.personnel?.monitorCount))
+    && Number(draft.personnel.monitorCount) > 0;
+  const resolvable = new Map([
+    ["PERSONNEL_DATES_REQUIRED", datesValid],
+    ["MONITOR_COUNT_REQUIRED", monitorCountValid],
+  ]);
+  const warnings = (draft.warnings || []).filter(
+    (item) => !(resolvable.has(item.code) && resolvable.get(item.code)),
+  );
+  for (const [code, resolved] of resolvable) {
+    if (!resolved && !warnings.some((item) => item.code === code)) warnings.push({ code });
+  }
+  draft.warnings = warnings;
   return { draft, changes: changes.sort((left, right) => left.path.localeCompare(right.path)) };
+}
+
+function operationSnapshotChanges(before = {}, after = {}, prefix = "") {
+  if (stableJson(before) === stableJson(after)) return [];
+  if (Array.isArray(before) || Array.isArray(after)
+    || !before || !after
+    || typeof before !== "object" || typeof after !== "object") {
+    return [{ path: prefix, before: before ?? "", after: after ?? "" }];
+  }
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys]
+    .flatMap((key) => operationSnapshotChanges(
+      before[key],
+      after[key],
+      prefix ? `${prefix}.${key}` : key,
+    ))
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function irreversibleBoundaryReached(checkpoints = {}) {
@@ -401,12 +441,13 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       releaseProfile();
     }
     const mode = existing.lastSuccessfulFingerprint ? "resend" : "initial";
+    const target = targetFromDraft(draft, snapshot);
     const baseline = mode === "resend"
       ? normalizeOperationPersonnelSnapshot(existing.lastOperationSnapshot || {})
-      : targetFromDraft(draft, snapshot);
+      : structuredClone(target);
     if (mode === "initial") baseline.batch.published = snapshot.batch.published;
     const conflicts = operationPersonnelConflicts(
-      baseline || targetFromDraft(draft, snapshot),
+      baseline || target,
       snapshot,
       mode,
     );
@@ -495,6 +536,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         draftVersion,
         state: next,
         changes: diffOperationPersonnelTaskDrafts(freshState.draft || {}, draft),
+        operationChanges: operationSnapshotChanges(snapshot, target),
       };
     });
   }

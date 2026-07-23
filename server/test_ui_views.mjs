@@ -662,6 +662,10 @@ test("personnel task labels and visible countdown follow server state", () => {
     operationPersonnelActionLabel({ status: "result_unknown" }),
     "重新核对发送记录",
   );
+  assert.equal(operationPersonnelActionLabel({ status: "unsupported" }), "当前人员任务类型不支持");
+  assert.equal(operationPersonnelActionLabel({ status: "waiting_batch" }), "等待运控批次");
+  assert.equal(operationPersonnelActionLabel({ status: "blocked_pending_change" }), "存在待审核需求变更");
+  assert.equal(operationPersonnelActionLabel({ status: "operation_conflict" }), "运控与平台不一致，请人工处理");
   assert.equal(
     operationPersonnelRemainingSeconds(
       "2026-07-23T02:00:30.000Z",
@@ -719,6 +723,70 @@ test("personnel confirmation keeps environment and recipients read only with one
   assert.equal(renderer.includes('data-operation-personnel-edit="recipients"'), false);
 });
 
+test("personnel confirmation renders the real preview DTO and operation diff", () => {
+  const operationPersonnelConfirmContent = { innerHTML: "" };
+  const operationPersonnelConfirmSendBtn = { disabled: false };
+  const operationPersonnelProgress = { textContent: "" };
+  const renderOperationPersonnelConfirmation = compileInlineFunction(
+    "      function renderOperationPersonnelConfirmation(preview = {}) {",
+    "\n      function collectOperationPersonnelPreviewEdits",
+    {
+      taskViewState: { currentProject: { taskId: "task-a", projectName: "示例考试" } },
+      operationPersonnelConfirmContent,
+      operationPersonnelConfirmSendBtn,
+      operationPersonnelProgress,
+      safeText: (value) => String(value ?? ""),
+    },
+  );
+  renderOperationPersonnelConfirmation({
+    previewToken: "preview-a",
+    operationChanges: [{
+      path: "dates.start",
+      before: "ACTUAL_DATE",
+      after: "TARGET_DATE",
+    }],
+    changes: {
+      fields: [{ path: "draft-only", before: "DRAFT_OLD", after: "DRAFT_NEW" }],
+      summary: "日期变化",
+    },
+    state: {
+      environment: "test",
+      activePreview: { requirementVersion: 3 },
+      draft: {
+        batch: { code: "EZT260003" },
+        operationBatch: { batchName: "真实运控批次" },
+        previewOperationSnapshot: { batch: { published: false, batchName: "真实运控批次" } },
+        schedules: [{
+          scheduleCode: "7",
+          subjectName: "综合能力",
+          start: "2026-08-22 09:00",
+          end: "2026-08-22 11:00",
+          earlyLoginMinutes: 30,
+        }],
+        personnel: {
+          serviceType: "ATA 监考－分散在线监考",
+          platform: "悦站",
+          monitorCount: 2,
+          monitorRatio: "1:50",
+          candidateBasis: 81,
+        },
+        dates: { start: "2026-07-23", end: "2026-08-19", nameListDue: "2026-08-19" },
+        operationTaskSheet: { conditions: [{ name: "人员配置", satisfied: true }] },
+        directoryMatch: { to: [{ group: "演示组", name: "张乐翔" }], cc: [] },
+        warnings: [],
+      },
+      lastSuccessfulFingerprint: "",
+    },
+  });
+  assert.match(operationPersonnelConfirmContent.innerHTML, /真实运控批次/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, />7</);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /计算依据：81/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /ACTUAL_DATE/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /TARGET_DATE/);
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /DRAFT_OLD|DRAFT_NEW/);
+  assert.equal(operationPersonnelConfirmSendBtn.disabled, false);
+});
+
 test("personnel send payload contains only the server preview binding and resend summary", () => {
   const operationPersonnelSendPayload = compileInlineFunction(
     "      function operationPersonnelSendPayload(preview = {}, changeSummary = \"\") {",
@@ -767,6 +835,14 @@ test("personnel state disables unchanged resend and only exposes recheck for unk
     disabled: true,
     showRecheck: false,
   });
+  for (const status of [
+    "unsupported",
+    "waiting_batch",
+    "blocked_pending_change",
+    "operation_conflict",
+  ]) {
+    assert.equal(operationPersonnelActionState({ status }).disabled, true, status);
+  }
 });
 
 test("personnel resend requires a reviewed change summary before calling send", () => {
@@ -817,6 +893,66 @@ test("stale personnel attempt response cannot render into a newly selected proje
   await pending;
 
   assert.deepEqual(renders, []);
+});
+
+test("rejected personnel polling is handled and remains recoverable", async () => {
+  const cleared = [];
+  const scheduled = [];
+  const taskViewState = {
+    currentProjectId: "project-a",
+    currentProject: { taskId: "project-a" },
+    operationPersonnelRequestToken: 3,
+    operationPersonnelPollTimer: 41,
+  };
+  const operationPersonnelProgress = { textContent: "" };
+  const pollOperationPersonnelAttempt = compileInlineFunction(
+    "      async function pollOperationPersonnelAttempt(taskId, attemptId, requestToken) {",
+    "\n      async function recheckOperationPersonnelTask",
+    {
+      taskViewState,
+      operationPersonnelProgress,
+      fetchJson: async () => { throw new Error("attempt unavailable"); },
+      operationPersonnelRequestIsCurrent: (taskId, token) => (
+        taskViewState.currentProjectId === taskId
+        && taskViewState.operationPersonnelRequestToken === token
+      ),
+      clearTimeout: (timer) => cleared.push(timer),
+      setTimeout: (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return 42;
+      },
+    },
+  );
+  await assert.doesNotReject(
+    pollOperationPersonnelAttempt("project-a", "attempt-a", 3),
+  );
+  assert.deepEqual(cleared, [41]);
+  assert.equal(scheduled[0].delay, 2000);
+  assert.match(operationPersonnelProgress.textContent, /attempt unavailable/);
+  assert.equal(taskViewState.operationPersonnelPollTimer, 42);
+});
+
+test("stale personnel errors do not overwrite the current project", () => {
+  const taskViewState = {
+    currentProjectId: "project-b",
+    operationPersonnelRequestToken: 4,
+  };
+  const surface = { textContent: "project-b-state" };
+  const renderOperationPersonnelRequestError = compileInlineFunction(
+    "      function renderOperationPersonnelRequestError(taskId, requestToken, surface, error, restoreControl = null) {",
+    "\n      async function loadOperationPersonnelTaskState",
+    {
+      operationPersonnelRequestIsCurrent: (taskId, token) => (
+        taskViewState.currentProjectId === taskId
+        && taskViewState.operationPersonnelRequestToken === token
+      ),
+    },
+  );
+  assert.equal(
+    renderOperationPersonnelRequestError("project-a", 3, surface, new Error("stale")),
+    false,
+  );
+  assert.equal(surface.textContent, "project-b-state");
 });
 
 test("project switching invalidates personnel requests and clears their polling timer", () => {
@@ -902,6 +1038,55 @@ test("personnel UI connects the five service APIs without an environment overrid
   assert.ok(send.includes("operationPersonnelSendPayload(preview, changeSummary)"));
   assert.ok(send.includes("operationPersonnelSubmitError(preview, changeSummary)"));
   assert.equal(send.includes("environment:"), false);
+});
+
+test("same-project stale personnel panel rejection cannot overwrite newer state", async () => {
+  const personnel = Promise.withResolvers();
+  const operationPersonnelTaskState = { textContent: "newer-state" };
+  const taskViewState = {
+    currentProjectId: "",
+    currentProject: null,
+    currentProjectWorkflow: null,
+    operationPersonnelRequestToken: 0,
+  };
+  const dependencies = {
+    taskViewState,
+    fetchJson: async () => ({ taskId: "project-a" }),
+    isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
+    beginOperationPersonnelProjectRequest: (projectId) => {
+      taskViewState.currentProjectId = projectId;
+      taskViewState.operationPersonnelRequestToken += 1;
+      return taskViewState.operationPersonnelRequestToken;
+    },
+    renderProjectDetail: (task) => { taskViewState.currentProject = task; },
+    loadProjectOperationBatchDraft: async () => {},
+    loadOperationPersonnelTaskState: async () => personnel.promise,
+    loadProjectRequirementForDetail: async () => {},
+    loadProjectWechatBinding: async () => {},
+    setProjectOverviewExpanded: () => {},
+    setProjectActionControlsDisabled: () => {},
+    projectOperationBatchState: { textContent: "" },
+    operationPersonnelTaskState,
+    projectRequirementInlineState: { textContent: "" },
+    projectWechatBindingState: { textContent: "" },
+    operationPersonnelRequestIsCurrent: (taskId, token) => (
+      taskViewState.currentProjectId === taskId
+      && taskViewState.operationPersonnelRequestToken === token
+    ),
+  };
+  const loadProjectDetail = compileInlineFunction(
+    "      async function loadProjectDetail(projectId) {",
+    "\n      function requirementNextAction(item = {}) {",
+    dependencies,
+  );
+
+  const pending = loadProjectDetail("project-a");
+  await Promise.resolve();
+  taskViewState.operationPersonnelRequestToken += 1;
+  personnel.reject(new Error("stale personnel error"));
+  await pending;
+
+  assert.equal(operationPersonnelTaskState.textContent, "newer-state");
 });
 
 test("requirement edit payload includes only dirty fields and preserves intentional clears", () => {

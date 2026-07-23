@@ -9257,6 +9257,9 @@
         if (state.status === "sent") {
           return { action: "preview", disabled: true, showRecheck: false };
         }
+        if (["unsupported", "waiting_batch", "blocked_pending_change", "operation_conflict"].includes(state.status)) {
+          return { action: "preview", disabled: true, showRecheck: false };
+        }
         if (["queued", "running"].includes(state.activeAttempt?.status)
           || ["applying_config", "sending", "verifying"].includes(state.status)) {
           return { action: "preview", disabled: true, showRecheck: false };
@@ -9268,6 +9271,10 @@
         if (state.status === "result_unknown") return "重新核对发送记录";
         if (state.status === "failed_resumable") return "继续未完成流程";
         if (state.status === "changes_pending") return "检查变更并重新发送";
+        if (state.status === "unsupported") return "当前人员任务类型不支持";
+        if (state.status === "waiting_batch") return "等待运控批次";
+        if (state.status === "blocked_pending_change") return "存在待审核需求变更";
+        if (state.status === "operation_conflict") return "运控与平台不一致，请人工处理";
         if (state.status === "sent" && state.canResend === false) return "内容未变化，不允许重复发送";
         if (state.status === "sent") return "内容未变化，不允许重复发送";
         return "检查并发送人员任务单";
@@ -9321,23 +9328,25 @@
         const conditions = draft.operationTaskSheet?.conditions || [];
         const willPublishBatch = !draft.previewOperationSnapshot?.batch?.published
           && !state.lastSuccessfulFingerprint;
-        const scheduleRows = (draft.schedules || []).map((item) => `<tr><td>${safeText(item.code || "--")}</td><td>${safeText(item.subjectName || item.subject || "--")}</td><td>${safeText(item.start || "--")}</td><td>${safeText(item.end || "--")}</td><td>${safeText(item.earlyLoginMinutes ?? "--")}</td></tr>`).join("");
-        const fieldDiffs = preview.changes?.fields || [];
-        const scheduleDiffs = preview.changes?.schedules || {};
-        const diffRows = [
-          ...fieldDiffs.map((item) => `<li>${safeText(item.path)}：${safeText(item.before || "空")} → ${safeText(item.after || "空")}</li>`),
-          ...(scheduleDiffs.added?.length ? [`<li>新增日程 ${scheduleDiffs.added.length} 项</li>`] : []),
-          ...(scheduleDiffs.changed?.length ? [`<li>修改日程 ${scheduleDiffs.changed.length} 项</li>`] : []),
-          ...(scheduleDiffs.deleted?.length ? [`<li>删除日程 ${scheduleDiffs.deleted.length} 项</li>`] : []),
-        ].join("");
+        const scheduleRows = (draft.schedules || []).map((item) => `<tr><td>${safeText(item.scheduleCode || "--")}</td><td>${safeText(item.subjectName || item.subject || "--")}</td><td>${safeText(item.start || "--")}</td><td>${safeText(item.end || "--")}</td><td>${safeText(item.earlyLoginMinutes ?? "--")}</td></tr>`).join("");
+        const displayValue = (value) => {
+          if (value === "" || value === null || value === undefined) return "空";
+          return typeof value === "object" ? JSON.stringify(value) : String(value);
+        };
+        const diffRows = (preview.operationChanges || [])
+          .map((item) => `<li>${safeText(item.path)}：${safeText(displayValue(item.before))} → ${safeText(displayValue(item.after))}</li>`)
+          .join("");
         const recipients = draft.directoryMatch || {};
+        const batchName = draft.operationBatch?.batchName
+          || draft.previewOperationSnapshot?.batch?.batchName
+          || "--";
         const recipientNames = (items = []) => items.map((item) => `${item.group ? `${item.group} / ` : ""}${item.name || item.id || "--"}`).join("；") || "无";
         const isResend = Boolean(state.lastSuccessfulFingerprint);
         operationPersonnelConfirmContent.innerHTML = `
           <div class="operation-param-list">
             <div class="operation-param-item"><div class="operation-param-label">运控环境</div><div class="operation-param-value">${safeText(state.environment || "--")}</div></div>
             <div class="operation-param-item"><div class="operation-param-label">项目</div><div class="operation-param-value">${safeText(project.projectName || project.taskId || "--")}</div></div>
-            <div class="operation-param-item"><div class="operation-param-label">批次</div><div class="operation-param-value">${safeText(draft.batch?.code || "--")} · ${safeText(draft.batch?.batchName || "--")}</div></div>
+            <div class="operation-param-item"><div class="operation-param-label">批次</div><div class="operation-param-value">${safeText(draft.batch?.code || "--")} · ${safeText(batchName)}</div></div>
             <div class="operation-param-item"><div class="operation-param-label">需求版本</div><div class="operation-param-value">${safeText(requirementVersion)}</div></div>
           </div>
           <div class="operation-detail-subsection"><h4>阻断条件与发送条件</h4><div class="task-meta">阻断条件：${warnings.length ? warnings.map((item) => safeText(item.message || item.code)).join("；") : "无"}</div><ul>${conditions.length ? conditions.map((item) => `<li>${safeText(item.name || item.label || "--")}：${item.satisfied ? "已满足" : "未满足"}</li>`).join("") : "<li>运控任务单条件将在发送前再次核验</li>"}</ul></div>
@@ -9350,11 +9359,13 @@
             <label class="field"><span class="field-label">人员名单提交日期</span><input class="field-input" type="date" data-operation-personnel-edit="nameListDue" value="${safeText(dates.nameListDue || "")}" /></label>
             <label class="field"><span class="field-label">监考人数</span><input class="field-input" type="number" min="1" data-operation-personnel-edit="monitorCount" value="${safeText(personnel.monitorCount || "")}" /></label>
             <label class="field"><span class="field-label">监考比例</span><input class="field-input" data-operation-personnel-edit="monitorRatio" value="${safeText(personnel.monitorRatio || "")}" /></label>
-          </div><div class="task-meta">人员服务：${safeText(personnel.serviceType || "--")} · 平台：${safeText(personnel.platform || "--")} · 计算依据：${safeText(personnel.monitorCountBasis || personnel.calculationBasis || "--")}</div></div>
+          </div><div class="task-meta">人员服务：${safeText(personnel.serviceType || "--")} · 平台：${safeText(personnel.platform || "--")} · 计算依据：${safeText(personnel.candidateBasis || "--")}</div></div>
           <div class="operation-detail-subsection"><h4>固定收件人</h4><div class="task-meta">To：${safeText(recipientNames(recipients.to))}</div><h4>固定抄送人</h4><div class="task-meta">CC：${safeText(recipientNames(recipients.cc))}</div></div>
           <label class="field" ${isResend ? "" : "hidden"}><span class="field-label">重发变化摘要</span><textarea class="field-input" data-operation-personnel-change-summary>${safeText(state.changeSummary || preview.changes?.summary || "")}</textarea></label>
         `;
-        operationPersonnelConfirmSendBtn.disabled = warnings.length > 0 || !preview.previewToken;
+        operationPersonnelConfirmSendBtn.disabled = warnings.length > 0
+          || conditions.some((item) => item.satisfied === false)
+          || !preview.previewToken;
         operationPersonnelProgress.textContent = "";
       }
 
@@ -9407,6 +9418,13 @@
       function operationPersonnelRequestIsCurrent(taskId, requestToken) {
         return String(taskViewState.currentProjectId || "") === String(taskId || "")
           && taskViewState.operationPersonnelRequestToken === requestToken;
+      }
+
+      function renderOperationPersonnelRequestError(taskId, requestToken, surface, error, restoreControl = null) {
+        if (!operationPersonnelRequestIsCurrent(taskId, requestToken)) return false;
+        surface.textContent = error?.message || String(error);
+        if (typeof restoreControl === "function") restoreControl();
+        return true;
       }
 
       async function loadOperationPersonnelTaskState(task = taskViewState.currentProject, requestToken = taskViewState.operationPersonnelRequestToken) {
@@ -9480,21 +9498,35 @@
       }
 
       async function pollOperationPersonnelAttempt(taskId, attemptId, requestToken) {
-        const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-personnel-task/attempts/${encodeURIComponent(attemptId)}?_=${Date.now()}`);
-        if (!operationPersonnelRequestIsCurrent(taskId, requestToken)) return null;
-        renderOperationPersonnelAttempt(result);
-        if (!result.completed) {
-          taskViewState.operationPersonnelPollTimer = setTimeout(
-            () => void pollOperationPersonnelAttempt(taskId, attemptId, requestToken),
-            1000,
-          );
+        try {
+          const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-personnel-task/attempts/${encodeURIComponent(attemptId)}?_=${Date.now()}`);
+          if (!operationPersonnelRequestIsCurrent(taskId, requestToken)) return null;
+          renderOperationPersonnelAttempt(result);
+          if (!result.completed) {
+            if (taskViewState.operationPersonnelPollTimer) clearTimeout(taskViewState.operationPersonnelPollTimer);
+            taskViewState.operationPersonnelPollTimer = setTimeout(
+              () => void pollOperationPersonnelAttempt(taskId, attemptId, requestToken)
+                .catch((error) => renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelProgress, error)),
+              1000,
+            );
+            return result;
+          }
+          taskViewState.operationPersonnelPollTimer = null;
+          await loadOperationPersonnelTaskState(taskViewState.currentProject, requestToken);
+          if (!operationPersonnelRequestIsCurrent(taskId, requestToken)) return result;
+          await loadProjectOperationBatchDraft(taskViewState.currentProject);
           return result;
+        } catch (error) {
+          if (!operationPersonnelRequestIsCurrent(taskId, requestToken)) return null;
+          if (taskViewState.operationPersonnelPollTimer) clearTimeout(taskViewState.operationPersonnelPollTimer);
+          operationPersonnelProgress.textContent = `读取执行进度失败，2 秒后重试：${error?.message || String(error)}`;
+          taskViewState.operationPersonnelPollTimer = setTimeout(
+            () => void pollOperationPersonnelAttempt(taskId, attemptId, requestToken)
+              .catch((retryError) => renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelProgress, retryError)),
+            2000,
+          );
+          return null;
         }
-        taskViewState.operationPersonnelPollTimer = null;
-        await loadOperationPersonnelTaskState(taskViewState.currentProject, requestToken);
-        if (!operationPersonnelRequestIsCurrent(taskId, requestToken)) return result;
-        await loadProjectOperationBatchDraft(taskViewState.currentProject);
-        return result;
       }
 
       async function recheckOperationPersonnelTask() {
@@ -10651,7 +10683,8 @@
         taskViewState.projectRequirementSwitching = false;
         setProjectActionControlsDisabled(true);
         const task = await fetchJson(`/api/tasks/${encodeURIComponent(projectId)}?_=${Date.now()}`);
-        if (!isCurrentProject(projectId)) return;
+        if (!isCurrentProject(projectId)
+          || taskViewState.operationPersonnelRequestToken !== operationPersonnelRequestToken) return;
         renderProjectDetail(task);
         const panelLoads = [
           [loadProjectOperationBatchDraft(task), projectOperationBatchState, "无法加载运营批次参数"],
@@ -10660,7 +10693,8 @@
           [loadProjectWechatBinding(task), projectWechatBindingState, "无法加载本项目微信群绑定"],
         ];
         const results = await Promise.allSettled(panelLoads.map(([promise]) => promise));
-        if (!isCurrentProject(projectId)) return;
+        if (!isCurrentProject(projectId)
+          || taskViewState.operationPersonnelRequestToken !== operationPersonnelRequestToken) return;
         results.forEach((result, index) => {
           if (result.status !== "rejected") return;
           const [, state, label] = panelLoads[index];
@@ -15102,14 +15136,24 @@
       operationBatchCreateBtn.addEventListener("click", () => createProjectOperationBatch().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
       operationBatchReconcileBtn.addEventListener("click", () => reconcileProjectOperationBatch().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
       operationBatchRecordBtn.addEventListener("click", () => recordProjectOperationBatchCode().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
-      operationPersonnelTaskActionBtn.addEventListener("click", () => previewOperationPersonnelTask().catch((error) => {
-        operationPersonnelTaskState.textContent = error.message || String(error);
-        operationPersonnelTaskActionBtn.disabled = false;
-      }));
-      operationPersonnelTaskRecheckBtn.addEventListener("click", () => recheckOperationPersonnelTask().catch((error) => {
-        operationPersonnelTaskState.textContent = error.message || String(error);
-        operationPersonnelTaskRecheckBtn.disabled = false;
-      }));
+      operationPersonnelTaskActionBtn.addEventListener("click", () => {
+        const taskId = taskViewState.currentProject?.taskId;
+        const requestToken = taskViewState.operationPersonnelRequestToken + 1;
+        previewOperationPersonnelTask().catch((error) => {
+          renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelTaskState, error, () => {
+            operationPersonnelTaskActionBtn.disabled = false;
+          });
+        });
+      });
+      operationPersonnelTaskRecheckBtn.addEventListener("click", () => {
+        const taskId = taskViewState.currentProject?.taskId;
+        const requestToken = taskViewState.operationPersonnelRequestToken;
+        recheckOperationPersonnelTask().catch((error) => {
+          renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelTaskState, error, () => {
+            operationPersonnelTaskRecheckBtn.disabled = false;
+          });
+        });
+      });
       operationPersonnelConfirmCloseBtn.addEventListener("click", () => closeProjectDialog(operationPersonnelConfirmDialog));
       operationPersonnelConfirmCancelBtn.addEventListener("click", () => closeProjectDialog(operationPersonnelConfirmDialog));
       operationPersonnelConfirmDialog.addEventListener("cancel", (event) => {
@@ -15121,15 +15165,23 @@
       });
       operationPersonnelConfirmContent.addEventListener("change", (event) => {
         if (!event.target.closest("[data-operation-personnel-edit]")) return;
+        const taskId = taskViewState.currentProject?.taskId;
+        const requestToken = taskViewState.operationPersonnelRequestToken + 1;
         refreshOperationPersonnelPreviewFromDialog().catch((error) => {
-          operationPersonnelProgress.textContent = error.message || String(error);
-          operationPersonnelConfirmSendBtn.disabled = true;
+          renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelProgress, error, () => {
+            operationPersonnelConfirmSendBtn.disabled = true;
+          });
         });
       });
-      operationPersonnelConfirmSendBtn.addEventListener("click", () => sendOperationPersonnelTask().catch((error) => {
-        operationPersonnelProgress.textContent = error.message || String(error);
-        operationPersonnelConfirmSendBtn.disabled = false;
-      }));
+      operationPersonnelConfirmSendBtn.addEventListener("click", () => {
+        const taskId = taskViewState.currentProject?.taskId;
+        const requestToken = taskViewState.operationPersonnelRequestToken;
+        sendOperationPersonnelTask().catch((error) => {
+          renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelProgress, error, () => {
+            operationPersonnelConfirmSendBtn.disabled = false;
+          });
+        });
+      });
       contentRequirementEmailSendBtn.addEventListener("click", () => sendContentRequirementEmailFromProject().catch((error) => { contentRequirementEmailState.textContent = error.message || String(error); }));
       projectContentTaskDraft.addEventListener("change", (event) => {
         const input = event.target.closest("[data-content-exam-remark-key]");

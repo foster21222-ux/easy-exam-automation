@@ -464,6 +464,73 @@ test("editable draft changes increment version and append an auto-confirmed audi
   assert.equal(preview.state.events.at(-1).type, "operation_personnel_draft_auto_confirmed");
 });
 
+test("editable dates and monitor count clear only the warnings they resolve", async () => {
+  const harness = serviceHarness();
+  harness.task.sessions[0].candidateCount = 0;
+  harness.task.config.businessRequirement.high_end_supplement_required = "是";
+  harness.task.config.examRequirement.config.startTimeDisplay = "2026/07/24 09:00";
+  harness.task.config.examRequirement.config.endTimeDisplay = "2026/07/24 11:00";
+  const preview = await harness.service.preview("task-a", owner(), {
+    dates: {
+      start: "2026-07-23",
+      end: "2026-07-23",
+      nameListDue: "2026-07-23",
+    },
+    monitorCount: 2,
+  });
+  assert.equal(
+    preview.state.draft.warnings.some((item) => item.code === "PERSONNEL_DATES_REQUIRED"),
+    false,
+  );
+  assert.equal(
+    preview.state.draft.warnings.some((item) => item.code === "MONITOR_COUNT_REQUIRED"),
+    false,
+  );
+  assert.equal(
+    preview.state.draft.warnings.some((item) => item.code === "UNSUPPORTED_PERSONNEL_TASK"),
+    true,
+  );
+  assert.equal(preview.state.draft.personnel.monitorCount, 2);
+});
+
+test("invalid edited dates and monitor count keep their resolvable warnings", async () => {
+  const harness = serviceHarness();
+  harness.task.sessions[0].candidateCount = 0;
+  harness.task.config.examRequirement.config.startTimeDisplay = "2026/07/24 09:00";
+  harness.task.config.examRequirement.config.endTimeDisplay = "2026/07/24 11:00";
+  const preview = await harness.service.preview("task-a", owner(), {
+    dates: {
+      start: "2026-02-30",
+      end: "2026-02-28",
+      nameListDue: "not-a-date",
+    },
+    monitorCount: 0,
+  });
+  assert.equal(
+    preview.state.draft.warnings.some((item) => item.code === "PERSONNEL_DATES_REQUIRED"),
+    true,
+  );
+  assert.equal(
+    preview.state.draft.warnings.some((item) => item.code === "MONITOR_COUNT_REQUIRED"),
+    true,
+  );
+});
+
+test("preview returns actual operation to target changes separately from draft edits", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {
+    monitorCount: 4,
+  });
+  assert.ok(Array.isArray(preview.operationChanges));
+  assert.deepEqual(
+    preview.operationChanges.find((item) => item.path === "batch.published"),
+    { path: "batch.published", before: false, after: true },
+  );
+  assert.ok(preview.operationChanges.some((item) => item.path === "schedules"));
+  assert.ok(preview.operationChanges.some((item) => item.path === "personnel.monitorCount"));
+  assert.equal(preview.changes.fields.some((item) => item.path === "personnel.monitorCount"), true);
+});
+
 test("send persists queued attempt and returns before the runner completes", async () => {
   const pending = Promise.withResolvers();
   const harness = serviceHarness({ runnerResult: pending.promise });
