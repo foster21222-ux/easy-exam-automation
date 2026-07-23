@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { buildOperationPersonnelTaskDraft, operationPersonnelTaskFingerprint } from "./operation_personnel_task.mjs";
+import { normalizeOperationPersonnelSnapshot } from "./operation_personnel_task_runner.mjs";
 import { createOperationPersonnelTaskService } from "./operation_personnel_task_service.mjs";
 
 const START = Date.parse("2026-07-23T02:00:00.000Z");
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${stableJson(value[key])}`
+    )).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function valueFingerprint(value) {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
 
 function owner() {
   return { email: "owner@example.com", role: "user" };
@@ -139,6 +155,25 @@ function serviceHarness(options = {}) {
       environment: options.environment || "test",
       now: new Date(START).toISOString(),
     });
+    const operationSnapshot = normalizeOperationPersonnelSnapshot(inspection);
+    draft.operationBatch = structuredClone(operationSnapshot.batch);
+    draft.operationRequirements = structuredClone(operationSnapshot.requirements);
+    draft.operationTaskSheet = structuredClone(operationSnapshot.taskSheet);
+    draft.directoryMatch = structuredClone(operationSnapshot.directoryMatch);
+    draft.previewOperationSnapshot = structuredClone(operationSnapshot);
+    const target = normalizeOperationPersonnelSnapshot({
+      batch: {
+        ...draft.operationBatch,
+        ...draft.batch,
+        published: true,
+      },
+      schedules: draft.schedules,
+      personnel: draft.personnel,
+      dates: draft.dates,
+      requirements: draft.operationRequirements,
+      taskSheet: draft.operationTaskSheet,
+      directoryMatch: draft.directoryMatch,
+    });
     const checkpointName = options.orphanedAttemptCheckpoint || "verify_send_record";
     const attempt = {
       attemptId: "attempt-orphan",
@@ -153,6 +188,12 @@ function serviceHarness(options = {}) {
       createdAt: "2026-07-23T02:00:00.000Z",
       startedAt: "2026-07-23T02:00:01.000Z",
       status: "running",
+      target,
+      baseline: structuredClone(target),
+      previewBinding: {
+        operationSnapshotFingerprint: valueFingerprint(operationSnapshot),
+        directoryMatchFingerprint: valueFingerprint(operationSnapshot.directoryMatch),
+      },
     };
     task.config.operationPersonnelTask = {
       schemaVersion: 1,
@@ -294,6 +335,20 @@ test("preview token expires after ten minutes", async () => {
   );
 });
 
+test("preview token rejects an invalid expiresAt value", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {});
+  harness.task.config.operationPersonnelTask.activePreview.expiresAt = "not-a-date";
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
+  );
+});
+
 test("preview rejects a requirement version changed during the operation inspection", async () => {
   const harness = serviceHarness({
     onInspection: (task) => {
@@ -326,6 +381,29 @@ test("service environment is authoritative and request environment is ignored", 
   assert.equal(preview.state.environment, "test");
   assert.deepEqual(preview.state.draft.recipients.toNames, ["张乐翔"]);
   assert.equal(preview.state.draft.recipients.ccCount, 0);
+});
+
+test("send validates the complete previewed operation snapshot binding", async () => {
+  const mutations = [
+    (state) => { state.draft.operationBatch.batchName = "外部修改"; },
+    (state) => { state.draft.operationRequirements.push({ name: "新增需求", value: "是" }); },
+    (state) => { state.draft.operationTaskSheet.content = "变化后的任务内容"; },
+    (state) => { state.draft.previewOperationSnapshot.batch.batchName = "快照被替换"; },
+    (state) => { state.activePreview.operationSnapshotFingerprint = "0".repeat(64); },
+  ];
+  for (const mutate of mutations) {
+    const harness = serviceHarness();
+    const preview = await harness.service.preview("task-a", owner(), {});
+    mutate(harness.task.config.operationPersonnelTask);
+    await assert.rejects(
+      harness.service.send("task-a", owner(), {
+        previewToken: preview.previewToken,
+        draftVersion: preview.draftVersion,
+        changeSummary: "",
+      }),
+      { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
+    );
+  }
 });
 
 test("unknown service environment blocks get and preview", async () => {
@@ -448,6 +526,22 @@ test("a resumable orphan keeps its attempt id and completed checkpoints", async 
   );
 });
 
+test("changed resumable target gets a new attempt id and clears old checkpoints", async () => {
+  const harness = serviceHarness({ orphanedAttemptCheckpoint: "sync_personnel_dates" });
+  const preview = await harness.service.preview("task-a", owner(), { monitorCount: 4 });
+  const accepted = await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+  assert.equal(accepted.attemptId, "attempt-1");
+  assert.deepEqual(harness.task.config.operationPersonnelTask.checkpoints, {});
+  assert.equal(
+    harness.task.config.operationPersonnelTask.activeAttempt.target.personnel.monitorCount,
+    4,
+  );
+});
+
 test("queued attempt retains the exact previewed batch identity", async () => {
   const harness = serviceHarness();
   const inspected = inspectionFor(harness.task);
@@ -542,17 +636,15 @@ test("attempt lookup is project-scoped", async () => {
   );
 });
 
-test("result_unknown cannot start a new send attempt", async () => {
+test("result_unknown blocks preview without inspection or persistence", async () => {
   const harness = serviceHarness({ resultUnknown: true });
-  const preview = await harness.service.preview("task-a", owner(), {});
+  const before = structuredClone(harness.task.config.operationPersonnelTask);
   await assert.rejects(
-    harness.service.send("task-a", owner(), {
-      previewToken: preview.previewToken,
-      draftVersion: preview.draftVersion,
-      changeSummary: "",
-    }),
+    harness.service.preview("task-a", owner(), {}),
     { code: "PERSONNEL_RESULT_UNKNOWN", status: 409 },
   );
+  assert.deepEqual(harness.runnerCalls, []);
+  assert.deepEqual(harness.task.config.operationPersonnelTask, before);
   assert.equal(harness.deferredJobs.length, 0);
 });
 
@@ -589,4 +681,28 @@ test("recheck reconciles a newly visible record without another send or attempt 
   assert.equal(result.state.sendHistory[0].attemptId, "attempt-orphan");
   assert.equal(result.state.activeAttempt.attemptId, "attempt-orphan");
   assert.deepEqual(harness.runnerCalls, ["recheck"]);
+});
+
+test("recheck normalizes the real runner return shape into a resend baseline", async () => {
+  const sendRecord = { type: "首次发送", sentAt: "2026-07-23T02:00:20.000Z" };
+  const historical = { type: "首次发送", sentAt: "2026-07-22T02:00:20.000Z" };
+  const harness = serviceHarness({
+    resultUnknown: true,
+    recheckResult: {
+      status: "sent",
+      sendRecord,
+      sendRecords: [historical],
+    },
+  });
+  harness.task.config.operationPersonnelTask.activeAttempt.operationSnapshot = {
+    batch: { published: true },
+  };
+  const result = await harness.service.recheck("task-a", owner());
+  assert.equal(result.state.lastOperationSnapshot.batch.code, "EZT260003");
+  assert.equal(result.state.lastOperationSnapshot.personnel.platform, "悦站");
+  assert.deepEqual(result.state.lastOperationSnapshot.sendRecords, [sendRecord, historical]);
+  assert.deepEqual(
+    result.state.sendHistory[0].operationSnapshot,
+    result.state.lastOperationSnapshot,
+  );
 });

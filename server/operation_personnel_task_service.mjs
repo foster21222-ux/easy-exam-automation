@@ -41,6 +41,10 @@ function fingerprint(value) {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
+function draftSourceFingerprint(draft = {}) {
+  return fingerprint(draft);
+}
+
 function nowIso(now) {
   return new Date(now()).toISOString();
 }
@@ -102,7 +106,7 @@ function stateDefaults(environment, draft = {}) {
     draft,
     draftVersion: 1,
     sourceFingerprint: draft && Object.keys(draft).length
-      ? operationPersonnelTaskFingerprint(draft)
+      ? draftSourceFingerprint(draft)
       : "",
     lastSuccessfulFingerprint: "",
     scheduleCodeMap: draft.scheduleCodeMap || {},
@@ -219,6 +223,60 @@ function attemptHistory(attempt, result, completedAt) {
   };
 }
 
+function attemptMatchesPreview(attempt, preview) {
+  return attempt
+    && attempt.environment === preview.environment
+    && attempt.kind === preview.kind
+    && attempt.requirementVersion === preview.requirementVersion
+    && attempt.draftVersion === preview.draftVersion
+    && attempt.fingerprint === preview.fingerprint
+    && stableJson(attempt.recipients) === stableJson(preview.recipients)
+    && stableJson(attempt.target) === stableJson(preview.target)
+    && stableJson(attempt.baseline) === stableJson(preview.baseline)
+    && stableJson(attempt.previewBinding) === stableJson(preview.previewBinding);
+}
+
+function recheckedOperationSnapshot(state, result) {
+  const attempt = state.activeAttempt;
+  const layers = [
+    state.lastOperationSnapshot,
+    attempt.target,
+    attempt.operationSnapshot,
+    result.operationSnapshot,
+  ].filter(Boolean);
+  if (!layers.length) {
+    throw serviceError(
+      "PERSONNEL_RECHECK_SNAPSHOT_MISSING",
+      409,
+      "发送记录已出现，但缺少可核验的原发送快照",
+    );
+  }
+  const nested = ["batch", "personnel", "dates", "taskSheet", "directoryMatch"];
+  const merged = layers.reduce((current, layer) => {
+    const next = { ...current, ...structuredClone(layer) };
+    for (const key of nested) {
+      next[key] = { ...(current[key] || {}), ...(layer[key] || {}) };
+    }
+    return next;
+  }, {});
+  const seenRecords = new Set();
+  const records = [
+    result.sendRecord,
+    ...(result.sendRecords || []),
+    ...(merged.sendRecords || []),
+  ].filter((item) => {
+    if (!item) return false;
+    const key = `${text(item.type)}\u0000${text(item.sentAt)}`;
+    if (seenRecords.has(key)) return false;
+    seenRecords.add(key);
+    return true;
+  });
+  return normalizeOperationPersonnelSnapshot({
+    ...merged,
+    sendRecords: records,
+  });
+}
+
 function serializedFailure(error) {
   return {
     code: text(error?.code) || "PERSONNEL_ATTEMPT_FAILED",
@@ -303,6 +361,17 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
   async function preview(taskId, actor, input = {}) {
     assertEnvironment(environment);
     const initialTask = await readAuthorized(taskId, actor);
+    const existing = recoverOrphanedAttempt(
+      normalizedState(initialTask, environment),
+      activeAttemptIds,
+    );
+    if (existing.status === "result_unknown") {
+      throw serviceError(
+        "PERSONNEL_RESULT_UNKNOWN",
+        409,
+        "上次发送结果未知，只能重新核对发送记录",
+      );
+    }
     const requirement = await readRequirementFor(initialTask);
     if (hasPendingRequirementChange(requirement)) {
       throw serviceError(
@@ -311,10 +380,6 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         "存在待审核的外部需求变更，不能预览人员任务",
       );
     }
-    const existing = recoverOrphanedAttempt(
-      normalizedState(initialTask, environment),
-      activeAttemptIds,
-    );
     const inspectedRequirementVersion = requirementVersion(initialTask, requirement);
     const generated = buildOperationPersonnelTaskDraft(initialTask, {
       environment,
@@ -383,7 +448,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       draft.operationTaskSheet = structuredClone(snapshot.taskSheet);
       draft.operationBatch = structuredClone(snapshot.batch);
       draft.directoryMatch = structuredClone(snapshot.directoryMatch);
-      const sourceFingerprint = operationPersonnelTaskFingerprint(draft);
+      draft.previewOperationSnapshot = structuredClone(snapshot);
+      const sourceFingerprint = draftSourceFingerprint(draft);
       const token = text(makeToken());
       const createdAt = nowIso(now);
       const expiresAt = new Date(now() + PREVIEW_TTL_MS).toISOString();
@@ -595,15 +661,19 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         );
       }
       const preview = state.activePreview;
+      const expiresAt = Date.parse(preview?.expiresAt);
       const stale = !preview
         || preview.token !== text(input.previewToken)
-        || Date.parse(preview.expiresAt) <= now()
+        || !Number.isFinite(expiresAt)
+        || expiresAt <= now()
         || preview.requirementVersion !== requirementVersion(task, requirement)
         || preview.draftVersion !== Number(input.draftVersion)
         || state.draftVersion !== Number(input.draftVersion)
         || state.environment !== environment
         || state.draft.environment !== environment
-        || state.sourceFingerprint !== operationPersonnelTaskFingerprint(state.draft)
+        || state.sourceFingerprint !== draftSourceFingerprint(state.draft)
+        || preview.operationSnapshotFingerprint
+          !== fingerprint(state.draft.previewOperationSnapshot || {})
         || preview.directoryMatchFingerprint !== fingerprint(state.draft.directoryMatch || {});
       if (stale) {
         throw serviceError(
@@ -634,10 +704,32 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       const previous = state.activeAttempt?.status === "failed_resumable"
         ? state.activeAttempt
         : null;
-      const attemptId = previous?.attemptId || text(makeAttemptId());
-      const createdAt = previous?.createdAt || nowIso(now);
+      const recipients = {
+        to: structuredClone(state.draft.directoryMatch?.to || []),
+        cc: structuredClone(state.draft.directoryMatch?.cc || []),
+      };
+      const baseline = structuredClone(
+        kind === "resend" ? state.lastOperationSnapshot : target,
+      );
+      const previewBinding = {
+        operationSnapshotFingerprint: preview.operationSnapshotFingerprint,
+        directoryMatchFingerprint: preview.directoryMatchFingerprint,
+      };
+      const resumeSameAttempt = attemptMatchesPreview(previous, {
+        environment,
+        kind,
+        requirementVersion: preview.requirementVersion,
+        draftVersion: state.draftVersion,
+        fingerprint: currentFingerprint,
+        recipients,
+        target,
+        baseline,
+        previewBinding,
+      });
+      const attemptId = resumeSameAttempt ? previous.attemptId : text(makeAttemptId());
+      const createdAt = resumeSameAttempt ? previous.createdAt : nowIso(now);
       const attempt = {
-        ...(previous || {}),
+        ...(resumeSameAttempt ? previous : {}),
         attemptId,
         kind,
         operator: text(actor?.email),
@@ -645,28 +737,20 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         requirementVersion: preview.requirementVersion,
         draftVersion: state.draftVersion,
         fingerprint: currentFingerprint,
-        recipients: {
-          to: structuredClone(state.draft.directoryMatch?.to || []),
-          cc: structuredClone(state.draft.directoryMatch?.cc || []),
-        },
+        recipients,
         changeSummary,
         createdAt,
         status: "queued",
         target,
-        baseline: structuredClone(
-          kind === "resend" ? state.lastOperationSnapshot : target,
-        ),
-        previewBinding: {
-          operationSnapshotFingerprint: preview.operationSnapshotFingerprint,
-          directoryMatchFingerprint: preview.directoryMatchFingerprint,
-        },
+        baseline,
+        previewBinding,
       };
       const next = {
         ...state,
         status: "ready",
         activePreview: null,
         activeAttempt: attempt,
-        checkpoints: previous ? state.checkpoints : {},
+        checkpoints: resumeSameAttempt ? state.checkpoints : {},
         changeSummary,
         events: [...state.events, {
           type: "operation_personnel_attempt_queued",
@@ -741,12 +825,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         };
       }
       const completedAt = text(result.completedAt) || checkedAt;
-      const operationSnapshot = structuredClone(
-        result.operationSnapshot
-        || freshAttempt.operationSnapshot
-        || freshState.lastOperationSnapshot
-        || null,
-      );
+      const operationSnapshot = recheckedOperationSnapshot(freshState, result);
       const reconciled = {
         ...result,
         operationSnapshot,
@@ -760,7 +839,12 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         status: "sent",
         lastSuccessfulFingerprint: freshAttempt.fingerprint,
         lastOperationSnapshot: operationSnapshot,
-        activeAttempt: { ...freshAttempt, status: "sent", completedAt },
+        activeAttempt: {
+          ...freshAttempt,
+          status: "sent",
+          completedAt,
+          operationSnapshot,
+        },
         sendHistory: history,
         events: [...freshState.events, {
           type: "operation_personnel_rechecked",
