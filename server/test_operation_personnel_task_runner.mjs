@@ -9,6 +9,57 @@ import {
   runOperationPersonnelInspection,
 } from "./operation_personnel_task_runner.mjs";
 
+function exactBatchPages(rows = [{ cells: ["EZT260003"], rowId: "target" }]) {
+  return {
+    headers: ["批次代码"],
+    pages: [rows],
+  };
+}
+
+function inspectionReaders(overrides = {}) {
+  return {
+    readBatchPages: async () => exactBatchPages(),
+    openBatchRow: async () => {},
+    readBatch: async () => ({ code: "EZT260003" }),
+    readSchedules: async () => [],
+    readPersonnel: async () => ({}),
+    readDates: async () => ({}),
+    readRequirements: async () => [],
+    readTaskSheet: async () => ({}),
+    readSendRecords: async () => [],
+    readDirectoryGroups: async () => [
+      { name: "演示组", people: [{ id: "u1", name: "张乐翔" }] },
+    ],
+    ...overrides,
+  };
+}
+
+function visibleSnapshot(evidence = {}) {
+  return {
+    batch: { code: "EZT260003" },
+    schedules: [],
+    personnel: { platform: "" },
+    dates: {},
+    requirements: [],
+    taskSheet: {},
+    sendRecords: [],
+    directoryGroups: [
+      { name: "演示组", people: [{ id: "u1", name: "张乐翔" }] },
+    ],
+    evidence: {
+      batch: { present: true },
+      schedules: { present: true },
+      personnel: { present: true },
+      dates: { present: true },
+      requirements: { present: true },
+      taskSheet: { present: true },
+      sendRecords: { present: true },
+      directoryGroups: { present: true },
+      ...evidence,
+    },
+  };
+}
+
 test("recipient matching requires the exact environment directory result", () => {
   assert.deepEqual(matchOperationPersonnelRecipients({
     environment: "test",
@@ -100,10 +151,13 @@ test("inspection opens only the exact batch code and returns a read-only snapsho
   const page = { marker: "page" };
   const instruction = { environment: "test", batch: { code: "EZT260003" } };
   const snapshot = await inspectOperationPersonnelTask(page, instruction, {
-    readBatchRows: async () => [
-      { code: "EZT260030", rowId: "wrong" },
-      { code: "EZT260003", rowId: "target" },
-    ],
+    readBatchPages: async () => ({
+      headers: ["关联代码", "批次代码"],
+      pages: [
+        [{ cells: ["EZT260003", "EZT260030"], rowId: "wrong-column-token" }],
+        [{ cells: ["other", "EZT260003"], rowId: "target" }],
+      ],
+    }),
     openBatchRow: async (actualPage, row) => {
       assert.strictEqual(actualPage, page);
       opened.push(row.rowId);
@@ -133,11 +187,62 @@ test("inspection opens only the exact batch code and returns a read-only snapsho
 test("inspection rejects missing and duplicate exact batch rows", async () => {
   const instruction = { environment: "test", batch: { code: "EZT260003" } };
   await assert.rejects(() => inspectOperationPersonnelTask({}, instruction, {
-    readBatchRows: async () => [{ code: "EZT260030" }],
+    readBatchPages: async () => exactBatchPages([{ cells: ["EZT260030"] }]),
   }), /未找到批次代码 EZT260003/);
   await assert.rejects(() => inspectOperationPersonnelTask({}, instruction, {
-    readBatchRows: async () => [{ code: "EZT260003" }, { code: "EZT260003" }],
+    readBatchPages: async () => ({
+      headers: ["批次代码"],
+      pages: [
+        [{ cells: ["EZT260003"] }],
+        [{ cells: ["EZT260003"] }],
+      ],
+    }),
   }), /批次代码 EZT260003 精确匹配到 2 行/);
+});
+
+test("inspection rejects a detail identity that differs from the selected batch", async () => {
+  await assert.rejects(() => inspectOperationPersonnelTask(
+    {},
+    { environment: "test", batch: { code: "EZT260003", projectCode: "P001" } },
+    inspectionReaders({
+      readBatch: async () => ({ code: "EZT260004", projectCode: "P001" }),
+    }),
+  ), /批次详情身份不一致.*EZT260003.*EZT260004/);
+});
+
+test("missing DOM controls, tables, and task sections block inspection", async () => {
+  const instruction = { environment: "test", batch: { code: "EZT260003" } };
+  for (const [section, missing] of [
+    ["personnel", "人员落实平台"],
+    ["schedules", "考试日程表"],
+    ["taskSheet", "分散在线监考任务单"],
+  ]) {
+    await assert.rejects(() => inspectOperationPersonnelTask({}, instruction, {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => {},
+      readVisibleSnapshot: async () => visibleSnapshot({
+        [section]: { present: false, missing: [missing] },
+      }),
+    }), new RegExp(`运控人员任务检查阻断.*${missing}`));
+  }
+});
+
+test("a present operation control with an empty value remains fillable", async () => {
+  const snapshot = await inspectOperationPersonnelTask(
+    {},
+    { environment: "test", batch: { code: "EZT260003" } },
+    {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => {},
+      readVisibleSnapshot: async () => visibleSnapshot(),
+    },
+  );
+  assert.equal(snapshot.personnel.platform, "");
+  assert.deepEqual(operationPersonnelConflicts(
+    { personnel: { platform: "悦站" } },
+    snapshot,
+    "initial",
+  ), []);
 });
 
 test("first send may fill empty operation fields but never overwrite values", () => {
@@ -161,6 +266,18 @@ test("batch identity mismatches always block initial send", () => {
   ).map((item) => item.path), ["batch.projectCode"]);
 });
 
+test("initial conflicts project only expected fields from a normalized actual snapshot", () => {
+  const actual = normalizeOperationPersonnelSnapshot({
+    batch: { code: "EZT260003", projectCode: "P001" },
+    personnel: { platform: "" },
+  });
+  assert.deepEqual(operationPersonnelConflicts(
+    { personnel: { platform: "悦站" } },
+    actual,
+    "initial",
+  ), []);
+});
+
 test("resend blocks any drift from the last successful operation snapshot", () => {
   const conflicts = operationPersonnelConflicts(
     { schedules: [{ scheduleCode: 1, start: "2026-08-22 10:00" }] },
@@ -170,7 +287,23 @@ test("resend blocks any drift from the last successful operation snapshot", () =
   assert.equal(conflicts[0].path, "schedules.1.start");
 });
 
-test("run inspection launches and closes the shared operation context", async () => {
+test("missing or duplicate schedule codes are rejected before comparison", () => {
+  assert.throws(() => normalizeOperationPersonnelSnapshot({
+    schedules: [{ start: "2026-08-22 10:00" }],
+  }), /考试日程缺少日程代码/);
+  assert.throws(() => operationPersonnelConflicts(
+    { schedules: [{ scheduleCode: 1, start: "2026-08-22 10:00" }] },
+    {
+      schedules: [
+        { scheduleCode: 1, start: "2026-08-22 10:00" },
+        { scheduleCode: 1, start: "2026-08-22 09:00" },
+      ],
+    },
+    "resend",
+  ), /考试日程代码 1 重复/);
+});
+
+test("run inspection always launches visibly and closes the shared operation context", async () => {
   const events = [];
   const page = {};
   const context = {
@@ -183,22 +316,32 @@ test("run inspection launches and closes the shared operation context", async ()
   }, {
     userDataDir: "/tmp/operation-personnel-profile",
     headless: true,
+    env: { OPERATION_CONSOLE_HEADLESS: "1" },
     launchPersistentContext: async (userDataDir, launchOptions) => {
       events.push(["launch", userDataDir, launchOptions]);
       return context;
     },
-    readBatchRows: async () => [{ code: "EZT260003" }],
-    openBatchRow: async () => events.push("open"),
-    readBatch: async () => ({ code: "EZT260003" }),
-    readDirectoryGroups: async () => [
-      { name: "演示组", people: [{ id: "u1", name: "张乐翔" }] },
-    ],
+    ...inspectionReaders({ openBatchRow: async () => events.push("open") }),
   });
 
   assert.equal(result.batch.code, "EZT260003");
   assert.deepEqual(events, [
-    ["launch", "/tmp/operation-personnel-profile", { headless: true, viewport: null }],
+    ["launch", "/tmp/operation-personnel-profile", { headless: false, viewport: null }],
     "open",
     "close",
   ]);
+});
+
+test("run inspection propagates context close failures", async () => {
+  const closeError = new Error("inspection close failed");
+  await assert.rejects(() => runOperationPersonnelInspection({
+    environment: "test",
+    batch: { code: "EZT260003" },
+  }, {
+    launchPersistentContext: async () => ({
+      pages: () => [{}],
+      close: async () => { throw closeError; },
+    }),
+    ...inspectionReaders(),
+  }), (error) => error === closeError);
 });

@@ -298,7 +298,7 @@ async function selectOperationTask(page, serial) {
   await modal.getByRole("button", { name: /确\s*定/ }).click();
 }
 
-async function ensureBatchListReady(page, batchListUrl, options = {}) {
+export async function ensureBatchListReady(page, batchListUrl, options = {}) {
   const loginWaitMinutes = Number(options.loginWaitMinutes || process.env.OPERATION_CONSOLE_LOGIN_WAIT_MINUTES || 10);
   const waitMs = Math.max(1, loginWaitMinutes) * 60 * 1000;
   const createButton = page.getByRole("button", { name: /创建批次/ });
@@ -394,7 +394,7 @@ export function operationBatchTableResponseMatches(response, pageUrl, options = 
   }
 }
 
-async function operationBatchTableRows(page) {
+export async function operationBatchTableRows(page) {
   const rows = await page.locator("tbody tr").all();
   return Promise.all(rows.map(async (row) => (
     (await row.locator("td").allInnerTexts()).map((cell) => text(cell))
@@ -415,7 +415,7 @@ async function waitForStableOperationBatchRows(page, options = {}) {
   throw reconciliationRequiredError(new Error("批次列表在安全等待时间内未稳定，无法确认完整查询结果"));
 }
 
-async function performOperationBatchTableAction(page, action, options = {}, responseOptions = {}) {
+export async function performOperationBatchTableAction(page, action, options = {}, responseOptions = {}) {
   const batchListUrl = text(responseOptions.batchListUrl);
   assertOperationBatchListPage(page, batchListUrl);
   const loading = page
@@ -444,7 +444,7 @@ async function performOperationBatchTableAction(page, action, options = {}, resp
   }
 }
 
-async function operationBatchActivePage(page) {
+export async function operationBatchActivePage(page) {
   const activeLocator = page.locator(".ant-pagination-item-active");
   if (await activeLocator.count() !== 1) {
     throw reconciliationRequiredError(new Error("批次列表缺少唯一的 Ant 当前页标记，无法证明分页进度"));
@@ -457,53 +457,96 @@ async function operationBatchActivePage(page) {
   return Number(value);
 }
 
-async function collectOperationBatchListRows(page, initialRows, batchListUrl, options = {}) {
+export async function advanceOperationBatchListPage(
+  page,
+  currentPage,
+  previousPageRows,
+  batchListUrl,
+  options = {},
+) {
   const maxPages = Math.max(1, Number(options.maxBatchListPages || 100));
-  const allRows = [...initialRows];
-  let previousPageRows = initialRows;
-  for (let pageNumber = 1; ; pageNumber += 1) {
-    assertOperationBatchListPage(page, batchListUrl);
-    const pagination = page.locator(".ant-pagination");
-    const paginationCount = await pagination.count();
-    if (paginationCount === 0) return allRows;
-    if (paginationCount !== 1) {
-      throw reconciliationRequiredError(new Error("批次列表存在多个 Ant 分页控件，无法证明结果完整"));
-    }
-    const nextLocator = page.locator(".ant-pagination .ant-pagination-next");
-    if (await nextLocator.count() !== 1) {
-      throw reconciliationRequiredError(new Error("批次列表分页缺少唯一的 Ant 下一页控件，无法证明结果完整"));
-    }
-    const next = nextLocator.first();
-    const activePage = await operationBatchActivePage(page);
-    if (activePage !== pageNumber) {
-      throw reconciliationRequiredError(new Error(`批次列表当前页 ${activePage} 与预期页 ${pageNumber} 不一致，无法证明分页连续`));
-    }
-    const classes = text(await next.getAttribute("class"));
-    const ariaDisabled = text(await next.getAttribute("aria-disabled"));
-    if (classes.split(/\s+/).includes("ant-pagination-disabled") || ariaDisabled === "true") return allRows;
-    if (pageNumber >= maxPages) {
-      throw reconciliationRequiredError(new Error(`批次列表超过安全分页上限 ${maxPages}，无法确认完整结果`));
-    }
-    const control = next.locator("button, a").first();
-    if (await control.count() !== 1) {
-      throw reconciliationRequiredError(new Error("批次列表下一页控件不可操作，无法证明结果完整"));
-    }
-    const rows = await performOperationBatchTableAction(
-      page,
-      () => control.click(),
-      options,
-      { batchListUrl },
-    );
-    const nextActivePage = await operationBatchActivePage(page);
-    if (nextActivePage !== activePage + 1) {
-      throw reconciliationRequiredError(new Error(`批次列表点击下一页后未推进：仍为第 ${nextActivePage} 页`));
-    }
-    if (JSON.stringify(rows) === JSON.stringify(previousPageRows)) {
-      throw reconciliationRequiredError(new Error("批次列表点击下一页后行数据未变化，无法证明已读取新页"));
-    }
-    allRows.push(...rows);
-    previousPageRows = rows;
+  assertOperationBatchListPage(page, batchListUrl);
+  const pagination = page.locator(".ant-pagination");
+  const paginationCount = await pagination.count();
+  if (paginationCount === 0) return null;
+  if (paginationCount !== 1) {
+    throw reconciliationRequiredError(new Error("批次列表存在多个 Ant 分页控件，无法证明结果完整"));
   }
+  const nextLocator = page.locator(".ant-pagination .ant-pagination-next");
+  if (await nextLocator.count() !== 1) {
+    throw reconciliationRequiredError(new Error("批次列表分页缺少唯一的 Ant 下一页控件，无法证明结果完整"));
+  }
+  const next = nextLocator.first();
+  const activePage = await operationBatchActivePage(page);
+  if (activePage !== currentPage) {
+    throw reconciliationRequiredError(new Error(`批次列表当前页 ${activePage} 与预期页 ${currentPage} 不一致，无法证明分页连续`));
+  }
+  const classes = text(await next.getAttribute("class"));
+  const ariaDisabled = text(await next.getAttribute("aria-disabled"));
+  if (classes.split(/\s+/).includes("ant-pagination-disabled") || ariaDisabled === "true") return null;
+  if (currentPage >= maxPages) {
+    throw reconciliationRequiredError(new Error(`批次列表超过安全分页上限 ${maxPages}，无法确认完整结果`));
+  }
+  const control = next.locator("button, a").first();
+  if (await control.count() !== 1) {
+    throw reconciliationRequiredError(new Error("批次列表下一页控件不可操作，无法证明结果完整"));
+  }
+  const rows = await performOperationBatchTableAction(
+    page,
+    () => control.click(),
+    options,
+    { batchListUrl },
+  );
+  const nextActivePage = await operationBatchActivePage(page);
+  if (nextActivePage !== activePage + 1) {
+    throw reconciliationRequiredError(new Error(`批次列表点击下一页后未推进：仍为第 ${nextActivePage} 页`));
+  }
+  if (JSON.stringify(rows) === JSON.stringify(previousPageRows)) {
+    throw reconciliationRequiredError(new Error("批次列表点击下一页后行数据未变化，无法证明已读取新页"));
+  }
+  return rows;
+}
+
+export async function collectOperationBatchListPages(page, initialRows, batchListUrl, options = {}) {
+  const pages = [initialRows];
+  let rows = initialRows;
+  for (let pageNumber = 1; ; pageNumber += 1) {
+    rows = await advanceOperationBatchListPage(page, pageNumber, rows, batchListUrl, options);
+    if (!rows) return pages;
+    pages.push(rows);
+  }
+}
+
+async function collectOperationBatchListRows(page, initialRows, batchListUrl, options = {}) {
+  return (await collectOperationBatchListPages(page, initialRows, batchListUrl, options)).flat();
+}
+
+export async function startOperationBatchListSearch(page, batchListUrl, query, options = {}) {
+  const normalizedQuery = text(query);
+  if (!normalizedQuery) {
+    throw reconciliationRequiredError(new Error("批次列表查询值为空"));
+  }
+  await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
+  await ensureBatchListReady(page, batchListUrl, options);
+  const searchInput = page.locator("input[placeholder*=批次代码], input[placeholder*=批次名称]").first();
+  await searchInput.waitFor({ state: "visible", timeout: 30000 });
+  await searchInput.fill(normalizedQuery);
+  const rows = await performOperationBatchTableAction(
+    page,
+    () => searchInput.press("Enter"),
+    options,
+    { batchListUrl, expectedBatchName: normalizedQuery },
+  );
+  const headers = (await page.locator("thead th").allInnerTexts()).map(text);
+  return { headers, rows };
+}
+
+export async function searchOperationBatchListPages(page, batchListUrl, query, options = {}) {
+  const { headers, rows } = await startOperationBatchListSearch(page, batchListUrl, query, options);
+  return {
+    headers,
+    pages: await collectOperationBatchListPages(page, rows, batchListUrl, options),
+  };
 }
 
 export async function findCreatedBatchFromList(page, batchListUrl, batchName, options = {}) {
