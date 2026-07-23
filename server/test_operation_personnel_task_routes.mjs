@@ -107,6 +107,7 @@ function previewState(task, {
   draft.operationBatch = structuredClone(snapshot.batch);
   draft.directoryMatch = structuredClone(snapshot.directoryMatch);
   draft.previewOperationSnapshot = structuredClone(snapshot);
+  draft.previewBaselineSnapshot = structuredClone(snapshot);
   const activeAttempt = attemptId ? {
     attemptId,
     kind: "initial",
@@ -123,6 +124,7 @@ function previewState(task, {
     target: snapshot,
     baseline: snapshot,
     previewBinding: {
+      baselineSnapshotFingerprint: fingerprint(snapshot),
       operationSnapshotFingerprint: fingerprint(snapshot),
       directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
     },
@@ -154,6 +156,10 @@ function previewState(task, {
       expiresAt,
       requirementVersion: 3,
       draftVersion: 1,
+      kind: "initial",
+      externalBaseline: false,
+      baselineSendRecord: null,
+      baselineSnapshotFingerprint: fingerprint(snapshot),
       operationSnapshotFingerprint: fingerprint(snapshot),
       directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
     },
