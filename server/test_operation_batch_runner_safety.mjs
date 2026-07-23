@@ -21,8 +21,14 @@ function fakeBatchCardsPage(cards, {
   tableRows = [],
 } = {}) {
   const events = [];
+  let currentUrl = "http://operation/batch/batchList";
+  let detailWait;
   const cardLocators = cards.map((card) => ({
-    click: async () => events.push(`click:${card.code}`),
+    click: async () => {
+      events.push(`click:${card.code}`);
+      currentUrl = `http://operation/batch/batchDetail?batch_guid=${"a".repeat(32)}`;
+      if (detailWait?.predicate(new URL(currentUrl))) detailWait.resolve();
+    },
     locator(selector) {
       if (selector === ":scope > div:first-child > div:first-child > span:first-child") {
         return {
@@ -41,6 +47,13 @@ function fakeBatchCardsPage(cards, {
   }));
   return {
     events,
+    url: () => currentUrl,
+    waitForURL(predicate) {
+      events.push("wait:detail");
+      return new Promise((resolve) => {
+        detailWait = { predicate, resolve };
+      });
+    },
     locator(selector) {
       if (selector === "thead th") {
         return { allInnerTexts: async () => tableHeaders };
@@ -153,7 +166,7 @@ test("card detail opening clicks only one exact dedicated batch code", async () 
     { code: "EZT260004", name: "目标批次" },
   ]);
   await openExactOperationBatchCard(page, "EZT260004");
-  assert.deepEqual(page.events, ["click:EZT260004"]);
+  assert.deepEqual(page.events, ["wait:detail", "click:EZT260004"]);
 });
 
 test("card detail opening blocks duplicate exact batch codes before clicking", async () => {

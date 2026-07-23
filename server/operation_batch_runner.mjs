@@ -429,7 +429,20 @@ export async function openExactOperationBatchCard(page, batchCode) {
       `批次代码 ${normalizedCode} 精确匹配到 ${matches.length} 张卡片`,
     ));
   }
-  await matches[0].locator.click();
+  const listUrl = new URL(page.url());
+  const detailWait = page.waitForURL((value) => {
+    const detailUrl = new URL(String(value));
+    return detailUrl.origin === listUrl.origin
+      && detailUrl.pathname === "/batch/batchDetail"
+      && Boolean(text(detailUrl.searchParams.get("batch_guid")));
+  }, { timeout: 30000 });
+  detailWait.catch(() => {});
+  try {
+    await matches[0].locator.click();
+    await detailWait;
+  } catch (error) {
+    throw reconciliationRequiredError(error);
+  }
 }
 
 export async function operationBatchListSnapshot(page) {
