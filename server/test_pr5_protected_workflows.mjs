@@ -53,6 +53,40 @@ const EXPECTED_SENTINELS = {
   ],
 };
 
+const EXPECTED_TASK4_FANWEI_IMPORT_GUARD_CHANGE = {
+  name: "Task 4 synced schedule deletion guard",
+  current: `  const existingOperationBatchCode = [
+    existingTask?.config?.operationBatchCode,
+    existingTask?.config?.operationBatch?.code,
+  ].find((code) => operationBatchCodeIsValid(code)) || "";
+  const existingRequirementCount = Array.isArray(existingTask?.config?.examRequirements)
+    ? existingTask.config.examRequirements.length
+    : 0;
+  if (operationBatchCodeIsValid(existingOperationBatchCode) && requirementFieldsList.length < existingRequirementCount) {
+    const error = new Error("批次创建后不允许删除已对应运控日程的易考需求单。");
+    error.status = 409;
+    error.errorCode = "OPERATION_BATCH_SCHEDULE_DELETE_FORBIDDEN";
+    throw error;
+  }
+`,
+  baseline: "",
+};
+
+const EXPECTED_TASK4_FANWEI_IMPORT_ERROR_MAPPING_CHANGE = {
+  name: "Task 4 Fanwei import conflict error mapping",
+  current: `  try {
+    json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));
+  } catch (error) {
+    json(res, error.status || 500, {
+      error: error instanceof Error ? error.message : String(error),
+      errorCode: error.errorCode,
+      detail: error.detail,
+    });
+  }
+`,
+  baseline: "  json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));\n",
+};
+
 const EXPECTED_SERVER_DISPATCHER_REGION = {
   name: "server dispatcher with approved PR 5 route slots",
   kind: "allowlisted-anchor-range",
@@ -116,8 +150,18 @@ const EXPECTED_SHARED_REGIONS = {
     { name: "auto-config job state", kind: "js-block", startAnchor: "function createJob(importRecord, login) {" },
     { name: "auto-config progress events", kind: "js-block", startAnchor: "function pushEvent(job, evt) {" },
     { name: "Fanwei preview handler", kind: "js-block", startAnchor: "async function handleFanweiRequirementPreview(req, res) {" },
-    { name: "Fanwei import task creation", kind: "js-block", startAnchor: "async function createFanweiRequirementImportFromPayload(payload, req, options = {}) {" },
-    { name: "Fanwei import handler", kind: "js-block", startAnchor: "async function handleFanweiRequirementImport(req, res) {" },
+    {
+      name: "Fanwei import task creation",
+      kind: "allowlisted-js-block",
+      startAnchor: "async function createFanweiRequirementImportFromPayload(payload, req, options = {}) {",
+      allowedChanges: [EXPECTED_TASK4_FANWEI_IMPORT_GUARD_CHANGE],
+    },
+    {
+      name: "Fanwei import handler",
+      kind: "allowlisted-js-block",
+      startAnchor: "async function handleFanweiRequirementImport(req, res) {",
+      allowedChanges: [EXPECTED_TASK4_FANWEI_IMPORT_ERROR_MAPPING_CHANGE],
+    },
     { name: "Fanwei auto-read status handler", kind: "js-block", startAnchor: "async function handleFanweiAutoReadStatus(_req, res) {" },
     { name: "Fanwei local-read handler", kind: "js-block", startAnchor: "async function handleFanweiLocalRead(req, res) {" },
     { name: "Fanwei auto-read handler", kind: "js-block", startAnchor: "async function handleFanweiAutoRead(req, res) {" },
@@ -480,7 +524,7 @@ function extractProtectedRegion(source, relativePath, region) {
     : region.kind === "js-call"
       ? ["(", ")"]
       : ["{", "}"];
-  const openIndex = region.kind === "js-block" && /(?:async )?function /.test(region.startAnchor)
+  const openIndex = (region.kind === "js-block" || region.kind === "allowlisted-js-block") && /(?:async )?function /.test(region.startAnchor)
     ? findFunctionBodyOpen(source, startIndex, relativePath, region.name)
     : source.indexOf(tokens[0], startIndex);
   assert.notEqual(openIndex, -1, `${relativePath} protected region "${region.name}" has no ${tokens[0]}`);
@@ -516,11 +560,42 @@ function baselineFile(relativePath) {
   );
 }
 
+function countOccurrences(source, value) {
+  return source.split(value).length - 1;
+}
+
+function normalizeAllowedChanges(currentRegion, deployedRegion, relativePath, region) {
+  let normalized = currentRegion;
+  for (const change of region.allowedChanges || []) {
+    assert.equal(
+      countOccurrences(deployedRegion, change.current),
+      0,
+      `${relativePath} protected region "${region.name}" baseline unexpectedly contains ${change.name}`,
+    );
+    assert.equal(
+      countOccurrences(currentRegion, change.current),
+      1,
+      `${relativePath} protected region "${region.name}" authorized change ${change.name} must appear exactly once`,
+    );
+    if (change.baseline) {
+      assert.equal(
+        countOccurrences(deployedRegion, change.baseline),
+        1,
+        `${relativePath} protected region "${region.name}" baseline replacement for ${change.name} is unexpected`,
+      );
+    }
+    normalized = normalized.replace(change.current, change.baseline);
+  }
+  return normalized;
+}
+
 function assertFileRegionsMatch(relativePath, regions, currentSource, deployedSource) {
   for (const region of regions) {
+    const currentRegion = extractProtectedRegion(currentSource, relativePath, region);
+    const deployedRegion = extractProtectedRegion(deployedSource, relativePath, region);
     assert.equal(
-      extractProtectedRegion(currentSource, relativePath, region),
-      extractProtectedRegion(deployedSource, relativePath, region),
+      normalizeAllowedChanges(currentRegion, deployedRegion, relativePath, region),
+      deployedRegion,
       `${relativePath} protected region "${region.name}" differs from deployed main commit ${PROTECTED_BASE_COMMIT}`,
     );
   }
@@ -650,6 +725,33 @@ test("PR 5 protected regions in shared files match the deployed main commit", ()
     const deployedSource = baselineFile(relativePath).toString("utf8");
     assertFileRegionsMatch(relativePath, regions, currentSource, deployedSource);
   }
+});
+
+test("PR 5 Task 4 Fanwei allowlist rejects changed or unapproved protected text", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const deployedSource = baselineFile(relativePath).toString("utf8");
+  const task4Regions = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === "Fanwei import task creation" || region.name === "Fanwei import handler",
+  );
+
+  const changedAllowlistSource = currentSource.replace(
+    '    error.status = 409;\n',
+    '    error.status = 400;\n',
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(relativePath, task4Regions, changedAllowlistSource, deployedSource),
+    /authorized change Task 4 synced schedule deletion guard must appear exactly once/,
+  );
+
+  const unapprovedMutationSource = currentSource.replace(
+    '  await fs.writeFile(payloadPath, JSON.stringify(model, null, 2), "utf8");\n',
+    '  return null;\n  await fs.writeFile(payloadPath, JSON.stringify(model, null, 2), "utf8");\n',
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(relativePath, task4Regions, unapprovedMutationSource, deployedSource),
+    /protected region "Fanwei import task creation" differs/,
+  );
 });
 
 test("PR 5 shared-region guard rejects an immediate return in handleExamList", () => {

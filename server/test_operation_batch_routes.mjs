@@ -189,7 +189,93 @@ test("rejects reducing Easy Exam requirements after batch creation", async () =>
       })),
     });
     assert.equal(response.status, 409);
-    assert.equal((await response.json()).errorCode, "OPERATION_BATCH_SCHEDULE_DELETE_FORBIDDEN");
+    assert.deepEqual(await response.json(), {
+      error: "批次创建后不允许删除已对应运控日程的易考需求单。",
+      errorCode: "OPERATION_BATCH_SCHEDULE_DELETE_FORBIDDEN",
+    });
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
+test("rejects reducing Easy Exam requirements when only the nested batch code is valid", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-operation-batch-routes-"));
+  const taskId = "nested-batch-schedule-delete-task";
+  seedTask(runtimeDir, {
+    taskId,
+    projectName: "测试项目",
+    config: {
+      projectCard: { sourceKey: "R0031683" },
+      operationBatchCode: "invalid",
+      operationBatch: { code: "EZT260003" },
+      examRequirements: [
+        { id: "requirement-1", fields: { "考试名称": "日程1", "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" } },
+        { id: "requirement-2", fields: { "考试名称": "日程2", "考试日期时间": "2026/08/23 09:00 - 2026/08/23 11:00" } },
+      ],
+    },
+  });
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+    const response = await fetch(`${server.baseUrl}/api/fanwei/requirement-import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fanweiImportPayload({
+        serialNo: "R0031683",
+        requirementFieldsList: [
+          { "考试名称": "日程1", "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" },
+        ],
+      })),
+    });
+    assert.equal(response.status, 409);
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
+test("allows equal, increased, and unbatched Fanwei requirement imports", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-operation-batch-routes-"));
+  const requirement = (name, date) => ({ id: name, fields: { "考试名称": name, "考试日期时间": date } });
+  const cases = [
+    { taskId: "equal-batch-task", serialNo: "R0031684", operationBatchCode: "EZT260003", count: 2 },
+    { taskId: "increased-batch-task", serialNo: "R0031685", operationBatchCode: "EZT260003", count: 3 },
+    { taskId: "unbatched-task", serialNo: "R0031686", operationBatchCode: "invalid", count: 1 },
+  ];
+  for (const entry of cases) {
+    seedTask(runtimeDir, {
+      taskId: entry.taskId,
+      projectName: "测试项目",
+      config: {
+        projectCard: { sourceKey: entry.serialNo },
+        operationBatchCode: entry.operationBatchCode,
+        examRequirements: [
+          requirement("日程1", "2026/08/22 09:00 - 2026/08/22 11:00"),
+          requirement("日程2", "2026/08/23 09:00 - 2026/08/23 11:00"),
+        ],
+      },
+    });
+  }
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+    for (const entry of cases) {
+      const requirementFieldsList = [
+        { "考试名称": "日程1", "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" },
+        { "考试名称": "日程2", "考试日期时间": "2026/08/23 09:00 - 2026/08/23 11:00" },
+      ];
+      if (entry.count === 3) requirementFieldsList.push({ "考试名称": "日程3", "考试日期时间": "2026/08/24 09:00 - 2026/08/24 11:00" });
+      if (entry.count === 1) requirementFieldsList.pop();
+      const response = await fetch(`${server.baseUrl}/api/fanwei/requirement-import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fanweiImportPayload({ serialNo: entry.serialNo, requirementFieldsList })),
+      });
+      assert.equal(response.status, 200, entry.taskId);
+    }
   } finally {
     await stopServer(child);
     rmSync(runtimeDir, { recursive: true, force: true });

@@ -41,14 +41,58 @@ export const PROTECTED_SENTINELS = {
   ],
 };
 
+const TASK4_FANWEI_IMPORT_GUARD_CHANGE = {
+  name: "Task 4 synced schedule deletion guard",
+  current: `  const existingOperationBatchCode = [
+    existingTask?.config?.operationBatchCode,
+    existingTask?.config?.operationBatch?.code,
+  ].find((code) => operationBatchCodeIsValid(code)) || "";
+  const existingRequirementCount = Array.isArray(existingTask?.config?.examRequirements)
+    ? existingTask.config.examRequirements.length
+    : 0;
+  if (operationBatchCodeIsValid(existingOperationBatchCode) && requirementFieldsList.length < existingRequirementCount) {
+    const error = new Error("批次创建后不允许删除已对应运控日程的易考需求单。");
+    error.status = 409;
+    error.errorCode = "OPERATION_BATCH_SCHEDULE_DELETE_FORBIDDEN";
+    throw error;
+  }
+`,
+  baseline: "",
+};
+
+const TASK4_FANWEI_IMPORT_ERROR_MAPPING_CHANGE = {
+  name: "Task 4 Fanwei import conflict error mapping",
+  current: `  try {
+    json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));
+  } catch (error) {
+    json(res, error.status || 500, {
+      error: error instanceof Error ? error.message : String(error),
+      errorCode: error.errorCode,
+      detail: error.detail,
+    });
+  }
+`,
+  baseline: "  json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));\n",
+};
+
 export const PROTECTED_SHARED_REGIONS = {
   "server/easy_exam_server.mjs": [
     { name: "import workbook task creation", kind: "js-block", startAnchor: "async function createImportFromWorkbook({" },
     { name: "auto-config job state", kind: "js-block", startAnchor: "function createJob(importRecord, login) {" },
     { name: "auto-config progress events", kind: "js-block", startAnchor: "function pushEvent(job, evt) {" },
     { name: "Fanwei preview handler", kind: "js-block", startAnchor: "async function handleFanweiRequirementPreview(req, res) {" },
-    { name: "Fanwei import task creation", kind: "js-block", startAnchor: "async function createFanweiRequirementImportFromPayload(payload, req, options = {}) {" },
-    { name: "Fanwei import handler", kind: "js-block", startAnchor: "async function handleFanweiRequirementImport(req, res) {" },
+    {
+      name: "Fanwei import task creation",
+      kind: "allowlisted-js-block",
+      startAnchor: "async function createFanweiRequirementImportFromPayload(payload, req, options = {}) {",
+      allowedChanges: [TASK4_FANWEI_IMPORT_GUARD_CHANGE],
+    },
+    {
+      name: "Fanwei import handler",
+      kind: "allowlisted-js-block",
+      startAnchor: "async function handleFanweiRequirementImport(req, res) {",
+      allowedChanges: [TASK4_FANWEI_IMPORT_ERROR_MAPPING_CHANGE],
+    },
     { name: "Fanwei auto-read status handler", kind: "js-block", startAnchor: "async function handleFanweiAutoReadStatus(_req, res) {" },
     { name: "Fanwei local-read handler", kind: "js-block", startAnchor: "async function handleFanweiLocalRead(req, res) {" },
     { name: "Fanwei auto-read handler", kind: "js-block", startAnchor: "async function handleFanweiAutoRead(req, res) {" },

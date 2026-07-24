@@ -1398,7 +1398,10 @@ async function createFanweiRequirementImportFromPayload(payload, req, options = 
   const user = getAuthUserFromRequest(auth, req);
   const ownerEmail = options.ownerEmail || user?.email || "";
   const existingTask = await findFanweiProject(model.fields["运控流水号"] || payload.serialNo, auth.enabled ? ownerEmail : "");
-  const existingOperationBatchCode = existingTask?.config?.operationBatchCode || existingTask?.config?.operationBatch?.code || "";
+  const existingOperationBatchCode = [
+    existingTask?.config?.operationBatchCode,
+    existingTask?.config?.operationBatch?.code,
+  ].find((code) => operationBatchCodeIsValid(code)) || "";
   const existingRequirementCount = Array.isArray(existingTask?.config?.examRequirements)
     ? existingTask.config.examRequirements.length
     : 0;
@@ -1474,6 +1477,7 @@ async function handleFanweiRequirementImport(req, res) {
     json(res, error.status || 500, {
       error: error instanceof Error ? error.message : String(error),
       errorCode: error.errorCode,
+      detail: error.detail,
     });
   }
 }
