@@ -1468,17 +1468,15 @@ async function visiblePersonnelRequirementsDrawer(page) {
 }
 
 async function exactVisibleRequirementRow(drawer, name) {
-  const rows = drawer.locator("tbody tr:visible");
-  const matches = [];
-  for (let index = 0; index < await rows.count(); index += 1) {
-    const row = rows.nth(index);
-    const cells = (await row.locator("td").allInnerTexts()).map(text);
-    if (cells.includes(text(name))) matches.push(row);
+  const label = drawer.getByText(text(name), { exact: true });
+  if (await label.count() === 0) {
+    await label.waitFor({ state: "visible", timeout: 10_000 });
   }
-  if (matches.length !== 1) {
-    throw operationControlError(`考务需求 ${text(name)} 行`, matches.length);
-  }
-  return matches[0];
+  const exact = await uniqueVisibleControl(label, `考务需求 ${text(name)} 名称`);
+  return uniqueVisibleControl(
+    exact.locator("xpath=ancestor::tr[1]"),
+    `考务需求 ${text(name)} 行`,
+  );
 }
 
 async function editVisibleSchedule(page, schedule, existing) {
