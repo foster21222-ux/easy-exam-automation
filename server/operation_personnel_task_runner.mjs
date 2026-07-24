@@ -66,6 +66,14 @@ function normalizePersonnel(raw = {}) {
   };
 }
 
+function personnelConfigProjection(raw = {}) {
+  const personnel = normalizePersonnel(raw);
+  return {
+    serviceType: personnel.serviceType,
+    platform: personnel.platform,
+  };
+}
+
 function normalizeDates(raw = {}) {
   return {
     start: text(raw.start),
@@ -331,6 +339,92 @@ export function operationPersonnelBatchIdentityFromVisibleRaw(raw = {}) {
       published: statusUnique && [...(raw.statusTags || [])].map(text).includes("已发布"),
     },
     evidence: { present: missing.length === 0, missing },
+  };
+}
+
+const VISIBLE_PERSONNEL_REQUIREMENT_NAMES = Object.freeze([
+  "正式考试-最早登录系统时间",
+  "正式考试-监考人员安排",
+  "正式考试-监考人员数量",
+  "正式考试-监考人员比例",
+  "正式考试-监考登录监控",
+]);
+
+function visibleLineValue(lines, label) {
+  const values = [];
+  const prefix = `${label}：`;
+  const alternatePrefix = `${label}:`;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = text(lines[index]).replace(/\s+/g, " ");
+    if (line === label || line === prefix || line === alternatePrefix) {
+      const next = text(lines[index + 1]).replace(/\s+/g, " ");
+      if (next) values.push(next);
+    } else if (line.startsWith(prefix) || line.startsWith(alternatePrefix)) {
+      values.push(text(line.slice(
+        line.startsWith(prefix) ? prefix.length : alternatePrefix.length,
+      )));
+    }
+  }
+  return values.length === 1 ? values[0] : "";
+}
+
+export function operationPersonnelPageFromVisibleRaw(raw = {}) {
+  const lines = [...(raw.lines || [])].map(text).filter(Boolean);
+  const dateRange = visibleLineValue(lines, "人员落实日期");
+  const [start = "", end = "", ...extraDates] = dateRange.split("~").map(text);
+  const platform = visibleLineValue(lines, "人员落实平台");
+  const monitorType = visibleLineValue(lines, "监考类型");
+  const nameListDue = visibleLineValue(lines, "人员名单提交日期");
+  const requirements = VISIBLE_PERSONNEL_REQUIREMENT_NAMES.map((name) => ({
+    name,
+    value: visibleLineValue(lines, name),
+  }));
+  const requirement = (name) => requirements.find((item) => item.name === name)?.value || "";
+  const earliestLoginMinutes = requirement("正式考试-最早登录系统时间")
+    .match(/前\s*(\d+)\s*分钟/)?.[1] || "";
+  const personnelMissing = [
+    ["人员落实平台", platform],
+    ["监考类型", monitorType === "分散监考"],
+    ["正式考试-最早登录系统时间", earliestLoginMinutes],
+    ["正式考试-监考人员数量", requirement("正式考试-监考人员数量")],
+    ["正式考试-监考人员比例", requirement("正式考试-监考人员比例")],
+    ["正式考试-监考登录监控", requirement("正式考试-监考登录监控")],
+  ].filter(([, present]) => !present).map(([label]) => label);
+  const datesMissing = [
+    ["人员落实开始日期", start],
+    ["人员落实结束日期", end && extraDates.length === 0],
+    ["人员名单提交日期", nameListDue],
+  ].filter(([, present]) => !present).map(([label]) => label);
+  const requirementsMissing = requirements
+    .filter((item) => !item.value)
+    .map((item) => item.name);
+  return {
+    personnel: normalizePersonnel({
+      serviceType: monitorType === "分散监考" ? "ATA 监考－分散在线监考" : "",
+      platform,
+      loginMonitoring: requirement("正式考试-监考登录监控"),
+      monitorRatio: requirement("正式考试-监考人员比例"),
+      candidateBasis: "",
+      monitorCount: requirement("正式考试-监考人员数量"),
+      earliestLoginMinutes,
+      trialIncluded: false,
+    }),
+    dates: normalizeDates({ start, end, nameListDue }),
+    requirements,
+    evidence: {
+      personnel: {
+        present: personnelMissing.length === 0,
+        missing: personnelMissing,
+      },
+      dates: {
+        present: datesMissing.length === 0,
+        missing: datesMissing,
+      },
+      requirements: {
+        present: requirementsMissing.length === 0,
+        missing: requirementsMissing,
+      },
+    },
   };
 }
 
@@ -1213,19 +1307,6 @@ async function fillVisibleField(page, label, value) {
   await control.fill(text(value));
 }
 
-async function chooseVisibleOption(page, label, value) {
-  const control = await labeledVisibleControl(
-    page,
-    label,
-    ".ant-select:visible, [role='combobox']:visible",
-  );
-  await control.click();
-  const option = typeof page?.getByRole === "function"
-    ? page.getByRole("option", { name: text(value), exact: true })
-    : null;
-  await clickUniqueVisible(option, `${label}选项 ${text(value)}`);
-}
-
 async function confirmTopVisibleDialog(page, buttonName = "确定") {
   const dialog = await topVisibleDialog(page, "运控弹窗");
   const button = dialog.getByRole("button", { name: buttonName, exact: true });
@@ -1236,6 +1317,127 @@ async function readVisibleSection(page, key) {
   const snapshot = await readVisibleOperationPersonnelSnapshot(page);
   assertVisibleSection(snapshot, key);
   return snapshot[key];
+}
+
+async function ensureVisiblePersonnelPage(page, instruction = {}) {
+  await locateOperationPersonnelBatch(page, instruction);
+  await clickUniqueVisible(
+    page.getByRole("tab", { name: "人员", exact: true }),
+    "批次详情人员页签",
+  );
+  await clickUniqueVisible(
+    page.getByRole("tab", { name: "在线监考", exact: true }),
+    "人员在线监考页签",
+  );
+  const config = page.getByText("配置项", { exact: true });
+  if (await config.count() === 0) {
+    await config.waitFor({ state: "visible", timeout: 10_000 });
+  }
+  await uniqueVisibleControl(config, "在线监考配置项");
+}
+
+async function readVisiblePersonnelPage(page) {
+  if (typeof page.waitForFunction === "function") {
+    await page.waitForFunction(() => {
+      const value = String(document.body?.innerText ?? "");
+      return value.includes("人员落实日期")
+        && value.includes("人员落实平台")
+        && value.includes("正式考试-监考人员数量");
+    }, undefined, { timeout: 10_000 });
+  }
+  const raw = await page.evaluate(() => ({
+    lines: String(document.body?.innerText ?? "")
+      .split(/\n+/)
+      .map((value) => value.trim().replace(/\s+/g, " "))
+      .filter(Boolean),
+  }));
+  return operationPersonnelPageFromVisibleRaw(raw);
+}
+
+async function readVisiblePersonnelPageSection(page, key) {
+  const snapshot = await readVisiblePersonnelPage(page);
+  assertVisibleSection(snapshot, key);
+  return snapshot[key];
+}
+
+async function openVisiblePersonnelSectionEditor(page, label) {
+  const title = await uniqueVisibleControl(
+    page.getByText(label, { exact: true }),
+    `在线监考${label}标题`,
+  );
+  let header = title.locator("xpath=ancestor::*[@role='button'][1]");
+  if (await header.count() !== 1) {
+    header = title.locator(
+      "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-collapse-header ')][1]",
+    );
+  }
+  if (await header.count() !== 1) {
+    throw operationControlError(`在线监考${label}区块`, await header.count());
+  }
+  await clickUniqueVisible(
+    header.locator(".anticon-edit:visible"),
+    `在线监考${label}编辑按钮`,
+  );
+}
+
+async function visiblePersonnelConfigDialog(page) {
+  const startInput = page.locator('input[placeholder="开始日期"]:visible');
+  if (await startInput.count() === 0) {
+    await startInput.waitFor({ state: "visible", timeout: 10_000 });
+  }
+  const dialogs = page.locator(".ant-modal:visible").filter({ has: startInput });
+  return uniqueVisibleControl(dialogs, "在线监考配置项弹窗");
+}
+
+async function fillVisibleDateInput(dialog, placeholder, value) {
+  const input = await uniqueVisibleControl(
+    dialog.locator(`input[placeholder="${placeholder}"]:visible`),
+    `${placeholder}输入框`,
+  );
+  await input.fill(text(value));
+  await input.press("Tab");
+}
+
+async function chooseVisibleRadio(dialog, name) {
+  await clickUniqueVisible(
+    dialog.getByRole("radio", { name: text(name), exact: true }),
+    `${text(name)}单选项`,
+  );
+}
+
+async function confirmVisiblePersonnelConfig(page, dialog) {
+  await clickUniqueNamedButton(
+    dialog,
+    ["确 定", "确定"],
+    "在线监考配置项确定按钮",
+  );
+  await dialog.waitFor({ state: "hidden", timeout: 10_000 });
+  await readVisiblePersonnelPage(page);
+}
+
+async function visiblePersonnelRequirementsDrawer(page) {
+  const title = page.getByText("在线监考——考务需求", { exact: true });
+  if (await title.count() === 0) {
+    await title.waitFor({ state: "visible", timeout: 10_000 });
+  }
+  const drawers = page.locator(".ant-drawer:visible").filter({
+    hasText: "在线监考——考务需求",
+  });
+  return uniqueVisibleControl(drawers, "在线监考考务需求抽屉");
+}
+
+async function exactVisibleRequirementRow(drawer, name) {
+  const rows = drawer.locator("tbody tr:visible");
+  const matches = [];
+  for (let index = 0; index < await rows.count(); index += 1) {
+    const row = rows.nth(index);
+    const firstCell = text(await row.locator("td").first().innerText());
+    if (firstCell === text(name)) matches.push(row);
+  }
+  if (matches.length !== 1) {
+    throw operationControlError(`考务需求 ${text(name)} 行`, matches.length);
+  }
+  return matches[0];
 }
 
 async function editVisibleSchedule(page, schedule, existing) {
@@ -1260,40 +1462,6 @@ async function editVisibleSchedule(page, schedule, existing) {
   await fillVisibleField(page, "时长", schedule.durationMinutes);
   await fillVisibleField(page, "提前登录分钟数", schedule.earlyLoginMinutes);
   await confirmTopVisibleDialog(page);
-}
-
-async function syncVisibleRequirements(page, target = [], current = []) {
-  const targetNames = new Set(target.map((item) => item.name));
-  for (const item of current.filter((candidate) => !targetNames.has(candidate.name))) {
-    const rows = await exactVisibleRows(page, item.name);
-    if (rows.length !== 1) throw operationControlError(`考务需求 ${item.name} 行`, rows.length);
-    await clickUniqueVisible(
-      rows[0].getByRole("button", { name: "删除", exact: true }),
-      `考务需求 ${item.name} 删除按钮`,
-    );
-    await confirmTopVisibleDialog(page);
-  }
-  const currentByName = new Map(current.map((item) => [item.name, item]));
-  for (const item of target) {
-    const existing = currentByName.get(item.name);
-    if (existing && sameData(existing, item)) continue;
-    if (existing) {
-      const rows = await exactVisibleRows(page, item.name);
-      if (rows.length !== 1) throw operationControlError(`考务需求 ${item.name} 行`, rows.length);
-      await clickUniqueVisible(
-        rows[0].getByRole("button", { name: "编辑", exact: true }),
-        `考务需求 ${item.name} 编辑按钮`,
-      );
-    } else {
-      await clickUniqueVisible(
-        page.getByRole("button", { name: "新增考务需求", exact: true }),
-        "新增考务需求按钮",
-      );
-    }
-    await fillVisibleField(page, "考务需求", item.name);
-    await fillVisibleField(page, "需求内容", item.value);
-    await confirmTopVisibleDialog(page);
-  }
 }
 
 async function selectVisiblePeople(dialog, groupName, people) {
@@ -1543,9 +1711,9 @@ export async function readVisibleTopRightSendRecords(page) {
 const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
   readBatch: (page) => readVisibleSection(page, "batch"),
   readSchedules: (page) => readVisibleSection(page, "schedules"),
-  readPersonnel: (page) => readVisibleSection(page, "personnel"),
-  readDates: (page) => readVisibleSection(page, "dates"),
-  readRequirements: (page) => readVisibleSection(page, "requirements"),
+  readPersonnel: (page) => readVisiblePersonnelPageSection(page, "personnel"),
+  readDates: (page) => readVisiblePersonnelPageSection(page, "dates"),
+  readRequirements: (page) => readVisiblePersonnelPageSection(page, "requirements"),
   readTaskSheet: async (page) => (await readVisiblePersonnelTaskSheet(page)).taskSheet,
   readSendRecords: (page) => readVisibleTopRightSendRecords(page),
   readDirectoryGroups: (page) => readVisibleSection(page, "directoryGroups"),
@@ -1578,34 +1746,56 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
     await confirmTopVisibleDialog(_page);
   },
 
-  async syncPersonnelConfig(page, personnel = {}) {
-    await chooseVisibleOption(page, "人员服务类型", personnel.serviceType);
-    await chooseVisibleOption(page, "人员落实平台", personnel.platform);
-    await chooseVisibleOption(page, "监考登录监控", personnel.loginMonitoring);
-    await chooseVisibleOption(page, "监考比例", personnel.monitorRatio);
-    await fillVisibleField(page, "监考人数计算基数", personnel.candidateBasis);
-    await fillVisibleField(page, "监考人数", personnel.monitorCount);
-    await fillVisibleField(page, "最早登录系统时间", personnel.earliestLoginMinutes);
-    await chooseVisibleOption(page, "试考监考", personnel.trialIncluded ? "是" : "否");
-    await clickUniqueVisible(
-      page.getByRole("button", { name: "保存人员配置", exact: true }),
-      "保存人员配置按钮",
-    );
+  async syncPersonnelConfig(page, personnel = {}, _current = {}, instruction = {}) {
+    if (text(personnel.serviceType) !== "ATA 监考－分散在线监考") {
+      throw operationConflict("人员服务类型不是 ATA 分散在线监考");
+    }
+    await ensureVisiblePersonnelPage(page, instruction);
+    await openVisiblePersonnelSectionEditor(page, "配置项");
+    const dialog = await visiblePersonnelConfigDialog(page);
+    await chooseVisibleRadio(dialog, personnel.platform);
+    await chooseVisibleRadio(dialog, "分散监考");
+    await confirmVisiblePersonnelConfig(page, dialog);
   },
 
-  async syncPersonnelDates(page, dates = {}) {
-    await fillVisibleField(page, "人员落实开始日期", dates.start);
-    await fillVisibleField(page, "人员落实结束日期", dates.end);
-    await fillVisibleField(page, "人员名单提交日期", dates.nameListDue);
-    await clickUniqueVisible(
-      page.getByRole("button", { name: "保存人员日期", exact: true }),
-      "保存人员日期按钮",
-    );
+  async syncPersonnelDates(page, dates = {}, current = {}, instruction = {}) {
+    await ensureVisiblePersonnelPage(page, instruction);
+    await openVisiblePersonnelSectionEditor(page, "配置项");
+    const dialog = await visiblePersonnelConfigDialog(page);
+    if (text(current.start) !== text(dates.start)) {
+      await fillVisibleDateInput(dialog, "开始日期", dates.start);
+    }
+    if (text(current.end) !== text(dates.end)) {
+      await fillVisibleDateInput(dialog, "结束日期", dates.end);
+    }
+    if (text(current.nameListDue) !== text(dates.nameListDue)) {
+      await fillVisibleDateInput(dialog, "请选择日期", dates.nameListDue);
+    }
+    await confirmVisiblePersonnelConfig(page, dialog);
   },
 
-  syncExamServiceRequirements: (page, target, current) => (
-    syncVisibleRequirements(page, target, current)
-  ),
+  async syncExamServiceRequirements(page, target = [], current = [], instruction = {}) {
+    await ensureVisiblePersonnelPage(page, instruction);
+    await openVisiblePersonnelSectionEditor(page, "考务需求");
+    const drawer = await visiblePersonnelRequirementsDrawer(page);
+    const currentByName = new Map(current.map((item) => [text(item.name), text(item.value)]));
+    for (const item of target) {
+      if (currentByName.get(text(item.name)) === text(item.value)) continue;
+      const row = await exactVisibleRequirementRow(drawer, item.name);
+      const input = await uniqueVisibleControl(
+        row.locator("textarea:visible"),
+        `考务需求 ${text(item.name)} 描述`,
+      );
+      await input.fill(text(item.value));
+    }
+    await clickUniqueNamedButton(
+      drawer,
+      ["确 定", "确定"],
+      "在线监考考务需求确定按钮",
+    );
+    await drawer.waitFor({ state: "hidden", timeout: 10_000 });
+    await readVisiblePersonnelPage(page);
+  },
 
   openTaskSheet: (page, instruction = {}) => (
     openVisiblePersonnelTaskSheet(page, instruction)
@@ -1819,7 +2009,10 @@ function assertTaskSheetReady(expected, actual) {
   ))) {
     throw taskSheetBlocked("页面发送条件未全部满足");
   }
-  return assertReadback("verify_task_sheet", expected, actual);
+  if (text(expected.type) && text(expected.type) !== text(actual.type)) {
+    throw operationConflict("verify_task_sheet 任务单类型与已确认目标不一致");
+  }
+  return actual;
 }
 
 function scheduleNotUnique(schedule, count) {
@@ -1884,22 +2077,38 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     const raw = await operationMethod(page, options, readName)(page, instruction);
     return normalizeOperationPersonnelSnapshot({ [key]: raw })[key];
   };
-  const sync = async (checkpointName, optionName, readName, key, action) => {
+  const sync = async (
+    checkpointName,
+    optionName,
+    readName,
+    key,
+    action,
+    project = (value) => value,
+  ) => {
+    const inspectedRaw = snapshot[key];
+    const inspected = project(inspectedRaw);
+    const desired = project(target[key]);
+    const unchanged = sameData(inspected, desired);
     const readAndVerify = async () => assertReadback(
       checkpointName,
-      target[key],
-      await readSection(readName, key),
+      desired,
+      project(await readSection(readName, key)),
     );
     snapshot[key] = await runPersonnelCheckpoint({
       name: checkpointName,
-      target: target[key],
+      target: desired,
       action: action || (async () => {
-        if (!sameData(snapshot[key], target[key])) {
-          await operationMethod(page, options, optionName)(page, target[key], snapshot[key], instruction);
+        if (!unchanged) {
+          await operationMethod(page, options, optionName)(
+            page,
+            target[key],
+            inspectedRaw,
+            instruction,
+          );
         }
       }),
-      verify: readAndVerify,
-      verifyCompleted: readAndVerify,
+      verify: unchanged ? async () => inspected : readAndVerify,
+      verifyCompleted: unchanged ? async () => inspected : readAndVerify,
       instruction,
       options,
     });
@@ -1946,7 +2155,14 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
       }
     },
   );
-  await sync(OPERATION_PERSONNEL_CHECKPOINTS[3], "syncPersonnelConfig", "readPersonnel", "personnel");
+  await sync(
+    OPERATION_PERSONNEL_CHECKPOINTS[3],
+    "syncPersonnelConfig",
+    "readPersonnel",
+    "personnel",
+    undefined,
+    personnelConfigProjection,
+  );
   await sync(OPERATION_PERSONNEL_CHECKPOINTS[4], "syncPersonnelDates", "readDates", "dates");
   await sync(
     OPERATION_PERSONNEL_CHECKPOINTS[5],

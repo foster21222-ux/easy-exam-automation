@@ -100,6 +100,19 @@ function inspectionFor(task, environment = "test") {
   };
 }
 
+function requirementsForPersonnel(personnel = {}) {
+  return [
+    {
+      name: "正式考试-最早登录系统时间",
+      value: `考生可于考试开始前${personnel.earliestLoginMinutes}分钟登录`,
+    },
+    { name: "正式考试-监考人员安排", value: "ATA监考-分散" },
+    { name: "正式考试-监考人员数量", value: String(personnel.monitorCount) },
+    { name: "正式考试-监考人员比例", value: String(personnel.monitorRatio) },
+    { name: "正式考试-监考登录监控", value: String(personnel.loginMonitoring) },
+  ];
+}
+
 function successfulAttemptResult(overrides = {}) {
   return {
     status: "sent",
@@ -171,7 +184,7 @@ function serviceHarness(options = {}) {
       schedules: draft.schedules,
       personnel: draft.personnel,
       dates: draft.dates,
-      requirements: draft.operationRequirements,
+      requirements: requirementsForPersonnel(draft.personnel),
       taskSheet: draft.operationTaskSheet,
       directoryMatch: draft.directoryMatch,
     });
@@ -414,6 +427,12 @@ test("test external baseline excludes allowed identity and equivalent schedule d
   assert.deepEqual(attempt.target.schedules, current.schedules);
   assert.equal(attempt.target.batch.projectCode, "4473-26");
   assert.equal(attempt.target.batch.projectName, "测试运控项目");
+  assert.equal(
+    attempt.target.requirements.find((item) => (
+      item.name === "正式考试-监考人员数量"
+    )).value,
+    String(draft.personnel.monitorCount),
+  );
 });
 
 test("unchanged external baseline blocks before directory inspection", async () => {
@@ -427,6 +446,7 @@ test("unchanged external baseline blocks before directory inspection", async () 
   current.schedules = structuredClone(draft.schedules);
   current.personnel = structuredClone(draft.personnel);
   current.dates = structuredClone(draft.dates);
+  current.requirements = requirementsForPersonnel(draft.personnel);
   harness.setInspection(current);
 
   await assert.rejects(

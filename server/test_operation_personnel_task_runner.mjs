@@ -70,6 +70,71 @@ test("current operation detail header never invents ambiguous identity fields", 
   ]);
 });
 
+test("personnel page visible lines map configuration dates and requirements", () => {
+  assert.deepEqual(operationPersonnelRunner.operationPersonnelPageFromVisibleRaw({
+    lines: [
+      "配置项",
+      "人员落实日期：",
+      "2026-07-24 ~ 2026-08-18",
+      "人员落实平台：",
+      "悦站",
+      "监考类型：",
+      "分散监考",
+      "人员名单提交日期：",
+      "2026-08-19",
+      "考务需求",
+      "正式考试-最早登录系统时间： 考生可于考试开始前30分钟登录",
+      "正式考试-监考人员安排： ATA监考-分散",
+      "正式考试-监考人员数量： 3",
+      "正式考试-监考人员比例： 1:50",
+      "正式考试-监考登录监控： 是",
+    ],
+  }), {
+    personnel: {
+      serviceType: "ATA 监考－分散在线监考",
+      platform: "悦站",
+      loginMonitoring: "是",
+      monitorRatio: "1:50",
+      candidateBasis: "",
+      monitorCount: 3,
+      earliestLoginMinutes: 30,
+      trialIncluded: false,
+    },
+    dates: {
+      start: "2026-07-24",
+      end: "2026-08-18",
+      nameListDue: "2026-08-19",
+    },
+    requirements: [
+      {
+        name: "正式考试-最早登录系统时间",
+        value: "考生可于考试开始前30分钟登录",
+      },
+      {
+        name: "正式考试-监考人员安排",
+        value: "ATA监考-分散",
+      },
+      {
+        name: "正式考试-监考人员数量",
+        value: "3",
+      },
+      {
+        name: "正式考试-监考人员比例",
+        value: "1:50",
+      },
+      {
+        name: "正式考试-监考登录监控",
+        value: "是",
+      },
+    ],
+    evidence: {
+      personnel: { present: true, missing: [] },
+      dates: { present: true, missing: [] },
+      requirements: { present: true, missing: [] },
+    },
+  });
+});
+
 function visiblePersonnelTaskSheetRaw(overrides = {}) {
   return {
     conditions: [
@@ -987,6 +1052,72 @@ test("published inspection evidence survives navigation to the task sheet", asyn
   assert.equal(batchReads, 1);
 });
 
+test("unchanged inspected sections do not require a second page read", async () => {
+  const page = fakeOperationPage({
+    published: true,
+    schedules: validInstruction().target.schedules,
+    personnelPlatform: "悦站",
+  });
+  let scheduleReads = 0;
+  let personnelReads = 0;
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      readSchedules: async () => {
+        scheduleReads += 1;
+        if (scheduleReads > 1) throw new Error("schedule editor is no longer visible");
+        return page.state.schedules;
+      },
+      readPersonnel: async () => {
+        personnelReads += 1;
+        if (personnelReads > 1) throw new Error("personnel editor is no longer visible");
+        return page.state.personnel;
+      },
+    }),
+  );
+  assert.equal(scheduleReads, 1);
+  assert.equal(personnelReads, 1);
+});
+
+test("requirement-managed personnel changes do not edit personnel config", async () => {
+  const baseline = structuredClone(validInstruction().target);
+  baseline.personnel.candidateBasis = "";
+  baseline.personnel.monitorCount = 3;
+  baseline.requirements = [{
+    name: "正式考试-监考人员数量",
+    value: "3",
+  }];
+  const target = structuredClone(baseline);
+  target.personnel.candidateBasis = 60;
+  target.personnel.monitorCount = 2;
+  target.requirements = [{
+    name: "正式考试-监考人员数量",
+    value: "2",
+  }];
+  const page = fakeOperationPage({
+    published: true,
+    schedules: baseline.schedules,
+    personnelPlatform: baseline.personnel.platform,
+    dates: baseline.dates,
+    requirements: baseline.requirements,
+    taskSheet: target.taskSheet,
+  });
+  page.state.personnel = structuredClone(baseline.personnel);
+
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({
+      kind: "resend",
+      baseline,
+      target,
+      changeSummary: "正式考试监考人数调整",
+    }),
+    attemptOptions(page),
+  );
+
+  assert.equal(page.events.includes("personnel:fill"), false);
+  assert.equal(page.events.includes("requirements:fill"), true);
+});
+
 test("normal pages use the concrete visible adapter for publish and final confirm", async () => {
   const page = simulatedVisibleOperationPage();
   const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
@@ -1288,6 +1419,21 @@ test("task sheet conditions must all be satisfied before recipients are selected
     attemptOptions(page),
   ), { code: "PERSONNEL_TASK_SHEET_BLOCKED" });
   assert.equal(page.events.includes("recipients:select"), false);
+});
+
+test("task sheet content may change after verified operation settings are saved", async () => {
+  const page = fakeOperationPage({
+    taskSheet: {
+      ...validInstruction().target.taskSheet,
+      content: "运控按最新配置重新生成的任务内容",
+    },
+  });
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page),
+  );
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.includes("recipients:select"), true);
 });
 
 test("recipient matching requires the exact environment directory result", () => {

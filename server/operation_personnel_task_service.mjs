@@ -163,6 +163,31 @@ function equivalentVisibleSchedule(target = {}, actual = {}) {
       || text(actual.scheduleEntryId) === text(target.scheduleEntryId));
 }
 
+function requirementsFromPersonnel(personnel = {}) {
+  return [
+    {
+      name: "正式考试-最早登录系统时间",
+      value: `考生可于考试开始前${text(personnel.earliestLoginMinutes)}分钟登录`,
+    },
+    {
+      name: "正式考试-监考人员安排",
+      value: "ATA监考-分散",
+    },
+    {
+      name: "正式考试-监考人员数量",
+      value: text(personnel.monitorCount),
+    },
+    {
+      name: "正式考试-监考人员比例",
+      value: text(personnel.monitorRatio),
+    },
+    {
+      name: "正式考试-监考登录监控",
+      value: text(personnel.loginMonitoring),
+    },
+  ];
+}
+
 function targetFromDraft(draft = {}, snapshot = {}) {
   const batch = {
     ...(snapshot.batch || {}),
@@ -188,7 +213,7 @@ function targetFromDraft(draft = {}, snapshot = {}) {
     schedules,
     personnel: draft.personnel || {},
     dates: draft.dates || {},
-    requirements: draft.operationRequirements || snapshot.requirements || [],
+    requirements: requirementsFromPersonnel(draft.personnel),
     taskSheet: draft.operationTaskSheet || snapshot.taskSheet || {},
     sendRecords: snapshot.sendRecords || [],
     directoryMatch: draft.directoryMatch || snapshot.directoryMatch || {},
@@ -275,6 +300,10 @@ function operationSnapshotChanges(before = {}, after = {}, prefix = "") {
       prefix ? `${prefix}.${key}` : key,
     ))
     .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function confirmationOperationChanges(changes = []) {
+  return changes.filter((item) => !text(item.path).startsWith("requirements."));
 }
 
 function changeValue(value) {
@@ -543,7 +572,9 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
             "人员任务内容未变化，不允许重复发送",
           );
         }
-        const directoryProbeSummary = suggestedChangeSummary(operationChanges);
+        const directoryProbeSummary = suggestedChangeSummary(
+          confirmationOperationChanges(operationChanges),
+        );
         const fullSnapshot = normalizeOperationPersonnelSnapshot(await runInspection({
           environment,
           batch: draft.batch,
@@ -682,7 +713,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         draftVersion,
         state: next,
         changes: diffOperationPersonnelTaskDrafts(freshState.draft || {}, draft),
-        operationChanges,
+        operationChanges: confirmationOperationChanges(operationChanges),
       };
     });
   }
