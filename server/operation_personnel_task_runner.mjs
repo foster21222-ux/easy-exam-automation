@@ -1253,6 +1253,9 @@ async function uniqueVisibleModalWithText(page, value, label) {
     return topVisibleDialog(page, label);
   }
   const modals = visibleModals.filter({ hasText: value });
+  if (await modals.count() === 0) {
+    await modals.first().waitFor({ state: "visible", timeout: 10_000 });
+  }
   return uniqueVisibleControl(modals, label);
 }
 
