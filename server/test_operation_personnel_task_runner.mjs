@@ -263,7 +263,6 @@ function fakePersonnelTaskListPage(rows = []) {
             "项目经理",
             "首次发送时间",
             "最近一次发送时间",
-            "操作",
           ],
         };
       }
@@ -333,8 +332,8 @@ test("current personnel task list opens the exact fixed action row", async () =>
     "function",
   );
   const page = fakePersonnelTaskListPage([
-    ["其它批次", "项目实施五部", "经理", "", "", "发送任务单"],
-    ["目标批次", "项目实施五部", "经理", "2026-07-23 10:09:34", "2026-07-23 10:09:34", "发送任务单"],
+    ["其它批次", "项目实施五部", "经理", "", ""],
+    ["目标批次", "项目实施五部", "经理", "2026-07-23 10:09:34", "2026-07-23 10:09:34"],
   ]);
 
   await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
@@ -358,8 +357,8 @@ test("current personnel task list blocks duplicate exact batch names", async () 
     "function",
   );
   const page = fakePersonnelTaskListPage([
-    ["目标批次", "项目实施五部", "经理", "", "", "发送任务单"],
-    ["目标批次", "项目实施五部", "经理", "", "", "发送任务单"],
+    ["目标批次", "项目实施五部", "经理", "", ""],
+    ["目标批次", "项目实施五部", "经理", "", ""],
   ]);
 
   await assert.rejects(

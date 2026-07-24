@@ -515,7 +515,7 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   for (let index = 0; index < await tables.count(); index += 1) {
     const table = tables.nth(index);
     const headers = (await table.locator("thead th").allInnerTexts()).map(text);
-    if (headers.includes("批次名称") && headers.includes("操作")) {
+    if (headers.includes("批次名称")) {
       matches.push({ table, headers });
     }
   }
