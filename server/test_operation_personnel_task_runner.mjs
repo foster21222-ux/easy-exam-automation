@@ -132,7 +132,7 @@ test("current personnel task sheet maps visible tables into a normalized snapsho
     projectDepartment: "项目实施五部",
     projectManager: "经理",
     systemType: "易考",
-    published: false,
+    published: true,
   });
   assert.deepEqual(snapshot.schedules, [{
     scheduleEntryId: "",

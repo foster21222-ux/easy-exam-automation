@@ -461,6 +461,11 @@ export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
       projectDepartment: values.get("项目部归属"),
       projectManager: values.get("项目经理"),
       systemType: values.get("系统类型"),
+      published: conditions.some((item) => (
+        item.satisfied
+        && item.name.includes("批次状态")
+        && item.name.includes("已发布")
+      )),
     },
     schedules,
     personnel: {
