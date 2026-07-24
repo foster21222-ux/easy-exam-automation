@@ -492,7 +492,7 @@ function validInstruction(overrides = {}) {
       content: "任务内容",
     },
     directoryMatch: {
-      to: [{ group: "演示组", id: "u1", name: "张乐翔" }],
+      to: [{ group: "演练组", id: "u1", name: "张乐翔" }],
       cc: [],
     },
   };
@@ -616,7 +616,7 @@ function attemptOptions(page = fakeOperationPage(), overrides = {}) {
     readTaskSheet: async () => page.state.taskSheet,
     readSendRecords: async () => page.state.sendRecords,
     readDirectoryGroups: async () => [
-      { name: "演示组", people: [{ id: "u1", name: "张乐翔" }] },
+      { name: "演练组", people: [{ id: "u1", name: "张乐翔" }] },
     ],
     publishBatch: async () => {
       page.events.push("publish:click");
@@ -685,7 +685,7 @@ function inspectionReaders(overrides = {}) {
     readTaskSheet: async () => ({}),
     readSendRecords: async () => [],
     readDirectoryGroups: async () => [
-      { name: "演示组", people: [{ id: "u1", name: "张乐翔" }] },
+      { name: "演练组", people: [{ id: "u1", name: "张乐翔" }] },
     ],
     ...overrides,
   };
@@ -701,7 +701,7 @@ function visibleSnapshot(evidence = {}) {
     taskSheet: {},
     sendRecords: [],
     directoryGroups: [
-      { name: "演示组", people: [{ id: "u1", name: "张乐翔" }] },
+      { name: "演练组", people: [{ id: "u1", name: "张乐翔" }] },
     ],
     evidence: {
       batch: { present: true },
@@ -1052,7 +1052,7 @@ test("task sheet conditions must all be satisfied before recipients are selected
 test("recipient matching requires the exact environment directory result", () => {
   assert.deepEqual(matchOperationPersonnelRecipients({
     environment: "test",
-    groups: [{ name: "演示组", people: [{ id: "u1", name: "张乐翔" }] }],
+    groups: [{ name: "演练组", people: [{ id: "u1", name: "张乐翔" }] }],
   }), {
     to: [{ id: "u1", name: "张乐翔" }],
     cc: [],
@@ -1079,7 +1079,7 @@ test("snapshot normalization is stable and keeps only matched directory people",
     ],
     personnel: { platform: " 悦站 ", monitorCount: "2" },
     directoryMatch: {
-      to: [{ group: " 演示组 ", id: " u1 ", name: " 张乐翔 ", email: "secret@example.com" }],
+      to: [{ group: " 演练组 ", id: " u1 ", name: " 张乐翔 ", email: "secret@example.com" }],
       cc: [],
       groups: [{ name: "不应保存", people: [{ id: "secret" }] }],
     },
@@ -1131,7 +1131,7 @@ test("snapshot normalization is stable and keeps only matched directory people",
     taskSheet: { type: "", conditions: [], content: "" },
     sendRecords: [],
     directoryMatch: {
-      to: [{ group: "演示组", id: "u1", name: "张乐翔" }],
+      to: [{ group: "演练组", id: "u1", name: "张乐翔" }],
       cc: [],
     },
   });
@@ -1161,14 +1161,14 @@ test("inspection opens only the exact batch code and returns a read-only snapsho
     readTaskSheet: async () => ({ type: "分散在线监考", content: "任务内容" }),
     readSendRecords: async () => [{ type: "首次发送", sentAt: "2026-07-23 11:00" }],
     readDirectoryGroups: async () => [
-      { name: "演示组", people: [{ id: "u1", name: "张乐翔", email: "hidden@example.com" }] },
+      { name: "演练组", people: [{ id: "u1", name: "张乐翔", email: "hidden@example.com" }] },
       { name: "其它组", people: [{ id: "u9", name: "不应返回" }] },
     ],
   });
 
   assert.deepEqual(opened, ["target"]);
   assert.deepEqual(snapshot.directoryMatch, {
-    to: [{ group: "演示组", id: "u1", name: "张乐翔" }],
+    to: [{ group: "演练组", id: "u1", name: "张乐翔" }],
     cc: [],
   });
   assert.equal(JSON.stringify(snapshot).includes("hidden@example.com"), false);
@@ -1245,7 +1245,7 @@ test("inspection resolves the exact directory only with a real probe summary", a
       readDirectoryGroups: async () => {
         directoryReads += 1;
         return [{
-          name: "演示组",
+          name: "演练组",
           people: [{ id: "u1", name: "张乐翔" }],
         }];
       },
@@ -1254,7 +1254,7 @@ test("inspection resolves the exact directory only with a real probe summary", a
 
   assert.equal(directoryReads, 1);
   assert.deepEqual(snapshot.directoryMatch, {
-    to: [{ group: "演示组", id: "u1", name: "张乐翔" }],
+    to: [{ group: "演练组", id: "u1", name: "张乐翔" }],
     cc: [],
   });
 });
@@ -1280,7 +1280,7 @@ test("attempt change summary rechecks the exact directory before applying change
       readDirectoryGroups: async () => {
         directoryReads += 1;
         return [{
-          name: "演示组",
+          name: "演练组",
           people: [{ id: "u1", name: "张乐翔" }],
         }];
       },

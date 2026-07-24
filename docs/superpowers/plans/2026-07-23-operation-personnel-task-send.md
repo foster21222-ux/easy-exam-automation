@@ -15,7 +15,7 @@
 - 运控页面始终通过现有持久化浏览器资料目录以可见客户端方式操作。
 - 建批次和人员任务必须共用 `persistent-profile` 浏览器锁；同一项目只能存在一个人员发送 attempt。
 - 正式环境收件人为“拓展二部 / 唐润梅”，抄送“结算组”全部且必须恰好 4 人。
-- 测试环境收件人为“演示组 / 张乐翔”，无抄送；不得回退到正式收件人。
+- 测试环境收件人为“演练组 / 张乐翔”，无抄送；不得回退到正式收件人。
 - 环境只读取服务端 `OPERATION_CONSOLE_ENVIRONMENT=test|production`；请求体和页面都不能临时切换环境，未知值必须阻断。
 - 首次发送时未发布批次要在统一确认中显示并自动发布；重发不重复发布。
 - 内容指纹完全一致时前端和服务端都禁止重发。
@@ -171,7 +171,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 const SCHEMA_VERSION = 1;
 const RECIPIENT_RULES = Object.freeze({
-  test: { toGroup: "演示组", toNames: ["张乐翔"], ccGroup: "", ccCount: 0 },
+  test: { toGroup: "演练组", toNames: ["张乐翔"], ccGroup: "", ccCount: 0 },
   production: { toGroup: "拓展二部", toNames: ["唐润梅"], ccGroup: "结算组", ccCount: 4 },
 });
 
@@ -381,7 +381,7 @@ test("profile-only lock excludes batch and personnel browser sessions", () => {
 test("recipient matching requires the exact environment directory result", () => {
   assert.deepEqual(matchOperationPersonnelRecipients({
     environment: "test",
-    groups: [{ name: "演示组", people: [{ id: "u1", name: "张乐翔" }] }],
+    groups: [{ name: "演练组", people: [{ id: "u1", name: "张乐翔" }] }],
   }), {
     to: [{ id: "u1", name: "张乐翔" }],
     cc: [],
@@ -1165,7 +1165,7 @@ Run:
 ```bash
 git diff --check
 git status --short
-rg -n "唐润梅|张乐翔|结算组|拓展二部|演示组" server outputs/web_prototype/easy_exam_automation.html
+rg -n "唐润梅|张乐翔|结算组|拓展二部|演练组" server outputs/web_prototype/easy_exam_automation.html
 rg -n "password|cookie|authorization|完整人员目录" server/operation_personnel_task*.mjs
 ```
 
@@ -1198,7 +1198,7 @@ Expected:
 只选择明确标记为测试的项目，并在统一确认中核对：
 
 - 环境为 test。
-- To 为“演示组 / 张乐翔”。
+- To 为“演练组 / 张乐翔”。
 - CC 为空。
 - 若批次未发布，确认窗口明确显示本次将发布。
 - 日程、日期、监考人数、比例、平台和登录监控均与测试项目一致。
@@ -1274,7 +1274,7 @@ Expected:
 
 - [ ] **Step 3: 确认后同步运控并重发**
 
-使用测试收件规则“演示组 / 张乐翔”，无抄送。确认后检查相应配置 checkpoint 回读为新值；最终发送只能点击一次。
+使用测试收件规则“演练组 / 张乐翔”，无抄送。确认后检查相应配置 checkpoint 回读为新值；最终发送只能点击一次。
 
 - [ ] **Step 4: 验证新的重发记录**
 

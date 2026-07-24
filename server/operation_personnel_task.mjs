@@ -3,7 +3,7 @@ import { operationBatchCodeIsValid } from "./operation_batch.mjs";
 
 const SCHEMA_VERSION = 1;
 const RECIPIENT_RULES = Object.freeze({
-  test: { toGroup: "演示组", toNames: ["张乐翔"], ccGroup: "", ccCount: 0 },
+  test: { toGroup: "演练组", toNames: ["张乐翔"], ccGroup: "", ccCount: 0 },
   production: { toGroup: "拓展二部", toNames: ["唐润梅"], ccGroup: "结算组", ccCount: 4 },
 });
 

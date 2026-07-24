@@ -69,7 +69,7 @@ function inspectionFor(task, environment = "test") {
   });
   const to = environment === "production"
     ? [{ group: "拓展二部", id: "p1", name: "唐润梅" }]
-    : [{ group: "演示组", id: "t1", name: "张乐翔" }];
+    : [{ group: "演练组", id: "t1", name: "张乐翔" }];
   const cc = environment === "production"
     ? ["c1", "c2", "c3", "c4"].map((id, index) => ({
       group: "结算组",

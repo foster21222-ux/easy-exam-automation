@@ -10,7 +10,7 @@ import {
 } from "./operation_batch_runner.mjs";
 
 const RECIPIENT_RULES = Object.freeze({
-  test: { toGroup: "演示组", toName: "张乐翔", ccGroup: "", ccCount: 0 },
+  test: { toGroup: "演练组", toName: "张乐翔", ccGroup: "", ccCount: 0 },
   production: { toGroup: "拓展二部", toName: "唐润梅", ccGroup: "结算组", ccCount: 4 },
 });
 

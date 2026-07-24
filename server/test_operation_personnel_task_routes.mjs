@@ -98,7 +98,7 @@ function previewState(task, {
     },
     sendRecords: [],
     directoryMatch: {
-      to: [{ group: "演示组", id: "demo-user", name: "张乐翔" }],
+      to: [{ group: "演练组", id: "demo-user", name: "张乐翔" }],
       cc: [],
     },
   });

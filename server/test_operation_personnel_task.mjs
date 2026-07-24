@@ -150,6 +150,7 @@ test("uses isolated fixed recipient rules", () => {
     environment: "production",
     now: "2026-07-23T02:00:00.000Z",
   });
+  assert.equal(testDraft.recipients.toGroup, "演练组");
   assert.deepEqual(testDraft.recipients.toNames, ["张乐翔"]);
   assert.equal(testDraft.recipients.ccCount, 0);
   assert.deepEqual(productionDraft.recipients.toNames, ["唐润梅"]);

@@ -777,7 +777,7 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
         },
         dates: { start: "2026-07-23", end: "2026-08-19", nameListDue: "2026-08-19" },
         operationTaskSheet: { conditions: [{ name: "人员配置", satisfied: true }] },
-        directoryMatch: { to: [{ group: "演示组", name: "张乐翔" }], cc: [] },
+        directoryMatch: { to: [{ group: "演练组", name: "张乐翔" }], cc: [] },
         warnings: [],
       },
       lastSuccessfulFingerprint: "",
