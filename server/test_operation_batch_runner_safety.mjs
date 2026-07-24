@@ -12,6 +12,7 @@ import {
   resolveSubmittedOperationBatch,
   runOperationBatchReconciliation,
   runWithOperationBatchContext,
+  startOperationBatchListSearch,
 } from "./operation_batch_runner.mjs";
 
 function fakeBatchCardsPage(cards, {
@@ -245,9 +246,11 @@ function fakeBatchListPage(pages, {
   pageUrl = "http://operation/batch/batchList",
   paginationCount,
   responseUrl = "http://operation/api/batch/list",
+  initialLoadResponse = false,
 } = {}) {
   const events = [];
   let pageIndex = initialPageIndex;
+  let responseWaitCount = 0;
   const response = {
     url: () => responseUrl,
     request: () => ({
@@ -259,6 +262,18 @@ function fakeBatchListPage(pages, {
     ok: () => true,
     async finished() {
       events.push("response:finished");
+    },
+  };
+  const initialResponse = {
+    ...response,
+    request: () => ({
+      resourceType: () => "xhr",
+      method: () => "POST",
+      url: () => responseUrl,
+      postData: () => JSON.stringify({ condition: null }),
+    }),
+    async finished() {
+      events.push("initial-response:finished");
     },
   };
   const rowLocator = {
@@ -368,6 +383,10 @@ function fakeBatchListPage(pages, {
     },
     waitForResponse(predicate) {
       events.push("response:wait");
+      if (initialLoadResponse && responseWaitCount++ === 0) {
+        assert.equal(predicate(initialResponse), true);
+        return Promise.resolve(initialResponse);
+      }
       assert.equal(predicate({
         ...response,
         url: () => "http://other.example/api/batch/list",
@@ -580,6 +599,23 @@ test("batch search registers its response wait before Enter and waits for stable
   assert.ok(page.events.indexOf("search:enter") < page.events.indexOf("response:finished"));
   assert.ok(page.events.indexOf("response:finished") < page.events.indexOf("loading:hidden"));
   assert.ok(page.events.filter((event) => event === "rows:1").length >= 2);
+});
+
+test("batch search waits for the initial list request before submitting its query", async () => {
+  const page = fakeBatchListPage(
+    [[["EZT260004", "目标项目_2026年8月"]]],
+    { initialLoadResponse: true },
+  );
+
+  const result = await startOperationBatchListSearch(
+    page,
+    "http://operation/batch/batchList",
+    "目标项目_2026年8月",
+    { tableStablePollMs: 0 },
+  );
+
+  assert.deepEqual(result.rows, [["EZT260004", "目标项目_2026年8月"]]);
+  assert.ok(page.events.indexOf("initial-response:finished") < page.events.indexOf("search:fill"));
 });
 
 test("batch search accepts a completed exact response when the loading spinner is too fast to appear", async () => {

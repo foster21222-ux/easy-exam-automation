@@ -641,8 +641,31 @@ export async function startOperationBatchListSearch(page, batchListUrl, query, o
   if (!normalizedQuery) {
     throw reconciliationRequiredError(new Error("批次列表查询值为空"));
   }
+  const loginWaitMinutes = Number(
+    options.loginWaitMinutes
+    || process.env.OPERATION_CONSOLE_LOGIN_WAIT_MINUTES
+    || 10,
+  );
+  const initialResponseWait = page.waitForResponse(
+    (response) => operationBatchTableResponseMatches(response, batchListUrl),
+    {
+      timeout: Math.max(30_000, Math.max(1, loginWaitMinutes) * 60 * 1000 + 30_000),
+    },
+  );
+  initialResponseWait.catch(() => {});
   await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
   await ensureBatchListReady(page, batchListUrl, options);
+  const initialResponse = await initialResponseWait;
+  if (typeof initialResponse.ok === "function" && !initialResponse.ok()) {
+    throw reconciliationRequiredError(new Error(`批次列表初始请求失败：${initialResponse.url()}`));
+  }
+  const initialResponseError = await initialResponse.finished();
+  if (initialResponseError) throw reconciliationRequiredError(initialResponseError);
+  await waitForStableOperationBatchRows(
+    page,
+    options,
+    await operationBatchResponseIdentities(initialResponse),
+  );
   const searchInput = page.locator("input[placeholder*=批次代码], input[placeholder*=批次名称]").first();
   await searchInput.waitFor({ state: "visible", timeout: 30000 });
   await searchInput.fill(normalizedQuery);
