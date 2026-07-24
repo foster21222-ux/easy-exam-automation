@@ -1675,6 +1675,39 @@ async function closeVisibleMailDialog(page) {
   );
 }
 
+export async function readVisiblePersonnelDirectoryGroups(page, mailDialog, rule) {
+  const groupNames = [...new Set([rule.toGroup, rule.ccGroup].filter(Boolean))];
+  const inlineGroup = mailDialog.getByRole("checkbox", {
+    name: groupNames[0],
+    exact: true,
+  });
+  if (await inlineGroup.count() === 1) {
+    const groups = [];
+    for (const groupName of groupNames) {
+      groups.push({
+        name: groupName,
+        people: await expandVisibleDirectoryGroup(mailDialog, groupName),
+      });
+    }
+    return groups;
+  }
+
+  const groups = [];
+  for (const groupName of groupNames) {
+    await openVisibleMailRecipientDirectory(
+      mailDialog,
+      groupName === rule.toGroup ? "收件人" : "抄送（C）",
+    );
+    const dialog = await topVisibleDialog(page, "人员目录弹窗");
+    groups.push({
+      name: groupName,
+      people: await expandVisibleDirectoryGroup(dialog, groupName),
+    });
+    await cancelVisibleDirectory(page);
+  }
+  return groups;
+}
+
 export async function openVisiblePersonnelMailDialog(page, instruction = {}) {
   const taskDialog = await uniqueVisibleModalWithText(
     page,
@@ -1773,19 +1806,7 @@ export async function inspectVisiblePersonnelDirectory(page, instruction = {}) {
   const mailDialog = await openVisiblePersonnelMailDialog(page, instruction);
   const rule = RECIPIENT_RULES[text(instruction.environment)];
   if (!rule) throw new Error(`未知运控收件环境：${text(instruction.environment) || "空"}`);
-  const groups = [];
-  for (const groupName of [...new Set([rule.toGroup, rule.ccGroup].filter(Boolean))]) {
-    await openVisibleMailRecipientDirectory(
-      mailDialog,
-      groupName === rule.toGroup ? "收件人" : "抄送（C）",
-    );
-    const dialog = await topVisibleDialog(page, "人员目录弹窗");
-    groups.push({
-      name: groupName,
-      people: await expandVisibleDirectoryGroup(dialog, groupName),
-    });
-    await cancelVisibleDirectory(page);
-  }
+  const groups = await readVisiblePersonnelDirectoryGroups(page, mailDialog, rule);
   await closeVisibleMailDialog(page);
   return groups;
 }

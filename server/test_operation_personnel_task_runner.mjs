@@ -907,6 +907,43 @@ test("recorded directory waits for its React group checkbox before reading membe
   }]);
 });
 
+test("inline directory inspection reads members without confirming the mail dialog", async () => {
+  const events = [];
+  let reads = 0;
+  const group = {
+    count: async () => 1,
+    click: async () => events.push("group:click"),
+  };
+  const mailDialog = {
+    getByRole: (role, { name }) => {
+      assert.equal(role, "checkbox");
+      assert.equal(name, "演练组");
+      return group;
+    },
+    evaluate: async () => (
+      reads++ === 0 ? [] : ["zhanglexiang@ata.net.cn (张乐翔)"]
+    ),
+  };
+  const page = {
+    getByRole: () => {
+      throw new Error("inline inspection must not confirm the mail dialog");
+    },
+  };
+
+  assert.deepEqual(
+    await operationPersonnelRunner.readVisiblePersonnelDirectoryGroups(
+      page,
+      mailDialog,
+      { toGroup: "演练组", ccGroup: "" },
+    ),
+    [{
+      name: "演练组",
+      people: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+    }],
+  );
+  assert.deepEqual(events, ["group:click"]);
+});
+
 function validInstruction(overrides = {}) {
   const target = {
     batch: {
