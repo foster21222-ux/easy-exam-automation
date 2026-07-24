@@ -1859,6 +1859,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   });
 
   const readPublishedBatch = async () => {
+    if (snapshot.batch.published) return snapshot.batch;
     const batch = normalizeOperationPersonnelSnapshot({
       batch: await operationMethod(page, options, "readBatch")(page, instruction),
     }).batch;

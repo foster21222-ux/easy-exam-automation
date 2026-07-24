@@ -971,6 +971,22 @@ test("published batches skip the publish click but still complete the checkpoint
   assert.equal(page.events.filter((item) => item === "publish:click").length, 0);
 });
 
+test("published inspection evidence survives navigation to the task sheet", async () => {
+  const page = fakeOperationPage({ published: true });
+  let batchReads = 0;
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      readBatch: async () => {
+        batchReads += 1;
+        if (batchReads > 1) throw new Error("batch detail is no longer visible");
+        return { ...page.state.batch };
+      },
+    }),
+  );
+  assert.equal(batchReads, 1);
+});
+
 test("normal pages use the concrete visible adapter for publish and final confirm", async () => {
   const page = simulatedVisibleOperationPage();
   const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
