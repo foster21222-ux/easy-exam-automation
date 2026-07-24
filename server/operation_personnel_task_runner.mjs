@@ -1322,12 +1322,20 @@ async function readVisibleSection(page, key) {
 
 async function ensureVisiblePersonnelPage(page, instruction = {}) {
   await locateOperationPersonnelBatch(page, instruction);
+  const personnelTab = page.getByRole("tab", { name: "人员", exact: true });
+  if (await personnelTab.count() === 0) {
+    await personnelTab.waitFor({ state: "visible", timeout: 10_000 });
+  }
   await clickUniqueVisible(
-    page.getByRole("tab", { name: "人员", exact: true }),
+    personnelTab,
     "批次详情人员页签",
   );
+  const onlineTab = page.getByRole("tab", { name: "在线监考", exact: true });
+  if (await onlineTab.count() === 0) {
+    await onlineTab.waitFor({ state: "visible", timeout: 10_000 });
+  }
   await clickUniqueVisible(
-    page.getByRole("tab", { name: "在线监考", exact: true }),
+    onlineTab,
     "人员在线监考页签",
   );
   const config = page.getByText("配置项", { exact: true });
