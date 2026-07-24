@@ -4,6 +4,7 @@ import {
   advanceOperationBatchListPage,
   launchOperationBatchContext,
   openExactOperationBatchCard,
+  operationDateTitle,
   runWithOperationBatchContext,
   searchOperationBatchListPages,
   startOperationBatchListSearch,
@@ -1389,13 +1390,16 @@ async function visiblePersonnelConfigDialog(page) {
   return uniqueVisibleControl(dialogs, "在线监考配置项弹窗");
 }
 
-async function fillVisibleDateInput(dialog, placeholder, value) {
+export async function selectVisiblePersonnelDate(page, dialog, placeholder, value) {
   const input = await uniqueVisibleControl(
     dialog.locator(`input[placeholder="${placeholder}"]:visible`),
     `${placeholder}输入框`,
   );
-  await input.fill(text(value));
-  await input.press("Tab");
+  await input.click();
+  await clickUniqueVisible(
+    page.locator(`[title="${operationDateTitle(value)}"]:visible`),
+    `${text(value)}日期单元格`,
+  );
 }
 
 async function chooseVisibleRadio(dialog, name) {
@@ -1763,13 +1767,13 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
     await openVisiblePersonnelSectionEditor(page, "配置项");
     const dialog = await visiblePersonnelConfigDialog(page);
     if (text(current.start) !== text(dates.start)) {
-      await fillVisibleDateInput(dialog, "开始日期", dates.start);
+      await selectVisiblePersonnelDate(page, dialog, "开始日期", dates.start);
     }
     if (text(current.end) !== text(dates.end)) {
-      await fillVisibleDateInput(dialog, "结束日期", dates.end);
+      await selectVisiblePersonnelDate(page, dialog, "结束日期", dates.end);
     }
     if (text(current.nameListDue) !== text(dates.nameListDue)) {
-      await fillVisibleDateInput(dialog, "请选择日期", dates.nameListDue);
+      await selectVisiblePersonnelDate(page, dialog, "请选择日期", dates.nameListDue);
     }
     await confirmVisiblePersonnelConfig(page, dialog);
   },

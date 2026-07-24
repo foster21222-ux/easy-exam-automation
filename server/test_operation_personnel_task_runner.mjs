@@ -135,6 +135,35 @@ test("personnel page visible lines map configuration dates and requirements", ()
   });
 });
 
+test("readonly personnel dates are selected through the exact calendar cell", async () => {
+  const events = [];
+  const control = (label) => ({
+    count: async () => 1,
+    click: async () => events.push(label),
+  });
+  const dialog = {
+    locator: (selector) => {
+      assert.equal(selector, 'input[placeholder="结束日期"]:visible');
+      return control("input");
+    },
+  };
+  const page = {
+    locator: (selector) => {
+      assert.equal(selector, '[title="2026年8月19日"]:visible');
+      return control("cell");
+    },
+  };
+
+  await operationPersonnelRunner.selectVisiblePersonnelDate(
+    page,
+    dialog,
+    "结束日期",
+    "2026-08-19",
+  );
+
+  assert.deepEqual(events, ["input", "cell"]);
+});
+
 function visiblePersonnelTaskSheetRaw(overrides = {}) {
   return {
     conditions: [
