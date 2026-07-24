@@ -6207,12 +6207,17 @@
           <dialog class="account-editor-modal operation-detail-modal" id="operationDetailModal" aria-labelledby="operationDetailTitle" aria-describedby="operationDetailNote">
             <div class="account-editor-head"><div><h2 class="account-editor-title" id="operationDetailTitle">运控任务详情</h2><div class="settings-note" id="operationDetailNote">查看当前任务的数据来源和执行参数。</div></div><button class="account-editor-close" id="operationDetailCloseBtn" type="button" aria-label="关闭运控任务详情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
             <div class="account-editor-body">
-              <div class="operation-detail-panel" data-operation-detail="batch" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>建批次信息</h3><p class="subtitle">创建参数来自泛微业务需求，创建结果回填项目卡。</p></div><span class="workflow-source-badge fanwei">泛微</span></div><div id="projectOperationBatchDraft"></div><div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="operationBatchCreateBtn" type="button">创建未发布批次</button><button class="btn primary" id="operationBatchReconcileBtn" type="button" hidden>查询并同步已有批次</button></div><details style="margin-top:14px;"><summary>手动补录批次代码</summary><div class="settings-grid" style="margin-top:12px;"><label class="field"><span class="field-label">运营批次代码</span><input class="field-input" id="operationBatchCodeInput" placeholder="例如 EZT260003" /><span class="task-meta">仅在自动创建失败、或已在运营控制台手工创建批次时补录。</span></label><label class="field"><span class="field-label">批次详情地址</span><input class="field-input" id="operationBatchDetailUrlInput" placeholder="可选，粘贴运营控制台详情页 URL" /></label></div><div class="view-actions" style="margin-top:12px;"><button class="btn" id="operationBatchRecordBtn" type="button">手动补录批次代码</button></div></details><div class="task-meta" style="margin-top:12px;">当前批次：<span id="projectOperationBatchDisplay">--</span></div></section></div>
+              <div class="operation-detail-panel" data-operation-detail="batch" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>建批次信息</h3><p class="subtitle">创建参数来自泛微业务需求，创建结果回填项目卡。</p></div><span class="workflow-source-badge fanwei">泛微</span></div><div id="projectOperationBatchDraft"></div><div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="operationBatchCreateBtn" type="button">创建未发布批次</button><button class="btn primary" id="operationBatchReconcileBtn" type="button" hidden>查询并同步已有批次</button></div><div class="task-meta" id="operationBatchUpdateState" style="margin-top:12px;" hidden></div><div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="operationBatchUpdateBtn" type="button" hidden>修改批次信息</button></div><details style="margin-top:14px;"><summary>手动补录批次代码</summary><div class="settings-grid" style="margin-top:12px;"><label class="field"><span class="field-label">运营批次代码</span><input class="field-input" id="operationBatchCodeInput" placeholder="例如 EZT260003" /><span class="task-meta">仅在自动创建失败、或已在运营控制台手工创建批次时补录。</span></label><label class="field"><span class="field-label">批次详情地址</span><input class="field-input" id="operationBatchDetailUrlInput" placeholder="可选，粘贴运营控制台详情页 URL" /></label></div><div class="view-actions" style="margin-top:12px;"><button class="btn" id="operationBatchRecordBtn" type="button">手动补录批次代码</button></div></details><div class="task-meta" style="margin-top:12px;">当前批次：<span id="projectOperationBatchDisplay">--</span></div></section></div>
               <div class="operation-detail-panel" data-operation-detail="personnel" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>人员任务信息</h3><p class="subtitle">人员服务字段来自泛微，批次代码来自建批次结果。</p></div><span class="workflow-source-badge fanwei">泛微</span></div><div id="projectPersonnelTaskDraft"></div><div class="task-meta" id="operationPersonnelTaskState" style="margin-top:12px;">正在读取人员任务状态。</div><div class="view-actions" style="margin-top:12px;"><button class="btn primary" id="operationPersonnelTaskActionBtn" type="button">检查并发送人员任务单</button><button class="btn" id="operationPersonnelTaskRecheckBtn" type="button" hidden>重新核对发送记录</button></div></section></div>
               <div class="operation-detail-panel" data-operation-detail="content" hidden><section class="operation-task-section"><div id="projectContentTaskDraft"></div><label class="field" style="margin-top:14px;"><span class="field-label">内容任务单收件人</span><input class="field-input" id="contentRequirementEmailRecipients" placeholder="收件人邮箱，多个用分号分隔" /></label><div class="view-actions" style="margin-top:10px;"><button class="btn primary" id="contentRequirementEmailSendBtn" type="button">发送内容任务单</button></div><div class="task-meta" id="contentRequirementEmailState" style="margin-top:8px;">等待发送。</div></section></div>
               <div class="operation-detail-panel" data-operation-detail="archive" hidden><section class="operation-task-section"><div class="operation-task-section-head"><div><h3>运控归档信息</h3><p class="subtitle">泛微业务字段与项目实际执行结果合并预览。</p></div><span class="workflow-source-badge actual_result">实际执行</span></div><div id="projectOperationArchiveDraft"></div><div class="view-actions" style="margin-top:12px;"><button class="btn" type="button" disabled>运控归档接口待接入</button></div><div class="operation-task-note">运控归档是向运控系统回填执行结果；项目列表中的“归档”仅隐藏本地项目卡，两者互不替代。</div><div class="operation-detail-subsection"><h4>执行门槛</h4><p class="subtitle">字段缺失会停在待补充，不自动跨阶段提交。</p><div id="projectWorkflowGates" style="margin-top:10px;"></div></div></section></div>
             </div>
             <div class="account-editor-actions"><button class="btn" id="operationDetailCancelBtn" type="button">关闭</button></div>
+          </dialog>
+          <dialog class="account-editor-modal operation-detail-modal" id="operationBatchUpdateConfirmDialog" aria-labelledby="operationBatchUpdateConfirmTitle">
+            <div class="account-editor-head"><div><h2 class="account-editor-title" id="operationBatchUpdateConfirmTitle">确认修改批次信息</h2><div class="settings-note">这里只展示服务端只读预检返回的变化；如需调整，请先修改来源需求再重新预览。</div></div><button class="account-editor-close" id="operationBatchUpdateConfirmCloseBtn" type="button" aria-label="关闭批次修改确认"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
+            <div class="account-editor-body"><div id="operationBatchUpdateConfirmContent"></div><div class="task-meta" id="operationBatchUpdateProgress" style="margin-top:12px;"></div></div>
+            <div class="account-editor-actions"><button class="btn" id="operationBatchUpdateConfirmCancelBtn" type="button">取消</button><button class="btn primary" id="operationBatchUpdateConfirmBtn" type="button">确认按以上内容修改批次</button></div>
           </dialog>
           <dialog class="account-editor-modal operation-detail-modal" id="operationPersonnelConfirmDialog" aria-labelledby="operationPersonnelConfirmTitle">
             <div class="account-editor-head"><div><h2 class="account-editor-title" id="operationPersonnelConfirmTitle">确认人员任务单</h2><div class="settings-note">核对运控修改、任务单内容和固定收件人后统一发送。</div></div><button class="account-editor-close" id="operationPersonnelConfirmCloseBtn" type="button" aria-label="关闭人员任务确认"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
@@ -6670,6 +6675,14 @@
       const operationBatchCreateBtn = document.querySelector("#operationBatchCreateBtn");
       const operationBatchReconcileBtn = document.querySelector("#operationBatchReconcileBtn");
       const operationBatchRecordBtn = document.querySelector("#operationBatchRecordBtn");
+      const operationBatchUpdateStateText = document.querySelector("#operationBatchUpdateState");
+      const operationBatchUpdateBtn = document.querySelector("#operationBatchUpdateBtn");
+      const operationBatchUpdateConfirmDialog = document.querySelector("#operationBatchUpdateConfirmDialog");
+      const operationBatchUpdateConfirmContent = document.querySelector("#operationBatchUpdateConfirmContent");
+      const operationBatchUpdateProgress = document.querySelector("#operationBatchUpdateProgress");
+      const operationBatchUpdateConfirmCloseBtn = document.querySelector("#operationBatchUpdateConfirmCloseBtn");
+      const operationBatchUpdateConfirmCancelBtn = document.querySelector("#operationBatchUpdateConfirmCancelBtn");
+      const operationBatchUpdateConfirmBtn = document.querySelector("#operationBatchUpdateConfirmBtn");
       const operationBatchCodeInput = document.querySelector("#operationBatchCodeInput");
       const operationBatchDetailUrlInput = document.querySelector("#operationBatchDetailUrlInput");
       const contentRequirementEmailRecipients = document.querySelector("#contentRequirementEmailRecipients");
@@ -6914,6 +6927,11 @@
         currentProject: null,
         currentProjectWorkflow: null,
         operationBatchAutomationTaskIds: new Set(),
+        operationBatchUpdateRequestToken: 0,
+        operationBatchUpdateAttemptId: "",
+        operationBatchUpdatePollTimer: null,
+        operationBatchUpdateState: null,
+        operationBatchUpdatePreview: null,
         operationPersonnelRequestToken: 0,
         operationPersonnelAttemptId: "",
         operationPersonnelPollTimer: null,
@@ -9236,6 +9254,11 @@
         sent: "已发送",
         needs_review: "待补充",
         reconciliation_required: "待同步",
+        waiting_schedule: "等待补全日程",
+        update_available: "可修改",
+        updating: "修改中",
+        update_conflict: "修改冲突",
+        update_failed: "修改失败",
         waiting_batch: "等待批次",
         waiting_execution: "等待执行数据",
         skipped: "无需执行",
@@ -9250,6 +9273,397 @@
           return `<div class="operation-param-item"><div class="operation-param-label"><span>${safeText(item.label || key)}</span><span class="workflow-source-badge ${safeText(source)}">${safeText(operationBatchSourceLabel(source))}</span></div><div class="operation-param-value">${safeText(item.value || "待补充")}${warning ? ` <span class="tag amber">待确认</span>` : ""}</div></div>`;
         }).join("");
         return rows ? `<div class="operation-param-list">${rows}</div>` : `<div class="empty-state">暂无参数</div>`;
+      }
+
+      function operationBatchUpdateStatus(state = {}) {
+        const pageStatus = String(state.pageStatus || "");
+        if ([
+          "success",
+          "waiting_schedule",
+          "update_available",
+          "updating",
+          "update_conflict",
+          "update_failed",
+        ].includes(pageStatus)) return pageStatus;
+        return String(state.state?.status || pageStatus || "");
+      }
+
+      function operationBatchUpdateActionState(state = {}) {
+        const status = operationBatchUpdateStatus(state);
+        if (status === "update_available") {
+          return { hidden: false, disabled: false, label: "修改批次信息", readOnly: true };
+        }
+        if (status === "updating") {
+          return { hidden: false, disabled: true, label: "修改中", readOnly: true };
+        }
+        if (status === "update_conflict" || status === "update_failed") {
+          return { hidden: false, disabled: false, label: "重新预览并核对", readOnly: true };
+        }
+        return { hidden: true, disabled: true, label: "修改批次信息", readOnly: true };
+      }
+
+      function operationBatchUpdateMissingCopy(missing = []) {
+        return (Array.isArray(missing) ? missing : []).map((item) => {
+          const index = Number(item?.requirementIndex);
+          const requirementNumber = Number.isInteger(index) ? index + 1 : "--";
+          const fields = Array.isArray(item?.fields) ? item.fields.join("、") : "";
+          return `易考需求单 ${requirementNumber}：${fields || "日程信息不完整"}`;
+        }).join("；");
+      }
+
+      function operationBatchUpdateAttemptCopy(attempt = {}) {
+        const parts = [];
+        if (attempt.checkpoint) parts.push(`当前检查点：${attempt.checkpoint}`);
+        const remainingSeconds = Math.max(0, Number(attempt.remainingSeconds || 0));
+        if (!attempt.completed && attempt.countdownKind === "next_status_poll") {
+          parts.push(`距离下次状态轮询：${remainingSeconds} 秒`);
+        }
+        return parts.join(" · ");
+      }
+
+      function renderOperationBatchUpdatePreview(preview = {}) {
+        const changes = Array.isArray(preview.changes) ? preview.changes : [];
+        if (!changes.length) {
+          return `<div class="empty-state">服务端预检未发现实际差异，不能提交修改。</div>`;
+        }
+        const overview = [];
+        const schedules = new Map();
+        changes.forEach((change) => {
+          const index = Number(change?.requirementIndex);
+          if (Number.isInteger(index)) {
+            if (!schedules.has(index)) schedules.set(index, []);
+            schedules.get(index).push(change);
+          } else {
+            overview.push(change);
+          }
+        });
+        const renderChange = (change) => {
+          const before = change?.before === "" || change?.before === null || change?.before === undefined
+            ? "空"
+            : String(change.before);
+          const after = change?.after === "" || change?.after === null || change?.after === undefined
+            ? "空"
+            : String(change.after);
+          return `<li data-operation-batch-change="${safeText(change?.path || "")}"><strong>${safeText(change?.label || change?.path || "--")}</strong><div class="task-meta">${safeText(before)} → ${safeText(after)}</div></li>`;
+        };
+        const overviewHtml = overview.length
+          ? overview.map(renderChange).join("")
+          : "<li>批次概况没有变化</li>";
+        const scheduleHtml = [...schedules.entries()].sort(([left], [right]) => left - right)
+          .map(([index, items]) => {
+            const aggregateAddition = items.find((item) => String(item?.path || "") === `schedules[${index}]`);
+            const isAddition = Boolean(aggregateAddition) || items.every((item) => (
+              item?.before === "" || item?.before === null || item?.before === undefined
+            ));
+            const title = aggregateAddition?.label || (isAddition ? `新增日程 ${index + 1}` : `日程 ${index + 1}`);
+            return `<div class="operation-detail-subsection" data-operation-batch-schedule="${index}"><h4>${safeText(title)}</h4><ul>${items.map(renderChange).join("")}</ul></div>`;
+          })
+          .join("");
+        return `<div class="operation-detail-subsection"><h4>批次概况</h4><ul>${overviewHtml}</ul></div>${scheduleHtml}`;
+      }
+
+      function operationBatchUpdateConfirmAllowed(preview = {}) {
+        return Boolean(preview.previewToken)
+          && Array.isArray(preview.changes)
+          && preview.changes.length > 0;
+      }
+
+      function operationBatchUpdateConfirmPayload(preview = {}) {
+        return { previewToken: preview.previewToken };
+      }
+
+      function operationBatchUpdateTerminalState(previous = {}, result = {}) {
+        const taskStatus = result.task?.config?.operationBatch?.status;
+        const fallbackStatus = result.status === "conflict"
+          ? "update_conflict"
+          : result.status === "failed"
+            ? "update_failed"
+            : result.status === "succeeded"
+              ? "success"
+              : previous.pageStatus;
+        const failed = result.status === "conflict" || result.status === "failed";
+        return {
+          ...previous,
+          task: result.task || previous.task,
+          workflow: result.workflow || previous.workflow,
+          pageStatus: taskStatus || fallbackStatus,
+          attempt: result,
+          errorMessage: result.error?.message || (failed ? previous.errorMessage || "" : ""),
+          differingFields: Array.isArray(result.error?.differingFields)
+            ? result.error.differingFields
+            : (failed ? previous.differingFields || [] : []),
+        };
+      }
+
+      function renderOperationBatchUpdateState(state = {}) {
+        const status = operationBatchUpdateStatus(state);
+        const action = operationBatchUpdateActionState(state);
+        operationBatchUpdateBtn.hidden = action.hidden;
+        operationBatchUpdateBtn.disabled = action.disabled;
+        operationBatchUpdateBtn.textContent = action.label;
+        if (!status || ["ready", "reconciliation_required"].includes(status)) {
+          operationBatchUpdateStateText.hidden = true;
+          operationBatchUpdateStateText.textContent = "";
+          return;
+        }
+        const labels = {
+          success: "已创建",
+          waiting_schedule: "等待补全日程",
+          update_available: "可修改",
+          updating: "修改中",
+          update_conflict: "修改冲突",
+          update_failed: "修改失败",
+        };
+        const missingCopy = operationBatchUpdateMissingCopy(state.missing || state.state?.missing || []);
+        const attemptCopy = operationBatchUpdateAttemptCopy(state.attempt || {});
+        const differences = Array.isArray(state.differingFields) ? state.differingFields : [];
+        const differenceHtml = differences.length
+          ? `<ul>${differences.map((item) => {
+            const expected = item?.expected ?? item?.before ?? "";
+            const actual = item?.actual ?? item?.after ?? "";
+            return `<li>${safeText(item?.path || "--")}：期望 ${safeText(expected)}，实际 ${safeText(actual)}</li>`;
+          }).join("")}</ul>`
+          : "";
+        const details = [
+          missingCopy ? `<div>缺失要求：${safeText(missingCopy)}</div>` : "",
+          attemptCopy ? `<div>${safeText(attemptCopy)}</div>` : "",
+          state.errorMessage ? `<div>服务端提示：${safeText(state.errorMessage)}</div>` : "",
+          differenceHtml,
+        ].filter(Boolean).join("");
+        operationBatchUpdateStateText.hidden = false;
+        operationBatchUpdateStateText.innerHTML = `<strong>${safeText(labels[status] || status)}</strong>${details}`;
+      }
+
+      function invalidateOperationBatchUpdateRequests() {
+        if (taskViewState.operationBatchUpdatePollTimer) {
+          clearTimeout(taskViewState.operationBatchUpdatePollTimer);
+        }
+        taskViewState.operationBatchUpdatePollTimer = null;
+        taskViewState.operationBatchUpdateRequestToken += 1;
+        return taskViewState.operationBatchUpdateRequestToken;
+      }
+
+      function beginOperationBatchUpdateProjectRequest(projectId) {
+        const requestToken = invalidateOperationBatchUpdateRequests();
+        taskViewState.currentProjectId = projectId;
+        taskViewState.operationBatchUpdateAttemptId = "";
+        taskViewState.operationBatchUpdateState = null;
+        taskViewState.operationBatchUpdatePreview = null;
+        return requestToken;
+      }
+
+      function operationBatchUpdateRequestIsCurrent(taskId, requestToken) {
+        return String(taskViewState.currentProjectId || "") === String(taskId || "")
+          && taskViewState.operationBatchUpdateRequestToken === requestToken;
+      }
+
+      function applyOperationBatchUpdateFreshContext(result = {}) {
+        const task = result.task;
+        if (!task || !isCurrentProject(task.taskId)) return false;
+        taskViewState.currentProject = task;
+        renderOperationBatchFromTask(task);
+        if (result.workflow) {
+          taskViewState.currentProjectWorkflow = result.workflow;
+          renderProjectWorkflow(
+            task,
+            result.workflow,
+            task.config?.operationBatch?.draft || {},
+          );
+        }
+        return true;
+      }
+
+      async function loadOperationBatchUpdateState(task = taskViewState.currentProject, requestToken = taskViewState.operationBatchUpdateRequestToken) {
+        const taskId = task?.taskId;
+        const code = task?.config?.operationBatchCode || task?.config?.operationBatch?.code || "";
+        if (!taskId || !operationBatchCodeIsValid(code)) {
+          renderOperationBatchUpdateState({});
+          return null;
+        }
+        const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/update-state?_=${Date.now()}`);
+        if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return null;
+        applyOperationBatchUpdateFreshContext(result);
+        const attempts = result.task?.config?.operationBatch?.updateAttempts || [];
+        const latestAttempt = attempts.at(-1);
+        const status = operationBatchUpdateStatus(result);
+        const state = {
+          ...result,
+          attempt: ["updating", "update_conflict", "update_failed"].includes(status) ? latestAttempt : null,
+          errorMessage: ["update_conflict", "update_failed"].includes(status) ? latestAttempt?.error?.message || "" : "",
+          differingFields: ["update_conflict", "update_failed"].includes(status)
+            ? latestAttempt?.error?.differingFields || []
+            : [],
+        };
+        taskViewState.operationBatchUpdateState = state;
+        renderOperationBatchUpdateState(state);
+        if (status === "updating" && latestAttempt?.attemptId) {
+          taskViewState.operationBatchUpdateAttemptId = latestAttempt.attemptId;
+          void pollOperationBatchUpdateAttempt(taskId, latestAttempt.attemptId, requestToken);
+        }
+        return result;
+      }
+
+      async function previewOperationBatchUpdate() {
+        const taskId = taskViewState.currentProject?.taskId;
+        if (!taskId) return null;
+        const requestToken = invalidateOperationBatchUpdateRequests();
+        operationBatchUpdateBtn.disabled = true;
+        operationBatchUpdateStateText.hidden = false;
+        operationBatchUpdateStateText.textContent = "正在只读检查运控当前值并生成修改预览...";
+        try {
+          const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/update-preview`, {
+            method: "POST",
+          });
+          if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return null;
+          applyOperationBatchUpdateFreshContext(result);
+          taskViewState.operationBatchUpdatePreview = result;
+          const state = {
+            ...result,
+            state: { status: result.action === "none" ? "success" : "update_available" },
+            pageStatus: result.task?.config?.operationBatch?.status,
+          };
+          taskViewState.operationBatchUpdateState = state;
+          renderOperationBatchUpdateState(state);
+          operationBatchUpdateConfirmContent.innerHTML = renderOperationBatchUpdatePreview(result);
+          operationBatchUpdateConfirmBtn.disabled = !operationBatchUpdateConfirmAllowed(result);
+          operationBatchUpdateProgress.textContent = operationBatchUpdateConfirmAllowed(result)
+            ? "预检完成，请核对服务端返回的全部变化。"
+            : "服务端预检未发现实际差异，不能提交修改。";
+          closeProjectDialog(operationDetailModal);
+          if (!operationBatchUpdateConfirmDialog.open) operationBatchUpdateConfirmDialog.showModal();
+          return result;
+        } catch (error) {
+          if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return null;
+          const response = error?.response || {};
+          applyOperationBatchUpdateFreshContext(response);
+          const state = {
+            ...(taskViewState.operationBatchUpdateState || {}),
+            task: response.task || taskViewState.currentProject,
+            workflow: response.workflow || taskViewState.currentProjectWorkflow,
+            pageStatus: response.errorCode === "OPERATION_BATCH_UPDATE_CONFLICT"
+              ? "update_conflict"
+              : "update_failed",
+            errorMessage: response.error || error?.message || String(error),
+            differingFields: response.differingFields || [],
+          };
+          taskViewState.operationBatchUpdateState = state;
+          renderOperationBatchUpdateState(state);
+          return null;
+        }
+      }
+
+      async function confirmOperationBatchUpdate() {
+        const taskId = taskViewState.currentProject?.taskId;
+        const requestToken = taskViewState.operationBatchUpdateRequestToken;
+        const preview = taskViewState.operationBatchUpdatePreview;
+        if (!taskId || !operationBatchUpdateConfirmAllowed(preview)) return null;
+        operationBatchUpdateConfirmBtn.disabled = true;
+        operationBatchUpdateProgress.textContent = "修改请求已提交，正在等待执行...";
+        try {
+          const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/update`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(operationBatchUpdateConfirmPayload(preview)),
+          });
+          if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return null;
+          applyOperationBatchUpdateFreshContext(result);
+          taskViewState.operationBatchUpdateAttemptId = result.attemptId;
+          taskViewState.operationBatchUpdateState = {
+            ...(taskViewState.operationBatchUpdateState || {}),
+            task: result.task,
+            workflow: result.workflow,
+            pageStatus: "updating",
+            attempt: { attemptId: result.attemptId, checkpoint: "queued" },
+            errorMessage: "",
+            differingFields: [],
+          };
+          renderOperationBatchUpdateState(taskViewState.operationBatchUpdateState);
+          return await pollOperationBatchUpdateAttempt(taskId, result.attemptId, requestToken);
+        } catch (error) {
+          if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return null;
+          const response = error?.response || {};
+          applyOperationBatchUpdateFreshContext(response);
+          const state = {
+            ...(taskViewState.operationBatchUpdateState || {}),
+            task: response.task || taskViewState.currentProject,
+            workflow: response.workflow || taskViewState.currentProjectWorkflow,
+            pageStatus: response.errorCode === "OPERATION_BATCH_UPDATE_CONFLICT"
+              ? "update_conflict"
+              : "update_failed",
+            errorMessage: response.error || error?.message || String(error),
+            differingFields: response.differingFields || [],
+          };
+          taskViewState.operationBatchUpdateState = state;
+          renderOperationBatchUpdateState(state);
+          operationBatchUpdateProgress.textContent = state.errorMessage;
+          return null;
+        }
+      }
+
+      function renderOperationBatchUpdateAttempt(attempt = {}) {
+        const copy = operationBatchUpdateAttemptCopy(attempt);
+        operationBatchUpdateProgress.textContent = attempt.error?.message
+          || copy
+          || (attempt.completed && attempt.status === "succeeded" ? "批次信息修改完成并已通过回读验证。" : "正在读取修改进度...");
+      }
+
+      async function pollOperationBatchUpdateAttempt(taskId, attemptId, requestToken) {
+        try {
+          const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/update-attempts/${encodeURIComponent(attemptId)}?_=${Date.now()}`);
+          if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return null;
+          applyOperationBatchUpdateFreshContext(result);
+          renderOperationBatchUpdateAttempt(result);
+          if (!result.completed) {
+            taskViewState.operationBatchUpdateState = {
+              ...(taskViewState.operationBatchUpdateState || {}),
+              task: result.task,
+              workflow: result.workflow,
+              pageStatus: "updating",
+              attempt: result,
+              errorMessage: "",
+              differingFields: [],
+            };
+            renderOperationBatchUpdateState(taskViewState.operationBatchUpdateState);
+            if (taskViewState.operationBatchUpdatePollTimer) {
+              clearTimeout(taskViewState.operationBatchUpdatePollTimer);
+            }
+            taskViewState.operationBatchUpdatePollTimer = setTimeout(() => {
+              const countdown = {
+                ...result,
+                remainingSeconds: Math.max(0, Number(result.remainingSeconds - 1)),
+              };
+              renderOperationBatchUpdateAttempt(countdown);
+              taskViewState.operationBatchUpdateState = {
+                ...(taskViewState.operationBatchUpdateState || {}),
+                attempt: countdown,
+              };
+              renderOperationBatchUpdateState(taskViewState.operationBatchUpdateState);
+              void pollOperationBatchUpdateAttempt(taskId, attemptId, requestToken);
+            }, 1000);
+            return result;
+          }
+          taskViewState.operationBatchUpdatePollTimer = null;
+          const terminalState = operationBatchUpdateTerminalState(
+            taskViewState.operationBatchUpdateState || {},
+            result,
+          );
+          taskViewState.operationBatchUpdateState = terminalState;
+          renderOperationBatchUpdateState(terminalState);
+          renderOperationBatchUpdateAttempt(result);
+          operationBatchUpdateConfirmBtn.disabled = true;
+          return result;
+        } catch (error) {
+          if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return null;
+          operationBatchUpdateProgress.textContent = `读取修改进度失败，1 秒后重试：${error?.message || String(error)}`;
+          if (taskViewState.operationBatchUpdatePollTimer) {
+            clearTimeout(taskViewState.operationBatchUpdatePollTimer);
+          }
+          taskViewState.operationBatchUpdatePollTimer = setTimeout(
+            () => void pollOperationBatchUpdateAttempt(taskId, attemptId, requestToken),
+            1000,
+          );
+          return null;
+        }
       }
 
       function operationPersonnelActionState(state = {}) {
@@ -10100,6 +10514,7 @@
           operationBatchCreateBtn,
           operationBatchReconcileBtn,
           operationBatchRecordBtn,
+          operationBatchUpdateBtn,
           operationPersonnelTaskActionBtn,
           operationPersonnelTaskRecheckBtn,
           contentRequirementEmailSendBtn,
@@ -10131,6 +10546,14 @@
           : warnings.length
             ? "建批次参数仍有字段需要补充，人员和内容任务会等待批次完成。"
             : "建批次参数已就绪；创建批次后将解锁人员任务和内容任务。";
+        if (hasBatchCode) {
+          await loadOperationBatchUpdateState(
+            taskViewState.currentProject,
+            taskViewState.operationBatchUpdateRequestToken,
+          );
+        } else {
+          renderOperationBatchUpdateState({});
+        }
       }
 
       async function createProjectOperationBatch() {
@@ -10685,6 +11108,7 @@
         projectDetailOverview.innerHTML = `<div class="task-overview-grid"><div><div class="task-overview-label">泛微流水号</div><div class="task-overview-value">${safeText(card.sourceKey || "未记录")}</div></div><div><div class="task-overview-label">项目编号</div><div class="task-overview-value">${safeText(task.taskId)}</div></div><div><div class="task-overview-label">项目编码</div><div class="task-overview-value">${safeText(task.config?.projectCode || "未记录")}</div></div><div><div class="task-overview-label">客户名称</div><div class="task-overview-value">${safeText(task.config?.customerName || task.customerName || "未记录")}</div></div><div><div class="task-overview-label">考生总数</div><div class="task-overview-value">${candidates}</div></div><div><div class="task-overview-label">班级总数</div><div class="task-overview-value">${rooms}</div></div><div><div class="task-overview-label">更新时间</div><div class="task-overview-value">${formatTaskTime(task.updatedAt)}</div></div></div>`;
         renderProjectSources(task);
         projectWorkflowSteps.innerHTML = `<div class="empty-state">正在加载运控任务流。</div>`;
+        renderOperationBatchUpdateState({});
         projectPersonnelTaskDraft.innerHTML = `<div class="empty-state">正在生成人员任务参数。</div>`;
         operationPersonnelTaskState.textContent = "正在读取人员任务状态。";
         operationPersonnelTaskActionBtn.disabled = true;
@@ -10702,6 +11126,7 @@
 
       async function loadProjectDetail(projectId) {
         setProjectOverviewExpanded(false);
+        const operationBatchUpdateRequestToken = beginOperationBatchUpdateProjectRequest(projectId);
         const operationPersonnelRequestToken = beginOperationPersonnelProjectRequest(projectId);
         taskViewState.currentProject = null;
         taskViewState.currentProjectWorkflow = null;
@@ -10710,6 +11135,7 @@
         setProjectActionControlsDisabled(true);
         const task = await fetchJson(`/api/tasks/${encodeURIComponent(projectId)}?_=${Date.now()}`);
         if (!isCurrentProject(projectId)
+          || taskViewState.operationBatchUpdateRequestToken !== operationBatchUpdateRequestToken
           || taskViewState.operationPersonnelRequestToken !== operationPersonnelRequestToken) return;
         renderProjectDetail(task);
         const panelLoads = [
@@ -10720,6 +11146,7 @@
         ];
         const results = await Promise.allSettled(panelLoads.map(([promise]) => promise));
         if (!isCurrentProject(projectId)
+          || taskViewState.operationBatchUpdateRequestToken !== operationBatchUpdateRequestToken
           || taskViewState.operationPersonnelRequestToken !== operationPersonnelRequestToken) return;
         results.forEach((result, index) => {
           if (result.status !== "rejected") return;
@@ -15177,6 +15604,22 @@
       operationBatchCreateBtn.addEventListener("click", () => createProjectOperationBatch().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
       operationBatchReconcileBtn.addEventListener("click", () => reconcileProjectOperationBatch().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
       operationBatchRecordBtn.addEventListener("click", () => recordProjectOperationBatchCode().catch((error) => { projectOperationBatchState.textContent = error.message || String(error); }));
+      operationBatchUpdateBtn.addEventListener("click", () => previewOperationBatchUpdate().catch((error) => {
+        operationBatchUpdateStateText.hidden = false;
+        operationBatchUpdateStateText.textContent = error?.message || String(error);
+      }));
+      operationBatchUpdateConfirmCloseBtn.addEventListener("click", () => closeProjectDialog(operationBatchUpdateConfirmDialog));
+      operationBatchUpdateConfirmCancelBtn.addEventListener("click", () => closeProjectDialog(operationBatchUpdateConfirmDialog));
+      operationBatchUpdateConfirmDialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        closeProjectDialog(operationBatchUpdateConfirmDialog);
+      });
+      operationBatchUpdateConfirmDialog.addEventListener("click", (event) => {
+        if (event.target === operationBatchUpdateConfirmDialog) closeProjectDialog(operationBatchUpdateConfirmDialog);
+      });
+      operationBatchUpdateConfirmBtn.addEventListener("click", () => confirmOperationBatchUpdate().catch((error) => {
+        operationBatchUpdateProgress.textContent = error?.message || String(error);
+      }));
       operationPersonnelTaskActionBtn.addEventListener("click", () => {
         const taskId = taskViewState.currentProject?.taskId;
         const requestToken = taskViewState.operationPersonnelRequestToken + 1;
