@@ -161,7 +161,7 @@ async function clickByText(page, textValue) {
   await page.getByText(textValue, { exact: false }).first().click();
 }
 
-async function formItemByLabel(page, label) {
+export async function formItemByLabel(page, label) {
   const labelNode = page.locator(`label[title^="${label}"]`).first();
   await labelNode.waitFor({ state: "visible", timeout: 30000 });
   return labelNode.locator("xpath=ancestor::*[contains(@class,'ant-form-item')][1]");
@@ -694,6 +694,36 @@ export async function searchOperationBatchListPages(page, batchListUrl, query, o
   return {
     headers,
     pages: await collectOperationBatchListPages(page, rows, batchListUrl, options),
+  };
+}
+
+export function operationBatchExactCodeLocation(result = {}, batchCode) {
+  const normalizedCode = text(batchCode);
+  const codeColumns = (result.headers || [])
+    .map((header, index) => ({ header: text(header), index }))
+    .filter((item) => item.header === "批次代码");
+  if (codeColumns.length !== 1) {
+    throw reconciliationRequiredError(new Error(
+      `批次列表必须有唯一“批次代码”列，实际 ${codeColumns.length} 列`,
+    ));
+  }
+  const codeColumn = codeColumns[0].index;
+  const matches = (result.pages || []).flatMap((rows, pageIndex) =>
+    (rows || []).map((cells, rowIndex) => ({
+      cells: (cells || []).map(text),
+      pageNumber: pageIndex + 1,
+      rowNumber: rowIndex + 1,
+    })))
+    .filter((row) => row.cells[codeColumn] === normalizedCode);
+  if (matches.length !== 1) {
+    throw reconciliationRequiredError(new Error(
+      `批次代码 ${normalizedCode} 精确匹配到 ${matches.length} 行`,
+    ));
+  }
+  return {
+    pageNumber: matches[0].pageNumber,
+    rowNumber: matches[0].rowNumber,
+    codeColumn,
   };
 }
 

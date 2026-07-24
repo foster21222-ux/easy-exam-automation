@@ -8,6 +8,7 @@ import {
   operationBatchListSnapshot,
   operationBatchListResultFromRows,
   operationBatchTableResponseMatches,
+  operationBatchExactCodeLocation,
   performOperationBatchTableAction,
   resolveSubmittedOperationBatch,
   runOperationBatchReconciliation,
@@ -582,6 +583,40 @@ test("batch rows require one exact name cell and one code", () => {
       ["QTT260007", "QTT260008", "目标项目_2026年8月"],
     ], "目标项目_2026年8月", detailUrl),
     (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED,
+  );
+});
+
+test("exact batch-code location uses one dedicated column and rejects duplicate rows", () => {
+  const result = {
+    headers: ["批次名称", "批次代码", "状态"],
+    pages: [
+      [["其他批次", "OLD260001", "实施中"]],
+      [["目标批次", "EZT260003", "未发布"]],
+    ],
+  };
+  assert.deepEqual(operationBatchExactCodeLocation(result, "EZT260003"), {
+    pageNumber: 2,
+    rowNumber: 1,
+    codeColumn: 1,
+  });
+  assert.throws(
+    () => operationBatchExactCodeLocation({
+      ...result,
+      pages: [
+        [["目标批次", "EZT260003", "未发布"]],
+        [["目标批次", "EZT260003", "未发布"]],
+      ],
+    }, "EZT260003"),
+    (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED
+      && /精确匹配到 2 行/.test(error.message),
+  );
+  assert.throws(
+    () => operationBatchExactCodeLocation({
+      headers: ["批次名称", "状态"],
+      pages: [[["目标批次", "未发布"]]],
+    }, "EZT260003"),
+    (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED
+      && /唯一“批次代码”列/.test(error.message),
   );
 });
 
