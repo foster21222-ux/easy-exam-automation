@@ -271,6 +271,9 @@ function normalizedManagedSnapshot(snapshot) {
   ) {
     throw new Error("运营批次受管快照不完整或格式不合法");
   }
+  if (!schedules.length) {
+    throw new Error("运营批次受管快照必须包含至少一条完整日程");
+  }
   const normalizedSchedules = schedules.map((schedule, index) => {
     const requirementIndex = Number(schedule?.requirementIndex);
     const name = text(schedule?.name);
@@ -293,10 +296,19 @@ function normalizedManagedSnapshot(snapshot) {
       end: dateTimeString(endParts),
     };
   });
+  const examStartDate = dateString(examStartParts);
+  const examEndDate = dateString(examEndParts);
+  const scheduleStartDate = [...normalizedSchedules]
+    .sort((left, right) => left.start.localeCompare(right.start))[0].start.slice(0, 10);
+  const scheduleEndDate = [...normalizedSchedules]
+    .sort((left, right) => left.end.localeCompare(right.end)).at(-1).end.slice(0, 10);
+  if (examStartDate !== scheduleStartDate || examEndDate !== scheduleEndDate) {
+    throw new Error("运营批次受管快照概况日期与日程范围不一致");
+  }
   return {
     batchName,
-    examStartDate: dateString(examStartParts),
-    examEndDate: dateString(examEndParts),
+    examStartDate,
+    examEndDate,
     schedules: normalizedSchedules,
   };
 }

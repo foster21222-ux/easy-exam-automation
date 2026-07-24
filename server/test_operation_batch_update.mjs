@@ -324,3 +324,50 @@ test("rejects an invalid verified managed snapshot", () => {
     /受管快照/,
   );
 });
+
+test("rejects verified overview dates that do not match schedule extrema", () => {
+  const task = taskWithRequirements([]);
+
+  assert.throws(
+    () => applyOperationBatchManagedResult(task, {
+      verified: true,
+      snapshot: {
+        batchName: "批次",
+        examStartDate: "2026-08-23",
+        examEndDate: "2026-08-23",
+        schedules: [
+          {
+            requirementIndex: 0,
+            name: "第二场",
+            start: "2026-08-23T09:00:00",
+            end: "2026-08-23T11:00:00",
+          },
+          {
+            requirementIndex: 1,
+            name: "跨日场",
+            start: "2026-08-22T15:00:00",
+            end: "2026-08-24T01:00:00",
+          },
+        ],
+      },
+    }),
+    /概况日期/,
+  );
+});
+
+test("rejects a verified managed snapshot without schedules", () => {
+  const task = taskWithRequirements([]);
+
+  assert.throws(
+    () => applyOperationBatchManagedResult(task, {
+      verified: true,
+      snapshot: {
+        batchName: "批次",
+        examStartDate: "2026-08-22",
+        examEndDate: "2026-08-22",
+        schedules: [],
+      },
+    }),
+    /至少一条完整日程/,
+  );
+});
