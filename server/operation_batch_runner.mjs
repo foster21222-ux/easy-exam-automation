@@ -483,13 +483,41 @@ export async function operationBatchListSnapshot(page) {
   };
 }
 
-async function waitForStableOperationBatchRows(page, options = {}) {
+function operationBatchSnapshotIdentities(snapshot) {
+  const codeIndex = snapshot.headers.indexOf("批次代码");
+  const nameIndex = snapshot.headers.indexOf("批次名称");
+  if (codeIndex < 0 || nameIndex < 0) return null;
+  return snapshot.rows.map((row) => [text(row[codeIndex]), text(row[nameIndex])]);
+}
+
+async function operationBatchResponseIdentities(response) {
+  if (typeof response?.json !== "function") return null;
+  try {
+    const items = (await response.json())?.data?._items;
+    if (!Array.isArray(items) || !items.length) return null;
+    const identities = items.map((item) => [
+      text(item?.batch_code),
+      text(item?.batch_name),
+    ]);
+    return identities.every(([code, name]) => code && name) ? identities : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForStableOperationBatchRows(page, options = {}, expectedIdentities = null) {
   const stablePollMs = Math.max(0, Number(options.tableStablePollMs ?? 100));
   const maxChecks = Math.max(2, Number(options.tableStableMaxChecks || 50));
   let previousSignature = "";
   for (let attempt = 0; attempt < maxChecks; attempt += 1) {
     const snapshot = await operationBatchListSnapshot(page);
     if (snapshot.layout === "pending") {
+      previousSignature = "";
+      await page.waitForTimeout(stablePollMs);
+      continue;
+    }
+    if (expectedIdentities
+      && JSON.stringify(operationBatchSnapshotIdentities(snapshot)) !== JSON.stringify(expectedIdentities)) {
       previousSignature = "";
       await page.waitForTimeout(stablePollMs);
       continue;
@@ -522,7 +550,8 @@ export async function performOperationBatchTableAction(page, action, options = {
     const responseError = await response.finished();
     if (responseError) throw responseError;
     await loading.waitFor({ state: "hidden", timeout: Number(options.batchListLoadingWaitMs || 30000) });
-    const rows = await waitForStableOperationBatchRows(page, options);
+    const expectedIdentities = await operationBatchResponseIdentities(response);
+    const rows = await waitForStableOperationBatchRows(page, options, expectedIdentities);
     assertOperationBatchListPage(page, batchListUrl);
     return rows;
   } catch (error) {

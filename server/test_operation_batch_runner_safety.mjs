@@ -161,6 +161,61 @@ test("table action waits through a delayed card list render", async () => {
   ), [["EZT260004", "目标批次"]]);
 });
 
+test("table action does not accept stable stale cards from before the matched response", async () => {
+  const stalePage = fakeBatchCardsPage([
+    { code: "QTT260007", name: "旧批次一" },
+    { code: "YKT260038", name: "旧批次二" },
+  ]);
+  const targetPage = fakeBatchCardsPage([
+    { code: "EZT260004", name: "目标批次" },
+  ]);
+  let snapshotReads = 0;
+  const responseUrl = "http://operation/api/batch/list";
+  const response = {
+    url: () => responseUrl,
+    request: () => ({
+      resourceType: () => "xhr",
+      method: () => "POST",
+      url: () => responseUrl,
+      postData: () => JSON.stringify({ condition: "EZT260004" }),
+    }),
+    ok: () => true,
+    finished: async () => null,
+    json: async () => ({
+      data: {
+        totalCount: 1,
+        _items: [{
+          batch_code: "EZT260004",
+          batch_name: "目标批次",
+        }],
+      },
+    }),
+  };
+  const page = {
+    url: () => "http://operation/batch/batchList",
+    locator(selector) {
+      if (selector === ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning") {
+        return { first: () => ({ waitFor: async () => {} }) };
+      }
+      if (selector === "thead th") snapshotReads += 1;
+      return (snapshotReads <= 2 ? stalePage : targetPage).locator(selector);
+    },
+    waitForResponse: async () => response,
+    waitForTimeout: async () => {},
+  };
+
+  assert.deepEqual(await performOperationBatchTableAction(
+    page,
+    async () => {},
+    { tableStablePollMs: 0 },
+    {
+      batchListUrl: "http://operation/batch/batchList",
+      expectedBatchName: "EZT260004",
+    },
+  ), [["EZT260004", "目标批次"]]);
+  assert.equal(snapshotReads >= 4, true);
+});
+
 test("card detail opening clicks only one exact dedicated batch code", async () => {
   const page = fakeBatchCardsPage([
     { code: "EZT260040", name: "相似批次" },
