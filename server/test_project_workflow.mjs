@@ -61,6 +61,22 @@ test("builds versioned Fanwei and EasyExam snapshots for a project card", () => 
   assert.equal(result.businessRequirement.project_code, "F0020795");
 });
 
+test("initial Fanwei project config generates an automatic business batch name", () => {
+  const config = buildFanweiProjectConfig({
+    fanwei: {
+      fields: {
+        "项目名称": "中国邮政集团公司湖北省分公司社会招聘考试",
+        "客户名称": "中国邮政集团公司湖北省分公司",
+      },
+    },
+    model: { requirementFields: { "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" } },
+    requirements: [{ fields: { "考试名称": "社会招聘考试", "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" } }],
+  });
+  assert.equal(config.businessRequirement.batch_name, "湖北邮政社招_2026年8月");
+  assert.equal(config.businessRequirement.batch_name_mode, "auto");
+  assert.equal(config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
+});
+
 test("stores every copied EasyExam requirement while keeping the first as the legacy snapshot", () => {
   const result = buildFanweiProjectConfig({
     fanwei,

@@ -6222,7 +6222,7 @@
           <dialog class="account-editor-modal operation-detail-modal" id="sourceDetailModal" aria-labelledby="sourceDetailTitle" aria-describedby="sourceDetailNote">
             <div class="account-editor-head"><div><h2 class="account-editor-title" id="sourceDetailTitle">数据来源详情</h2><div class="settings-note" id="sourceDetailNote">查看并修改项目卡保存的来源快照。</div></div><button class="account-editor-close" id="sourceDetailCloseBtn" type="button" aria-label="关闭数据来源详情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
             <div class="account-editor-body"><div class="source-detail-fields" id="sourceDetailFields"></div><div class="task-meta source-detail-state" id="sourceDetailState"></div></div>
-            <div class="account-editor-actions"><button class="btn" id="sourceDetailCancelBtn" type="button">取消</button><button class="btn primary" id="sourceDetailSaveBtn" type="button">保存修改</button></div>
+            <div class="account-editor-actions"><button class="btn" id="sourceDetailCancelBtn" type="button">取消</button><button class="btn" id="sourceBatchNameRestoreAutoBtn" type="button" hidden>恢复自动生成</button><button class="btn primary" id="sourceDetailSaveBtn" type="button">保存修改</button></div>
           </dialog>
           <details id="projectRequirementInlinePanel" open>
             <summary>需求变更</summary>
@@ -6701,6 +6701,7 @@
       const sourceDetailState = document.querySelector("#sourceDetailState");
       const sourceDetailCloseBtn = document.querySelector("#sourceDetailCloseBtn");
       const sourceDetailCancelBtn = document.querySelector("#sourceDetailCancelBtn");
+      const sourceBatchNameRestoreAutoBtn = document.querySelector("#sourceBatchNameRestoreAutoBtn");
       const sourceDetailSaveBtn = document.querySelector("#sourceDetailSaveBtn");
       const projectRequirementActions = document.querySelector("#projectRequirementActions");
       const projectRequirementInlinePanel = document.querySelector("#projectRequirementInlinePanel");
@@ -9851,6 +9852,10 @@
       function sourceFieldControl(group, key, value, selectOptions = {}) {
         const text = requirementTimeRangeFields.has(key) ? (normalizeFanweiTimeRangeText(value) || String(value ?? "")) : String(value ?? "");
         const data = `data-source-field-group="${safeText(group)}" data-source-field-key="${safeText(key)}"`;
+        const readOnly = group === "fields" && key === "项目名称";
+        const batchName = group === "fields" && key === "批次名称";
+        const readOnlyData = readOnly ? ` data-source-readonly-field="项目名称" readonly` : "";
+        const batchNameData = batchName ? ` data-source-batch-name-mode="${safeText(sourceDetailModal.dataset.batchNameMode || "auto")}"` : "";
         const options = selectOptions[key] || [];
         const normalizedOptions = text && !options.includes(text) ? [text, ...options] : options;
         if (!options.length && requirementTimeRangeFields.has(key)) {
@@ -9863,11 +9868,13 @@
           });
           return `<label class="field"><span class="field-label">${safeText(key)}</span>${control}</label>`;
         }
-        const control = options.length
+        const control = batchName
+          ? `<input class="field-input" ${data}${batchNameData} value="${safeText(text)}" />`
+          : options.length
           ? `<select class="field-input" ${data}><option value=""${text ? "" : " selected"}>请选择</option>${normalizedOptions.map((option) => `<option value="${safeText(option)}"${option === text ? " selected" : ""}>${safeText(option)}</option>`).join("")}</select>`
           : text.length > 70 || text.includes("\n")
-            ? `<textarea class="field-input" ${data} rows="3">${safeText(text)}</textarea>`
-            : `<input class="field-input" ${data} value="${safeText(text)}" />`;
+            ? `<textarea class="field-input" ${data}${readOnlyData} rows="3">${safeText(text)}</textarea>`
+            : `<input class="field-input" ${data}${readOnlyData} value="${safeText(text)}" />`;
         return `<label class="field"><span class="field-label">${safeText(key)}</span>${control}</label>`;
       }
 
@@ -9919,12 +9926,16 @@
         const task = taskViewState.currentProject || {};
         sourceDetailModal.dataset.source = source;
         sourceDetailModal.dataset.requirementIndex = "";
+        sourceDetailModal.dataset.restoreBatchNameAuto = "false";
         sourceDetailModal.classList.toggle("is-single-column", source === "examRequirement");
         sourceDetailState.textContent = "修改后保存会同步更新项目卡和运控任务参数。";
         sourceDetailSaveBtn.disabled = false;
         if (source === "fanwei") {
           const snapshot = task.config?.fanweiSource || {};
           const raw = snapshot.raw || {};
+          sourceDetailModal.dataset.batchNameMode = snapshot.batchNameMode || "auto";
+          sourceDetailModal.dataset.batchNameAutoValue = snapshot.batchNameAutoValue || raw.fields?.["批次名称"] || "";
+          sourceBatchNameRestoreAutoBtn.hidden = sourceDetailModal.dataset.batchNameMode !== "manual";
           sourceDetailTitle.textContent = "泛微业务需求";
           sourceDetailNote.textContent = `${snapshot.serialNo || "未关联流水号"} · 版本 ${snapshot.version || 0} · 保存项目卡时获取`;
           sourceDetailFields.innerHTML = [
@@ -9933,6 +9944,7 @@
             sourceExamSceneGroup(raw.examSceneRows || []),
           ].filter(Boolean).join("") || `<div class="empty-state">当前项目没有保存泛微字段。</div>`;
         } else if (source === "examRequirement") {
+          sourceBatchNameRestoreAutoBtn.hidden = true;
           const requirementIndex = Number(trigger?.dataset?.projectSourceIndex ?? taskViewState.activeProjectRequirementIndex ?? 0);
           const snapshot = projectExamRequirementSnapshot(task, requirementIndex) || {};
           sourceDetailModal.dataset.requirementIndex = String(requirementIndex);
@@ -9946,7 +9958,7 @@
       }
 
       function collectSourceDetailPayload() {
-        const payload = { source: sourceDetailModal.dataset.source || "", requirementIndex: Number(sourceDetailModal.dataset.requirementIndex || 0), fields: {}, serviceConfirmationFields: {}, examSceneRows: [] };
+        const payload = { source: sourceDetailModal.dataset.source || "", requirementIndex: Number(sourceDetailModal.dataset.requirementIndex || 0), fields: {}, serviceConfirmationFields: {}, examSceneRows: [], restoreBatchNameAuto: sourceDetailModal.dataset.restoreBatchNameAuto === "true" };
         sourceDetailFields.querySelectorAll("[data-source-field-group]").forEach((input) => {
           const group = input.dataset.sourceFieldGroup;
           if (!payload[group]) payload[group] = {};
@@ -15124,6 +15136,14 @@
       sourceDetailSaveBtn.addEventListener("click", () => saveProjectSourceDetail().catch((error) => {
         sourceDetailState.textContent = error.message || String(error);
       }));
+      sourceBatchNameRestoreAutoBtn.addEventListener("click", () => {
+        const input = sourceDetailFields.querySelector('[data-source-field-group="fields"][data-source-field-key="批次名称"]');
+        if (!input) return;
+        sourceDetailModal.dataset.restoreBatchNameAuto = "true";
+        input.value = sourceDetailModal.dataset.batchNameAutoValue || "";
+        input.dataset.sourceBatchNameMode = "auto";
+        sourceBatchNameRestoreAutoBtn.hidden = true;
+      });
       sourceDetailFields.addEventListener("click", (event) => {
         const timeButton = event.target.closest("[data-source-time-picker-part]");
         if (!timeButton) return;
@@ -15138,6 +15158,13 @@
         if (!editor || editor.contains(event.relatedTarget)) return;
         if (!validateTimeRangeEditor(editor, { report: true })) return;
         normalizeTimeRangeEditor(editor, { rewrite: true });
+      });
+      sourceDetailFields.addEventListener("input", (event) => {
+        const input = event.target.closest('[data-source-field-group="fields"][data-source-field-key="批次名称"]');
+        if (!input) return;
+        sourceDetailModal.dataset.restoreBatchNameAuto = "false";
+        input.dataset.sourceBatchNameMode = "manual";
+        sourceBatchNameRestoreAutoBtn.hidden = false;
       });
       sourceDetailModal.addEventListener("click", (event) => {
         if (event.target === sourceDetailModal) closeProjectDialog(sourceDetailModal);

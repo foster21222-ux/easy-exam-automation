@@ -1,4 +1,5 @@
 import { operationBatchCodeIsValid, operationBatchNeedsReconciliation } from "./operation_batch.mjs";
+import { defaultOperationBatchName, resolveOperationBatchName } from "./operation_batch_name.mjs";
 import { buildOperationPersonnelTaskDraft, buildOperationPersonnelTaskStatus } from "./operation_personnel_task.mjs";
 
 function text(value) {
@@ -35,6 +36,9 @@ export function normalizeFanweiBusinessRequirement(fanwei = {}, model = {}) {
     applicant_department: text(fields["申请人部门"]),
     application_date: text(fields["申请日期"]),
     operation_serial_number: text(fields["运控流水号"]),
+    batch_name: text(fields["批次名称"]),
+    batch_name_mode: text(model.batchNameMode) === "manual" ? "manual" : "auto",
+    batch_name_auto_value: text(model.batchNameAutoValue),
     project_name: first(fields["项目名称"], requirementFields["考试名称"]),
     project_code: text(fields["项目编码"]),
     customer_name: first(fields["客户名称（仅供参考）"], fields["客户名称"], confirmation["单位名称"]),
@@ -112,6 +116,28 @@ export function buildFanweiProjectConfig({ fanwei = {}, model = {}, parsed = {},
     };
   });
   const examRequirement = examRequirements[0];
+  const batchName = resolveOperationBatchName({
+    previousValue: previousConfig.fanweiSource?.raw?.fields?.["批次名称"],
+    previousMode: previousConfig.fanweiSource?.batchNameMode,
+    generatedValue: defaultOperationBatchName({
+      customerName: businessRequirement.customer_name,
+      projectName: businessRequirement.project_name,
+      examStart: examRequirement?.fields?.["考试日期时间"],
+    }),
+    submittedValue: fanwei.fields?.["批次名称"],
+  });
+  const fanweiSource = {
+    version: fanweiVersion,
+    capturedAt: now,
+    serialNo,
+    requestId: text(fanwei.requestid),
+    batchNameMode: batchName.mode,
+    batchNameAutoValue: batchName.autoValue,
+    raw: {
+      ...fanwei,
+      fields: { ...(fanwei.fields || {}), "批次名称": batchName.value },
+    },
+  };
   return {
     projectCard: {
       createdAt: previousConfig.projectCard?.createdAt || now,
@@ -120,14 +146,13 @@ export function buildFanweiProjectConfig({ fanwei = {}, model = {}, parsed = {},
       sourceType: "fanwei",
       sourceKey: serialNo,
     },
-    fanweiSource: {
-      version: fanweiVersion,
-      capturedAt: now,
-      serialNo,
-      requestId: text(fanwei.requestid),
-      raw: fanwei,
+    fanweiSource,
+    businessRequirement: {
+      ...businessRequirement,
+      batch_name: batchName.value,
+      batch_name_mode: batchName.mode,
+      batch_name_auto_value: batchName.autoValue,
     },
-    businessRequirement,
     examRequirements,
     examRequirement,
     customerName: first(parsed.config?.customerName, businessRequirement.customer_name),

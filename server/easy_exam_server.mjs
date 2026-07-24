@@ -131,6 +131,7 @@ import {
   buildProjectWorkflow,
   normalizeFanweiBusinessRequirement,
 } from "./project_workflow.mjs";
+import { defaultOperationBatchName, resolveOperationBatchName } from "./operation_batch_name.mjs";
 import { buildAutoConfigFromRequirement } from "./requirement_auto_config_adapter.mjs";
 import {
   buildWindowsChromeLaunchArgs,
@@ -1628,7 +1629,7 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
   if (source === "fanwei") {
     const currentSource = task.config?.fanweiSource || {};
     const currentRaw = currentSource.raw || {};
-    const raw = {
+    let raw = {
       ...currentRaw,
       fields: editableStringRecord(payload.fields),
       serviceConfirmation: {
@@ -1637,14 +1638,37 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
       },
       examSceneRows: editableExamSceneRows(payload.examSceneRows),
     };
+    const requirementFields = taskExamRequirements(task)[0]?.fields || task.config?.examRequirement?.fields || {};
+    const normalizedRequirement = normalizeFanweiBusinessRequirement(raw, { requirementFields });
+    const batchName = resolveOperationBatchName({
+      previousValue: currentSource.raw?.fields?.["批次名称"],
+      previousMode: currentSource.batchNameMode,
+      generatedValue: defaultOperationBatchName({
+        customerName: normalizedRequirement.customer_name,
+        projectName: normalizedRequirement.project_name,
+        examStart: requirementFields["考试日期时间"],
+      }),
+      submittedValue: payload.restoreBatchNameAuto === true ? "" : raw.fields["批次名称"],
+      restoreAuto: payload.restoreBatchNameAuto === true,
+    });
+    raw = {
+      ...raw,
+      fields: { ...raw.fields, "批次名称": batchName.value },
+    };
     const changes = projectRequirementFieldChanges(fanweiHistoryFields(currentRaw), fanweiHistoryFields(raw));
-    const requirementFields = task.config?.examRequirement?.fields || {};
-    const businessRequirement = normalizeFanweiBusinessRequirement(raw, { requirementFields });
+    const businessRequirement = {
+      ...normalizeFanweiBusinessRequirement(raw, { requirementFields }),
+      batch_name: batchName.value,
+      batch_name_mode: batchName.mode,
+      batch_name_auto_value: batchName.autoValue,
+    };
     const fanweiSource = {
       ...currentSource,
       version: Number(currentSource.version || 0) + 1,
       modifiedAt: now,
       serialNo: businessRequirement.operation_serial_number || currentSource.serialNo || "",
+      batchNameMode: batchName.mode,
+      batchNameAutoValue: batchName.autoValue,
       raw,
     };
     const projectCard = {

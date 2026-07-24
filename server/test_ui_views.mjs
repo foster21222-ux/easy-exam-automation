@@ -3650,6 +3650,13 @@ test("EasyExam source editing includes the established requirement dropdown opti
   }
 });
 
+test("Fanwei source editing exposes batch-name mode and restores automatic values", () => {
+  assert.ok(html.includes("data-source-batch-name-mode"));
+  assert.ok(html.includes('id="sourceBatchNameRestoreAutoBtn"'));
+  assert.ok(html.includes('data-source-readonly-field="项目名称"'));
+  assert.ok(html.includes("restoreBatchNameAuto"));
+});
+
 test("project configuration opens saved EasyExam requirements from the upper source card", () => {
   const sourceRenderer = sourceBetween(
     "      function renderProjectSources(task = {}, workflow = {}) {",
