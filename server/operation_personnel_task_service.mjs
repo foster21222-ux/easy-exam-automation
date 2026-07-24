@@ -14,6 +14,7 @@ import {
 const VALID_ENVIRONMENTS = new Set(["test", "production"]);
 const PREVIEW_TTL_MS = 10 * 60 * 1000;
 const ACTIVE_ATTEMPT_STATUSES = new Set(["queued", "running"]);
+const RECOVERY_STATUSES = new Set(["operation_conflict", "result_unknown", "failed_resumable"]);
 const PENDING_REQUIREMENT_STATUSES = new Set(["pending_internal_review", "pending_review"]);
 
 function text(value) {
@@ -58,13 +59,13 @@ function requirementRequestId(task = {}) {
 }
 
 function requirementVersion(task = {}, requirement = {}) {
-  const singular = Number(task.config?.examRequirement?.version);
-  if (Number.isFinite(singular)) return singular;
   const multiple = (task.config?.examRequirements || []).map((item) => ({
     id: text(item?.id),
     version: Number(item?.version || 0),
   }));
   if (multiple.length) return stableJson(multiple);
+  const singular = Number(task.config?.examRequirement?.version);
+  if (Number.isFinite(singular)) return singular;
   const external = Number(requirement?.version);
   return Number.isFinite(external) ? external : 0;
 }
@@ -508,7 +509,11 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     });
     let state = normalizedState(task, environment, draft);
     state = recoverOrphanedAttempt(state, activeAttemptIds);
-    if (!state.activeAttempt && !task.config?.operationPersonnelTask) {
+    state.draft = structuredClone(draft);
+    state.sourceFingerprint = draftSourceFingerprint(draft);
+    state.scheduleCodeMap = structuredClone(draft.scheduleCodeMap || {});
+    if (!ACTIVE_ATTEMPT_STATUSES.has(state.activeAttempt?.status)
+      && !RECOVERY_STATUSES.has(state.status)) {
       state.status = buildOperationPersonnelTaskStatus(task, draft).status;
     }
     return { taskId, state };
@@ -544,6 +549,13 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     });
     const edited = editableDraft(generated, input);
     const draft = edited.draft;
+    if ((draft.warnings || []).some((item) => item.code === "UNSUPPORTED_PERSONNEL_TASK")) {
+      throw serviceError(
+        "PERSONNEL_TASK_UNSUPPORTED",
+        409,
+        "当前需求包含人员任务单不支持的监考范围",
+      );
+    }
 
     const releaseProfile = coordinator.acquireProfile();
     let snapshot;
@@ -909,6 +921,13 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           "PERSONNEL_PREVIEW_STALE",
           409,
           "人员任务预览已失效，请重新检查",
+        );
+      }
+      if ((state.draft.warnings || []).length) {
+        throw serviceError(
+          "PERSONNEL_DRAFT_INCOMPLETE",
+          409,
+          "人员任务草稿仍有未解决问题，请重新检查",
         );
       }
       const currentFingerprint = operationPersonnelTaskFingerprint(state.draft);

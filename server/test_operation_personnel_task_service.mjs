@@ -349,6 +349,70 @@ test("preview token binds requirement, draft, operation snapshot and directory",
   );
 });
 
+test("changing requirement 2 invalidates a preview even when the singular legacy alias is unchanged", async () => {
+  const harness = serviceHarness();
+  const first = structuredClone(harness.task.config.examRequirement);
+  harness.task.config.examRequirements = [
+    first,
+    {
+      ...structuredClone(first),
+      id: "requirement-2",
+      version: 7,
+      config: {
+        ...structuredClone(first.config),
+        startTimeDisplay: "2026/08/23 09:00",
+        endTimeDisplay: "2026/08/23 11:00",
+      },
+    },
+  ];
+  const preview = await harness.service.preview("task-a", owner(), {});
+  harness.task.config.examRequirements[1].version += 1;
+
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
+  );
+  assert.equal(harness.deferredJobs.length, 0);
+  assert.equal(harness.task.config.operationPersonnelTask.activeAttempt, null);
+});
+
+test("preview rejects an unsupported personnel scope before inspection or token persistence", async () => {
+  const harness = serviceHarness();
+  harness.task.config.businessRequirement.high_end_supplement_required = "是";
+
+  await assert.rejects(
+    harness.service.preview("task-a", owner(), {}),
+    { code: "PERSONNEL_TASK_UNSUPPORTED", status: 409 },
+  );
+  assert.deepEqual(harness.runnerCalls, []);
+  assert.equal(harness.task.config.operationPersonnelTask, undefined);
+  assert.equal(harness.deferredJobs.length, 0);
+});
+
+test("send rejects residual draft warnings before queueing an attempt", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const state = harness.task.config.operationPersonnelTask;
+  state.draft.warnings.push({ code: "UNSUPPORTED_PERSONNEL_TASK" });
+  state.sourceFingerprint = valueFingerprint(state.draft);
+
+  await assert.rejects(
+    harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    }),
+    { code: "PERSONNEL_DRAFT_INCOMPLETE", status: 409 },
+  );
+  assert.equal(harness.deferredJobs.length, 0);
+  assert.equal(state.activeAttempt, null);
+  assert.equal(state.activePreview.token, preview.previewToken);
+});
+
 test("visible prior send record adopts an external resend baseline in two inspections", async () => {
   const harness = serviceHarness({ externalBaseline: true });
   const preview = await harness.service.preview("task-a", owner(), {});
@@ -601,6 +665,21 @@ test("identical successful fingerprint cannot be resent", async () => {
   );
 });
 
+test("get exposes a fresh draft and changes_pending after a sent requirement changes", async () => {
+  const harness = serviceHarness({ alreadySent: true });
+  harness.task.config.examRequirement.version += 1;
+  harness.task.config.examRequirement.config.startTimeDisplay = "2026/08/23 09:00";
+  harness.task.config.examRequirement.config.endTimeDisplay = "2026/08/23 11:00";
+
+  const current = await harness.service.get("task-a", owner());
+
+  assert.equal(current.state.status, "changes_pending");
+  assert.equal(current.state.draft.schedules[0].start, "2026/08/23 09:00");
+  assert.equal(current.state.draft.sourceVersion.requirements[0].version, 4);
+  assert.equal(current.state.activeAttempt, null);
+  assert.equal(current.state.sendHistory.length, 0);
+});
+
 test("service environment is authoritative and request environment is ignored", async () => {
   const harness = serviceHarness({ environment: "test" });
   const preview = await harness.service.preview("task-a", owner(), { environment: "production" });
@@ -693,8 +772,7 @@ test("editable draft changes increment version and append an auto-confirmed audi
 test("editable dates and monitor count clear only the warnings they resolve", async () => {
   const harness = serviceHarness();
   harness.task.sessions[0].candidateCount = 0;
-  harness.task.config.businessRequirement.high_end_supplement_required = "是";
-  harness.task.config.examRequirement.config.startTimeDisplay = "2026/07/24 09:00";
+  harness.task.config.examRequirement.config.startTimeDisplay = "invalid";
   harness.task.config.examRequirement.config.endTimeDisplay = "2026/07/24 11:00";
   const preview = await harness.service.preview("task-a", owner(), {
     dates: {
@@ -713,7 +791,7 @@ test("editable dates and monitor count clear only the warnings they resolve", as
     false,
   );
   assert.equal(
-    preview.state.draft.warnings.some((item) => item.code === "UNSUPPORTED_PERSONNEL_TASK"),
+    preview.state.draft.warnings.some((item) => item.code === "INVALID_SCHEDULE_RANGE"),
     true,
   );
   assert.equal(preview.state.draft.personnel.monitorCount, 2);
