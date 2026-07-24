@@ -244,8 +244,9 @@ test("current personnel directory labels map exact email identities", () => {
   );
 });
 
-function fakePersonnelTaskListPage(rows = []) {
+function fakePersonnelTaskListPage(rows = [], { searchInitiallyMissing = false } = {}) {
   const events = [];
+  let searchReady = !searchInitiallyMissing;
   const rowLocators = rows.map((cells, rowIndex) => ({
     locator: (selector) => {
       assert.equal(selector, "td");
@@ -300,7 +301,12 @@ function fakePersonnelTaskListPage(rows = []) {
     }),
   };
   const searchInput = {
-    count: async () => 1,
+    count: async () => searchReady ? 1 : 0,
+    waitFor: async ({ state }) => {
+      assert.equal(state, "visible");
+      events.push("search:visible");
+      searchReady = true;
+    },
     fill: async (value) => events.push(`fill:${value}`),
   };
   return {
@@ -349,6 +355,21 @@ test("current personnel task list opens the exact fixed action row", async () =>
     "click:1",
     "wait:任务单发送需满足以下条件",
   ]);
+});
+
+test("current personnel task list waits for its React filter", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["目标批次", "项目实施五部", "经理", "", ""],
+  ], { searchInitiallyMissing: true });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { batchName: "目标批次" } },
+    { baseUrl: "http://operation.test/" },
+  );
+
+  assert.equal(page.events.includes("search:visible"), true);
+  assert.equal(page.events.includes("click:0"), true);
 });
 
 test("current personnel task list blocks duplicate exact batch names", async () => {

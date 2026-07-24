@@ -501,6 +501,9 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   const search = page.locator(
     'input[placeholder="请输入批次代码、批次名称、项目经理"]:visible',
   );
+  if (await search.count() === 0) {
+    await search.waitFor({ state: "visible", timeout: 10_000 });
+  }
   if (await search.count() !== 1) {
     throw operationControlError("分散在线监考任务筛选框", await search.count());
   }
