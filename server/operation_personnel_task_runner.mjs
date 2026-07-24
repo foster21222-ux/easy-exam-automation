@@ -487,6 +487,18 @@ export function operationPersonnelSendRecordsFromVisibleRows(rows = []) {
   });
 }
 
+export function operationPersonnelTimelineSendRecordFromVisibleText(value) {
+  const match = text(value).match(
+    /^(.*?)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})$/,
+  );
+  const label = text(match?.[1]);
+  if (!label || !match?.[2]) return null;
+  return {
+    type: label === "首次发送" ? "首次发送" : "再次发送",
+    sentAt: match[2],
+  };
+}
+
 export function operationPersonnelDirectoryPeopleFromVisibleTexts(values = []) {
   const seen = new Set();
   return [...values].flatMap((value) => {
@@ -773,17 +785,10 @@ export async function readVisiblePersonnelTaskSheet(page) {
     const scheduleRows = scheduleTable
       ? [...scheduleTable.querySelectorAll("tbody tr")].filter(visible).map(cells)
       : [];
-    const timelineSendRows = [...modal.querySelectorAll(".ant-timeline-item-content")]
+    const timelineSendTexts = [...modal.querySelectorAll(".ant-timeline-item-content")]
       .filter(visible)
-      .flatMap((node) => {
-        const match = clean(node.textContent).match(
-          /^(首次发送|再次发送)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})$/,
-        );
-        return match ? [[match[2], match[1]]] : [];
-      });
-    const sendRecordRows = sendTable
-      ? tableRows(sendTable)
-      : [["发送时间", "变更内容"], ...timelineSendRows];
+      .map((node) => clean(node.textContent));
+    const sendRecordRows = sendTable ? tableRows(sendTable) : null;
     const modalText = String(modal.innerText ?? "");
     const conditions = [...modalText.matchAll(
       /\d+、\s*(.*?)(?=\s*\d+、|基本信息)/gs,
@@ -794,6 +799,7 @@ export async function readVisiblePersonnelTaskSheet(page) {
       scheduleHeaders,
       scheduleRows,
       sendRecordRows,
+      timelineSendTexts,
       content: JSON.stringify({
         conditions,
         keyValueRows,
@@ -802,7 +808,14 @@ export async function readVisiblePersonnelTaskSheet(page) {
       }),
     };
   });
-  return operationPersonnelTaskSheetFromVisibleRaw(raw);
+  const sendRecordRows = raw.sendRecordRows || [
+    ["发送时间", "变更内容"],
+    ...(raw.timelineSendTexts || []).flatMap((value) => {
+      const record = operationPersonnelTimelineSendRecordFromVisibleText(value);
+      return record ? [[record.sentAt, record.type]] : [];
+    }),
+  ];
+  return operationPersonnelTaskSheetFromVisibleRaw({ ...raw, sendRecordRows });
 }
 
 async function readVisibleOperationPersonnelSnapshot(page) {
@@ -1552,15 +1565,19 @@ async function selectVisiblePeople(dialog, groupName, people) {
   if (await group.count() === 0) {
     await group.waitFor({ state: "visible", timeout: 10_000 });
   }
-  await clickUniqueVisible(group, `人员目录组 ${groupName}`);
-  for (const person of people) {
-    const label = `${person.id} (${person.name})`;
-    const candidate = dialog.getByRole("checkbox", { name: label, exact: true });
-    if (await candidate.count() === 0) {
-      await candidate.waitFor({ state: "visible", timeout: 10_000 });
+  const exactGroup = await clickUniqueVisible(group, `人员目录组 ${groupName}`);
+  try {
+    for (const person of people) {
+      const label = `${person.id} (${person.name})`;
+      const candidate = dialog.getByRole("checkbox", { name: label, exact: true });
+      if (await candidate.count() === 0) {
+        await candidate.waitFor({ state: "visible", timeout: 10_000 });
+      }
+      const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
+      await exact.check();
     }
-    const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
-    await exact.check();
+  } finally {
+    if (await exactGroup.isChecked()) await exactGroup.uncheck();
   }
 }
 
@@ -1594,20 +1611,39 @@ export async function selectVisiblePersonnelRecipients(
   }
 }
 
-export async function readVisibleExpectedMailRecipients(mailDialog, expected) {
-  const read = async (people) => {
-    const selected = [];
-    for (const person of people) {
-      const label = `${person.id} (${person.name})`;
-      const candidate = mailDialog.getByRole("checkbox", { name: label, exact: true });
-      const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
-      if (await exact.isChecked()) selected.push(person);
-    }
-    return selected;
-  };
+export async function readVisibleExpectedMailRecipients(mailDialog, expected, rule = {}) {
+  const groupNames = [text(rule.toGroup), text(rule.ccGroup)];
+  const raw = await mailDialog.evaluate((node, expectedGroupNames) => {
+    const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
+    const checkboxName = (input) => clean(
+      input.getAttribute("aria-label")
+      || input.closest("label")?.innerText
+      || input.closest(".ant-checkbox-wrapper")?.innerText
+      || input.parentElement?.parentElement?.innerText,
+    );
+    const expectedGroups = new Set(expectedGroupNames.filter(Boolean));
+    const checkedNames = [...node.querySelectorAll('input[type="checkbox"]:checked')]
+      .map(checkboxName)
+      .filter(Boolean);
+    return {
+      checkedGroups: checkedNames.filter((name) => (
+        expectedGroups.has(name) || !name.includes("@")
+      )),
+      checkedPeople: checkedNames.filter((name) => name.includes("@")),
+    };
+  }, groupNames);
+  if (raw.checkedGroups.length) {
+    throw new Error(
+      `运控人员任务检查阻断：人员目录组“${raw.checkedGroups.join("、")}”仍为整组勾选`,
+    );
+  }
+  const selected = operationPersonnelMailPeopleFromVisibleTexts(raw.checkedPeople);
+  const ccKeys = new Set((expected.cc || []).map((person) => (
+    `${text(person.id)}\0${text(person.name)}`
+  )));
   return {
-    to: await read(expected.to || []),
-    cc: await read(expected.cc || []),
+    to: selected.filter((person) => !ccKeys.has(`${person.id}\0${person.name}`)),
+    cc: selected.filter((person) => ccKeys.has(`${person.id}\0${person.name}`)),
   };
 }
 
@@ -1766,7 +1802,7 @@ async function readVisibleMailRecipients(page, instruction = {}) {
     : null;
   if ((expected.to.length || expected.cc.length)
     && await inlineGroup?.count() === 1) {
-    return readVisibleExpectedMailRecipients(mailDialog, expected);
+    return readVisibleExpectedMailRecipients(mailDialog, expected, rule);
   }
 
   const raw = await page.evaluate(() => {

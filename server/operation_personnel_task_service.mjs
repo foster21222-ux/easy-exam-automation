@@ -123,6 +123,10 @@ function stateDefaults(environment, draft = {}) {
 function normalizedState(task, environment, draft = null) {
   const existing = task?.config?.operationPersonnelTask || {};
   const generated = draft || existing.draft || {};
+  const activeAttempt = existing.activeAttempt
+    ? structuredClone(existing.activeAttempt)
+    : null;
+  if (activeAttempt?.status === "sent") activeAttempt.error = null;
   return {
     ...stateDefaults(environment, generated),
     ...structuredClone(existing),
@@ -131,7 +135,7 @@ function normalizedState(task, environment, draft = null) {
     scheduleCodeMap: structuredClone(existing.scheduleCodeMap || generated.scheduleCodeMap || {}),
     checkpoints: structuredClone(existing.checkpoints || {}),
     activePreview: existing.activePreview ? structuredClone(existing.activePreview) : null,
-    activeAttempt: existing.activeAttempt ? structuredClone(existing.activeAttempt) : null,
+    activeAttempt,
     sendHistory: structuredClone(existing.sendHistory || []),
     events: structuredClone(existing.events || []),
   };
@@ -1086,6 +1090,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         activeAttempt: {
           ...freshAttempt,
           status: "sent",
+          error: null,
           completedAt,
           operationSnapshot,
         },

@@ -9232,6 +9232,7 @@
       const projectWorkflowStatusLabels = {
         ready: "可执行",
         success: "已完成",
+        sent: "已发送",
         needs_review: "待补充",
         reconciliation_required: "待同步",
         waiting_batch: "等待批次",
@@ -9615,7 +9616,7 @@
           const status = workflow.steps?.[key]?.status || "waiting_batch";
           const changeNotice = projectWorkflowSourceChangeNotice(task, key);
           const connector = index < projectWorkflowStepMeta.length - 1 ? `<span class="operation-workflow-connector" aria-hidden="true"></span>` : "";
-          return `<button class="operation-workflow-step ${safeText(status)}" type="button" data-workflow-step="${safeText(key)}" aria-selected="false"><span class="operation-workflow-index">${index + 1}</span><div class="operation-workflow-step-head"><span class="operation-workflow-step-title">${safeText(title)}</span><span class="operation-workflow-step-tags">${changeNotice ? `<span class="tag amber">${safeText(changeNotice)}</span>` : ""}<span class="tag ${status === "needs_review" || status === "reconciliation_required" ? "amber" : status === "ready" || status === "success" ? "green" : ""}">${safeText(projectWorkflowStatusLabels[status] || status)}</span></span></div><p>${safeText(description)}<br>来源：${safeText(source)} · 点击查看</p>${connector}</button>`;
+          return `<button class="operation-workflow-step ${safeText(status)}" type="button" data-workflow-step="${safeText(key)}" aria-selected="false"><span class="operation-workflow-index">${index + 1}</span><div class="operation-workflow-step-head"><span class="operation-workflow-step-title">${safeText(title)}</span><span class="operation-workflow-step-tags">${changeNotice ? `<span class="tag amber">${safeText(changeNotice)}</span>` : ""}<span class="tag ${status === "needs_review" || status === "reconciliation_required" ? "amber" : status === "ready" || status === "success" || status === "sent" ? "green" : ""}">${safeText(projectWorkflowStatusLabels[status] || status)}</span></span></div><p>${safeText(description)}<br>来源：${safeText(source)} · 点击查看</p>${connector}</button>`;
         }).join("");
         projectOperationBatchDraft.innerHTML = renderOperationBatchDraft(batchDraft);
         projectPersonnelTaskDraft.innerHTML = renderWorkflowDraft(workflow.personnelDraft);

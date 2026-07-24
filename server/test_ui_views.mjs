@@ -607,6 +607,7 @@ test("project and system views expose the selective PR 5 collaboration controls"
   assert.ok(html.includes('id="operationBatchReconcileBtn"'));
   assert.ok(html.includes('id="operationBatchRecordBtn"'));
   assert.ok(html.includes('reconciliation_required: "待同步"'));
+  assert.ok(html.includes('sent: "已发送"'));
   assert.ok(html.includes('/operation-batch/reconcile'));
   assert.ok(html.includes('id="contentRequirementEmailRecipients"'));
   assert.ok(html.includes('id="contentRequirementEmailSendBtn"'));

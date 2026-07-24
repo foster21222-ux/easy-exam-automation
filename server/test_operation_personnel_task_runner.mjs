@@ -373,6 +373,31 @@ test("current personnel send record table maps its header row and visible record
   );
 });
 
+test("current personnel timeline maps a change summary entry as a resend record", () => {
+  assert.equal(
+    typeof operationPersonnelRunner.operationPersonnelTimelineSendRecordFromVisibleText,
+    "function",
+  );
+  assert.deepEqual(
+    operationPersonnelRunner.operationPersonnelTimelineSendRecordFromVisibleText(
+      "人员落实结束日期调整为2026-08-19；正式考试监考人数由3人调整为80人（按4000人、1:50计算） 2026-07-24 13:38:39",
+    ),
+    { type: "再次发送", sentAt: "2026-07-24 13:38:39" },
+  );
+  assert.deepEqual(
+    operationPersonnelRunner.operationPersonnelTimelineSendRecordFromVisibleText(
+      "首次发送 2026-07-23 10:09:34",
+    ),
+    { type: "首次发送", sentAt: "2026-07-23 10:09:34" },
+  );
+  assert.equal(
+    operationPersonnelRunner.operationPersonnelTimelineSendRecordFromVisibleText(
+      "没有发送时间",
+    ),
+    null,
+  );
+});
+
 test("current personnel directory labels map exact email identities", () => {
   assert.equal(
     typeof operationPersonnelRunner.operationPersonnelDirectoryPeopleFromVisibleTexts,
@@ -675,6 +700,35 @@ test("current top-right send record reader uses the visible task sheet table", a
   );
 });
 
+test("current top-right send record reader accepts a visible resend change summary", async () => {
+  const page = {
+    locator: (selector) => {
+      assert.equal(selector, ".ant-modal:visible");
+      return {
+        filter: ({ hasText }) => {
+          assert.equal(hasText, "任务单发送需满足以下条件");
+          return { count: async () => 1 };
+        },
+      };
+    },
+    evaluate: async () => visiblePersonnelTaskSheetRaw({
+      sendRecordRows: null,
+      timelineSendTexts: [
+        "人员落实结束日期调整为2026-08-19；正式考试监考人数由3人调整为80人（按4000人、1:50计算） 2026-07-24 13:38:39",
+        "首次发送 2026-07-23 10:09:34",
+      ],
+    }),
+  };
+
+  assert.deepEqual(
+    await operationPersonnelRunner.readVisibleTopRightSendRecords(page),
+    [
+      { type: "再次发送", sentAt: "2026-07-24 13:38:39" },
+      { type: "首次发送", sentAt: "2026-07-23 10:09:34" },
+    ],
+  );
+});
+
 test("directory probe uses its reviewed summary in the built-in resend flow", async () => {
   const events = [];
   const button = (name) => ({
@@ -779,10 +833,19 @@ test("current operation console opens the inline 邮件发送 dialog directly", 
 
 test("inline mail directory selects recipients without clicking the final confirm button", async () => {
   const events = [];
+  let groupChecked = false;
   const checkbox = (name) => ({
     count: async () => 1,
-    click: async () => events.push(`click:${name}`),
+    click: async () => {
+      events.push(`click:${name}`);
+      if (name === "演练组") groupChecked = true;
+    },
     check: async () => events.push(`check:${name}`),
+    isChecked: async () => name === "演练组" && groupChecked,
+    uncheck: async () => {
+      events.push(`uncheck:${name}`);
+      if (name === "演练组") groupChecked = false;
+    },
   });
   const mailDialog = {
     getByRole: (role, { name }) => {
@@ -809,18 +872,22 @@ test("inline mail directory selects recipients without clicking the final confir
   assert.deepEqual(events, [
     "click:演练组",
     "check:zhanglexiang@ata.net.cn (张乐翔)",
+    "uncheck:演练组",
   ]);
 });
 
-test("inline mail recipient readback verifies the exact expected checked people", async () => {
-  const checked = new Set(["zhanglexiang@ata.net.cn (张乐翔)"]);
+test("inline mail recipient readback rejects checked groups and reports extra people", async () => {
+  let raw = {
+    checkedGroups: [],
+    checkedPeople: [
+      "zhanglexiang@ata.net.cn (张乐翔)",
+      "maomengmeng@ata.net.cn (毛萌萌)",
+    ],
+  };
   const mailDialog = {
-    getByRole: (role, { name }) => {
-      assert.equal(role, "checkbox");
-      return {
-        count: async () => 1,
-        isChecked: async () => checked.has(name),
-      };
+    evaluate: async (_callback, groupNames) => {
+      assert.deepEqual(groupNames, ["演练组", ""]);
+      return raw;
     },
   };
 
@@ -831,11 +898,31 @@ test("inline mail recipient readback verifies the exact expected checked people"
         to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
         cc: [{ id: "jiesuan1@ata.net.cn", name: "结算一" }],
       },
+      { toGroup: "演练组", ccGroup: "" },
     ),
     {
-      to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+      to: [
+        { id: "zhanglexiang@ata.net.cn", name: "张乐翔" },
+        { id: "maomengmeng@ata.net.cn", name: "毛萌萌" },
+      ],
       cc: [],
     },
+  );
+
+  raw = {
+    checkedGroups: ["演练组"],
+    checkedPeople: ["zhanglexiang@ata.net.cn (张乐翔)"],
+  };
+  await assert.rejects(
+    operationPersonnelRunner.readVisibleExpectedMailRecipients(
+      mailDialog,
+      {
+        to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+        cc: [],
+      },
+      { toGroup: "演练组", ccGroup: "" },
+    ),
+    /人员目录组“演练组”仍为整组勾选/,
   );
 });
 

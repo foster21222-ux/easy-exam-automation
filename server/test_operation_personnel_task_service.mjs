@@ -998,6 +998,21 @@ test("attempt lookup is project-scoped", async () => {
   );
 });
 
+test("sent personnel state does not expose a stale active-attempt error", async () => {
+  const harness = serviceHarness({ resultUnknown: true });
+  harness.task.config.operationPersonnelTask.status = "sent";
+  harness.task.config.operationPersonnelTask.activeAttempt.status = "sent";
+  harness.task.config.operationPersonnelTask.activeAttempt.error = {
+    code: "PERSONNEL_OPERATION_CONFLICT",
+    message: "旧错误",
+  };
+
+  const result = await harness.service.get("task-a", owner());
+
+  assert.equal(result.state.status, "sent");
+  assert.equal(result.state.activeAttempt.error, null);
+});
+
 test("result_unknown blocks preview without inspection or persistence", async () => {
   const harness = serviceHarness({ resultUnknown: true });
   const before = structuredClone(harness.task.config.operationPersonnelTask);
@@ -1037,11 +1052,16 @@ test("recheck reconciles a newly visible record without another send or attempt 
       operationSnapshot: { batch: { published: true } },
     },
   });
+  harness.task.config.operationPersonnelTask.activeAttempt.error = {
+    code: "PERSONNEL_OPERATION_CONFLICT",
+    message: "旧错误",
+  };
   const result = await harness.service.recheck("task-a", owner());
   assert.equal(result.state.status, "sent");
   assert.equal(result.state.sendHistory.length, 1);
   assert.equal(result.state.sendHistory[0].attemptId, "attempt-orphan");
   assert.equal(result.state.activeAttempt.attemptId, "attempt-orphan");
+  assert.equal(result.state.activeAttempt.error, null);
   assert.deepEqual(harness.runnerCalls, ["recheck"]);
 });
 
