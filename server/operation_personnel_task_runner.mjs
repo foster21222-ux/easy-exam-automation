@@ -975,7 +975,11 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     }
     return normalizeOperationPersonnelSnapshot({
       ...taskSnapshot,
-      batch: { ...taskSnapshot.batch, ...batch },
+      batch: {
+        ...taskSnapshot.batch,
+        ...batch,
+        published: taskSnapshot.batch.published === true || batch.published === true,
+      },
       directoryMatch: directoryProbeSummary
         ? directoryMatch(text(instruction.environment), matched)
         : { to: [], cc: [] },

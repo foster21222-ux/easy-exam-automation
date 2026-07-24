@@ -1427,7 +1427,11 @@ test("inspection resolves the exact directory only with a real probe summary", a
     {
       readBatchPages: async () => exactBatchPages(),
       openBatchRow: async () => {},
-      readBatch: async () => ({ code: "EZT260003", batchName: "目标批次" }),
+      readBatch: async () => ({
+        code: "EZT260003",
+        batchName: "目标批次",
+        published: false,
+      }),
       openPersonnelTaskSheet: async () => {},
       readPersonnelTaskSheetSnapshot: async () => taskSheetSnapshot,
       readDirectoryGroups: async () => {
@@ -1441,6 +1445,7 @@ test("inspection resolves the exact directory only with a real probe summary", a
   );
 
   assert.equal(directoryReads, 1);
+  assert.equal(snapshot.batch.published, true);
   assert.deepEqual(snapshot.directoryMatch, {
     to: [{ group: "演练组", id: "u1", name: "张乐翔" }],
     cc: [],
