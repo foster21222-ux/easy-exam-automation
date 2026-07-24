@@ -191,6 +191,10 @@ test("buildOperationBatchDraft keeps a missing business batch name as a required
         exam_schedule: [{ exam_date: "2026-07-10" }],
       },
     },
+  }, {
+    fields: {
+      batchName: "不能掩盖缺失值的过期批次名称",
+    },
   });
 
   assert.equal(draft.fields.batchName.value, "");
@@ -199,6 +203,26 @@ test("buildOperationBatchDraft keeps a missing business batch name as a required
     draft.warnings.find((item) => item.field === "batchName"),
     { field: "batchName", message: "批次名称缺失，需要人工补充" },
   );
+});
+
+test("buildOperationBatchDraft ignores batch name overrides but keeps other overrides", () => {
+  const draft = buildOperationBatchDraft({
+    config: {
+      businessRequirement: {
+        batch_name: "业务需求权威批次",
+      },
+    },
+  }, {
+    fields: {
+      batchName: "请求中的过期批次",
+      projectDepartment: "项目实施一部",
+    },
+  });
+
+  assert.equal(draft.fields.batchName.value, "业务需求权威批次");
+  assert.equal(draft.fields.batchName.source, "business_requirement");
+  assert.equal(draft.fields.projectDepartment.value, "项目实施一部");
+  assert.equal(draft.fields.projectDepartment.source, "manual");
 });
 
 test("buildOperationBatchDraft normalizes office department and personnel service defaults", () => {

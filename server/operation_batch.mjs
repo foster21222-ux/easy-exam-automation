@@ -103,7 +103,7 @@ export function buildOperationBatchDraft(task = {}, overrides = {}) {
     remark: field("", "manual", "备注"),
   };
   for (const [key, value] of Object.entries(overrides.fields || {})) {
-    if (!fields[key]) continue;
+    if (key === "batchName" || !fields[key]) continue;
     fields[key] = { ...fields[key], value: text(value), source: "manual" };
   }
   fields.operationTaskSerial.required = true;

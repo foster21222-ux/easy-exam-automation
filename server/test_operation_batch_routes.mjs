@@ -323,7 +323,7 @@ test("operation batch routes block create but admit reconcile for a persisted re
   }
 });
 
-test("operation batch draft route does not regenerate a missing business batch name", async () => {
+test("operation batch draft route does not let a request override mask a missing business batch name", async () => {
   const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-operation-batch-routes-"));
   const taskId = "missing-business-batch-name";
   seedTask(runtimeDir, {
@@ -342,15 +342,65 @@ test("operation batch draft route does not regenerate a missing business batch n
     child = server.child;
     const response = await fetch(
       `${server.baseUrl}/api/tasks/${taskId}/operation-batch/draft`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: {
+            batchName: "请求中的过期批次",
+            remark: "仍允许保存的其它覆盖值",
+          },
+        }),
+      },
     );
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.draft.fields.batchName.value, "");
     assert.equal(body.draft.fields.batchName.source, "business_requirement");
+    assert.equal(body.draft.fields.remark.value, "仍允许保存的其它覆盖值");
+    assert.equal(body.draft.fields.remark.source, "manual");
     assert.deepEqual(
       body.draft.warnings.find((item) => item.field === "batchName"),
       { field: "batchName", message: "批次名称缺失，需要人工补充" },
     );
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
+test("operation batch draft route does not restore a stale saved batch name", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-operation-batch-routes-"));
+  const taskId = "stale-saved-batch-name";
+  seedTask(runtimeDir, {
+    taskId,
+    config: {
+      businessRequirement: {
+        batch_name: "业务需求权威批次",
+      },
+      operationBatch: {
+        draft: {
+          fields: {
+            batchName: { value: "保存草稿中的过期批次" },
+            remark: { value: "保留的草稿备注" },
+          },
+        },
+      },
+    },
+  });
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+    const response = await fetch(
+      `${server.baseUrl}/api/tasks/${taskId}/operation-batch/draft`,
+    );
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.draft.fields.batchName.value, "业务需求权威批次");
+    assert.equal(body.draft.fields.batchName.source, "business_requirement");
+    assert.equal(body.draft.fields.remark.value, "保留的草稿备注");
+    assert.equal(body.draft.fields.remark.source, "manual");
   } finally {
     await stopServer(child);
     rmSync(runtimeDir, { recursive: true, force: true });
