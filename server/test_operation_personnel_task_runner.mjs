@@ -244,7 +244,10 @@ test("current personnel directory labels map exact email identities", () => {
   );
 });
 
-function fakePersonnelTaskListPage(rows = [], { searchInitiallyMissing = false } = {}) {
+function fakePersonnelTaskListPage(rows = [], {
+  searchInitiallyMissing = false,
+  taskSheetTextHasNoExactNode = false,
+} = {}) {
   const events = [];
   let searchReady = !searchInitiallyMissing;
   const rowLocators = rows.map((cells, rowIndex) => ({
@@ -318,6 +321,19 @@ function fakePersonnelTaskListPage(rows = [], { searchInitiallyMissing = false }
       }
       if (selector === "table:visible") return tables;
       if (selector === ".ant-table-fixed-right table:visible tbody tr") return fixedRows;
+      if (selector === ".ant-modal:visible") {
+        return {
+          filter: ({ hasText }) => {
+            assert.equal(hasText, "任务单发送需满足以下条件");
+            return {
+              count: async () => 1,
+              first: () => ({
+                waitFor: async () => events.push(`wait:${hasText}`),
+              }),
+            };
+          },
+        };
+      }
       throw new Error(`unexpected page selector: ${selector}`);
     },
     getByText(name, options) {
@@ -326,7 +342,12 @@ function fakePersonnelTaskListPage(rows = [], { searchInitiallyMissing = false }
         first() {
           return this;
         },
-        waitFor: async () => events.push(`wait:${name}`),
+        waitFor: async () => {
+          if (taskSheetTextHasNoExactNode && name === "任务单发送需满足以下条件") {
+            throw new Error("exact task-sheet condition text node missing");
+          }
+          events.push(`wait:${name}`);
+        },
       };
     },
   };
@@ -370,6 +391,21 @@ test("current personnel task list waits for its React filter", async () => {
 
   assert.equal(page.events.includes("search:visible"), true);
   assert.equal(page.events.includes("click:0"), true);
+});
+
+test("current personnel task list waits for the visible modal instead of an exact text node", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["目标批次", "项目实施五部", "经理", "", ""],
+  ], { taskSheetTextHasNoExactNode: true });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { batchName: "目标批次" } },
+    { baseUrl: "http://operation.test/" },
+  );
+
+  assert.equal(page.events.includes("click:0"), true);
+  assert.equal(page.events.includes("wait:任务单发送需满足以下条件"), true);
 });
 
 test("current personnel task list blocks duplicate exact batch names", async () => {

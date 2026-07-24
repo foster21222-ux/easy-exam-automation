@@ -540,10 +540,16 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
     .nth(exactRows[0])
     .getByText("发送任务单", { exact: true });
   await clickUniqueVisible(action, "分散在线监考发送任务单入口");
-  await page.getByText("任务单发送需满足以下条件", { exact: true }).first().waitFor({
+  const taskSheet = page.locator(".ant-modal:visible").filter({
+    hasText: "任务单发送需满足以下条件",
+  });
+  await taskSheet.first().waitFor({
     state: "visible",
     timeout: 10_000,
   });
+  if (await taskSheet.count() !== 1) {
+    throw operationControlError("分散在线监考任务单弹窗", await taskSheet.count());
+  }
 }
 
 export async function readVisiblePersonnelTaskSheet(page) {
