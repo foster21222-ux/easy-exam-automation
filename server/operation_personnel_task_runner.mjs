@@ -1505,10 +1505,16 @@ async function editVisibleSchedule(page, schedule, existing) {
 
 async function selectVisiblePeople(dialog, groupName, people) {
   const group = dialog.getByRole("checkbox", { name: groupName, exact: true });
+  if (await group.count() === 0) {
+    await group.waitFor({ state: "visible", timeout: 10_000 });
+  }
   await clickUniqueVisible(group, `人员目录组 ${groupName}`);
   for (const person of people) {
     const label = `${person.id} (${person.name})`;
     const candidate = dialog.getByRole("checkbox", { name: label, exact: true });
+    if (await candidate.count() === 0) {
+      await candidate.waitFor({ state: "visible", timeout: 10_000 });
+    }
     const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
     await exact.check();
   }
