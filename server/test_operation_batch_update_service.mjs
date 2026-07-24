@@ -186,6 +186,92 @@ test("a baseline-free preview binds the first live inspection without inventing 
   assert.equal(harness.task().config.operationBatch.managedSnapshot, undefined);
 });
 
+test("a baseline-free preview rejects live schedules beyond the desired count without saving", async () => {
+  const desired = snapshot({ name: "期望日程" });
+  const inspected = {
+    ...snapshot({ name: "现有日程1" }),
+    examEndDate: "2026-08-23",
+    schedules: [
+      snapshot({ name: "现有日程1" }).schedules[0],
+      {
+        requirementIndex: 1,
+        name: "现有日程2",
+        start: "2026-08-23T09:00:00",
+        end: "2026-08-23T11:00:00",
+      },
+    ],
+  };
+  const harness = createHarness({ applied: null, desired, inspected });
+
+  await assert.rejects(
+    harness.service.preview("task-a", actor),
+    (error) => {
+      assert.equal(error.code, "OPERATION_BATCH_UPDATE_CONFLICT");
+      assert.equal(error.status, 409);
+      assert.deepEqual(error.differingFields.map((item) => item.path), ["schedules.length"]);
+      assert.equal(error.differingFields[0].expected, 1);
+      assert.equal(error.differingFields[0].actual, 2);
+      return true;
+    },
+  );
+  assert.equal(harness.persisted.length, 0);
+  assert.equal(harness.task().config.operationBatch.managedSnapshot, undefined);
+  assert.equal(harness.task().config.operationBatch.activeUpdatePreview, undefined);
+});
+
+test("a baseline-free preview rejects non-contiguous live requirement indices without saving", async () => {
+  const desired = snapshot({ name: "期望日程" });
+  const inspected = snapshot({ name: "现有日程" });
+  inspected.schedules[0].requirementIndex = 2;
+  const harness = createHarness({ applied: null, desired, inspected });
+
+  await assert.rejects(
+    harness.service.preview("task-a", actor),
+    (error) => {
+      assert.equal(error.code, "OPERATION_BATCH_UPDATE_CONFLICT");
+      assert.equal(error.status, 409);
+      assert.deepEqual(
+        error.differingFields.map((item) => item.path),
+        ["schedules[0].requirementIndex"],
+      );
+      assert.equal(error.differingFields[0].expected, 0);
+      assert.equal(error.differingFields[0].actual, 2);
+      return true;
+    },
+  );
+  assert.equal(harness.persisted.length, 0);
+  assert.equal(harness.task().config.operationBatch.managedSnapshot, undefined);
+  assert.equal(harness.task().config.operationBatch.activeUpdatePreview, undefined);
+});
+
+test("a baseline-free preview permits a token-bound append from fewer contiguous live rows", async () => {
+  const first = snapshot({ name: "现有日程1" }).schedules[0];
+  const second = {
+    requirementIndex: 1,
+    name: "期望日程2",
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  };
+  const desired = {
+    ...snapshot({ name: first.name }),
+    examEndDate: "2026-08-23",
+    schedules: [first, second],
+  };
+  const inspected = snapshot({ name: first.name });
+  const harness = createHarness({ applied: null, desired, inspected });
+
+  const preview = await harness.service.preview("task-a", actor);
+
+  assert.equal(preview.action, "update");
+  assert.match(preview.previewToken, /^[A-Za-z0-9_-]{40,}$/);
+  assert.deepEqual(preview.inspectedCurrent, inspected);
+  assert.deepEqual(
+    harness.task().config.operationBatch.activeUpdatePreview.inspectedCurrent,
+    inspected,
+  );
+  assert.equal(harness.task().config.operationBatch.managedSnapshot, undefined);
+});
+
 test("a baseline-free no-difference preview persists the inspected baseline and performs no write", async () => {
   const current = snapshot();
   let updateCalls = 0;

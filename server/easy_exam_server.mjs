@@ -5507,7 +5507,6 @@ function getOperationBatchUpdateApi() {
   });
   operationBatchUpdateApi = createOperationBatchUpdateApi({
     service,
-    readTask,
     workflowForTask: (task) => {
       const batchDraft = buildOperationBatchDraft(
         task,

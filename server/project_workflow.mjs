@@ -3,6 +3,12 @@ import { defaultOperationBatchName, resolveOperationBatchName } from "./operatio
 import { operationBatchUpdateState } from "./operation_batch_update.mjs";
 import { buildOperationPersonnelTaskDraft, buildOperationPersonnelTaskStatus } from "./operation_personnel_task.mjs";
 
+const PERSISTED_BATCH_UPDATE_STATES = new Set([
+  "updating",
+  "update_failed",
+  "update_conflict",
+]);
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -232,6 +238,10 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
   const contentReady = examRequirements.length > 0 && examRequirements.every((requirement) => Boolean(requirement.fields?.["考试名称"] && requirement.fields?.["考试日期时间"]));
   const hasActualSession = (task.sessions || []).some((session) => text(session.session_id));
   const batchUpdate = operationBatchUpdateState(task);
+  const persistedBatchStatus = text(task.config?.operationBatch?.status);
+  const batchStatus = PERSISTED_BATCH_UPDATE_STATES.has(persistedBatchStatus)
+    ? persistedBatchStatus
+    : batchUpdate.status;
   return {
     sources: {
       fanwei: { ready: Boolean(business.operation_serial_number && business.project_code), version: task.config?.fanweiSource?.version || 0 },
@@ -241,7 +251,7 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
     steps: {
       batch: {
         status: hasBatchCode
-          ? batchUpdate.status
+          ? batchStatus
           : operationBatchNeedsReconciliation(task)
             ? "reconciliation_required"
             : (batchDraft?.warnings?.length ? "needs_review" : "ready"),

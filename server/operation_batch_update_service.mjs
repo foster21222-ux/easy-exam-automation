@@ -174,6 +174,46 @@ function snapshotsEqual(left, right) {
   return differingManagedFields(left, right).length === 0;
 }
 
+function baselineShapeDifferences(inspected = {}, desired = {}) {
+  const inspectedSchedules = inspected?.schedules;
+  const desiredSchedules = Array.isArray(desired?.schedules) ? desired.schedules : [];
+  if (!Array.isArray(inspectedSchedules)) {
+    return [{
+      path: "schedules",
+      expected: "array",
+      actual: typeof inspectedSchedules,
+    }];
+  }
+  if (inspectedSchedules.length > desiredSchedules.length) {
+    return [{
+      path: "schedules.length",
+      expected: desiredSchedules.length,
+      actual: inspectedSchedules.length,
+    }];
+  }
+  const differences = [];
+  inspectedSchedules.forEach((schedule, index) => {
+    if (!schedule || typeof schedule !== "object" || Array.isArray(schedule)) {
+      differences.push({
+        path: `schedules[${index}]`,
+        expected: "schedule",
+        actual: schedule ?? "",
+        requirementIndex: index,
+      });
+      return;
+    }
+    if (schedule.requirementIndex !== index) {
+      differences.push({
+        path: `schedules[${index}].requirementIndex`,
+        expected: index,
+        actual: schedule.requirementIndex ?? "",
+        requirementIndex: index,
+      });
+    }
+  });
+  return differences;
+}
+
 function serializedError(error, fallbackCode, differingFields) {
   return {
     code: text(error?.code) || fallbackCode,
@@ -266,6 +306,23 @@ export function createOperationBatchUpdateService(dependencies = {}) {
 
       const current = freshTask.config?.operationBatch || {};
       const applied = managedSnapshot(freshTask);
+      if (!applied) {
+        const differingFields = baselineShapeDifferences(
+          inspectedCurrent,
+          freshDesired,
+        );
+        if (differingFields.length) {
+          throw serviceError(
+            "OPERATION_BATCH_UPDATE_CONFLICT",
+            409,
+            "运控当前日程结构不能作为安全追加基线",
+            {
+              differingFields,
+              inspectedCurrent: structuredClone(inspectedCurrent),
+            },
+          );
+        }
+      }
       if (applied) {
         const differingFields = differingManagedFields(applied, inspectedCurrent);
         if (differingFields.length) {
@@ -627,25 +684,43 @@ export function createOperationBatchUpdateService(dependencies = {}) {
     };
   }
 
-  return { state, preview, start, attempt };
+  return {
+    authorizedTask: readAuthorized,
+    state,
+    preview,
+    start,
+    attempt,
+  };
 }
 
 export function createOperationBatchUpdateApi(dependencies = {}) {
   const {
     service,
-    readTask,
     workflowForTask,
+    statusPollIntervalSeconds = 2,
   } = dependencies;
+  const nextStatusPollSeconds = Math.max(
+    1,
+    Math.ceil(Number(statusPollIntervalSeconds) || 2),
+  );
 
-  async function freshContext(taskId) {
-    const task = await readTask(taskId);
+  async function freshContext(taskId, actor) {
+    const task = await service.authorizedTask(taskId, actor);
     return {
       task,
-      workflow: task ? await workflowForTask(task) : null,
+      workflow: await workflowForTask(task),
     };
   }
 
-  async function invoke(taskId, operation, shape = (result) => result) {
+  async function errorContext(taskId, actor) {
+    try {
+      return await freshContext(taskId, actor);
+    } catch {
+      return {};
+    }
+  }
+
+  async function invoke(taskId, actor, operation, shape = (result) => result) {
     try {
       const result = await operation();
       const statusCode = Number(result?.statusCode || 200);
@@ -654,7 +729,7 @@ export function createOperationBatchUpdateApi(dependencies = {}) {
         statusCode,
         body: {
           ...body,
-          ...await freshContext(taskId),
+          ...await freshContext(taskId, actor),
         },
       };
     } catch (error) {
@@ -664,35 +739,36 @@ export function createOperationBatchUpdateApi(dependencies = {}) {
           error: error instanceof Error ? error.message : String(error),
           errorCode: text(error?.code) || "OPERATION_BATCH_UPDATE_FAILED",
           differingFields: structuredClone(error?.differingFields || []),
-          ...await freshContext(taskId),
+          ...await errorContext(taskId, actor),
         },
       };
     }
   }
 
   function state(taskId, actor) {
-    return invoke(taskId, () => service.state(taskId, actor));
+    return invoke(taskId, actor, () => service.state(taskId, actor));
   }
 
   function preview(taskId, actor) {
-    return invoke(taskId, () => service.preview(taskId, actor));
+    return invoke(taskId, actor, () => service.preview(taskId, actor));
   }
 
   function start(taskId, input, actor) {
-    return invoke(taskId, () => service.start(taskId, input, actor), (result) => ({
+    return invoke(taskId, actor, () => service.start(taskId, input, actor), (result) => ({
       taskId: result.taskId,
       attemptId: result.attemptId,
     }));
   }
 
   function attempt(taskId, attemptId, actor) {
-    return invoke(taskId, () => service.attempt(taskId, attemptId, actor), (result) => {
+    return invoke(taskId, actor, () => service.attempt(taskId, attemptId, actor), (result) => {
       const current = result.attempt;
       return {
         attemptId: current.attemptId,
         status: current.status,
         checkpoint: current.checkpoint,
-        remainingSeconds: 0,
+        remainingSeconds: result.completed ? 0 : nextStatusPollSeconds,
+        countdownKind: "next_status_poll",
         completed: result.completed,
         error: current.error,
         inspectedBefore: current.inspectedBefore,

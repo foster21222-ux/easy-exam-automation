@@ -245,6 +245,41 @@ test("workflow exposes managed batch update state without treating subjects as m
   assert.deepEqual(workflow.steps.batch.managedChanges, []);
 });
 
+test("workflow prioritizes persisted in-flight and failure states over a computed update", () => {
+  for (const status of ["updating", "update_failed", "update_conflict"]) {
+    const workflow = buildProjectWorkflow({
+      config: {
+        operationBatchCode: "EZT260003",
+        businessRequirement: { batch_name: "批次" },
+        operationBatch: {
+          status,
+          managedSnapshot: {
+            batchName: "批次",
+            examStartDate: "2026-08-22",
+            examEndDate: "2026-08-22",
+            schedules: [{
+              requirementIndex: 0,
+              name: "旧日程",
+              start: "2026-08-22T09:00:00",
+              end: "2026-08-22T11:00:00",
+            }],
+          },
+        },
+        examRequirements: [{
+          fields: {
+            "考试名称": "新日程",
+            "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+          },
+        }],
+      },
+      sessions: [],
+    }, { warnings: [] });
+
+    assert.equal(workflow.steps.batch.status, status);
+    assert.equal(workflow.steps.batch.managedChanges[0].path, "schedules[0].name");
+  }
+});
+
 test("workflow exposes incomplete managed schedules for an existing batch", () => {
   const workflow = buildProjectWorkflow({
     config: {
