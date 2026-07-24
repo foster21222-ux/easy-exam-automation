@@ -1400,6 +1400,15 @@ export async function selectVisiblePersonnelDate(page, dialog, placeholder, valu
     page.locator(`[title="${operationDateTitle(value)}"]:visible`),
     `${text(value)}日期单元格`,
   );
+  const calendars = page.locator(".ant-calendar-picker-container:visible");
+  const calendarCount = await calendars.count();
+  if (calendarCount > 1) {
+    throw operationControlError("人员日期选择浮层", calendarCount);
+  }
+  if (calendarCount === 1) {
+    await input.press("Escape");
+    await calendars.waitFor({ state: "hidden", timeout: 10_000 });
+  }
 }
 
 async function chooseVisibleRadio(dialog, name) {

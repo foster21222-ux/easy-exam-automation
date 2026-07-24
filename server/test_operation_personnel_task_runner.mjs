@@ -140,6 +140,8 @@ test("readonly personnel dates are selected through the exact calendar cell", as
   const control = (label) => ({
     count: async () => 1,
     click: async () => events.push(label),
+    press: async (key) => events.push(`${label}:${key}`),
+    waitFor: async (options) => events.push(`${label}:${options.state}`),
   });
   const dialog = {
     locator: (selector) => {
@@ -149,8 +151,9 @@ test("readonly personnel dates are selected through the exact calendar cell", as
   };
   const page = {
     locator: (selector) => {
-      assert.equal(selector, '[title="2026年8月19日"]:visible');
-      return control("cell");
+      if (selector === '[title="2026年8月19日"]:visible') return control("cell");
+      assert.equal(selector, ".ant-calendar-picker-container:visible");
+      return control("calendar");
     },
   };
 
@@ -161,7 +164,12 @@ test("readonly personnel dates are selected through the exact calendar cell", as
     "2026-08-19",
   );
 
-  assert.deepEqual(events, ["input", "cell"]);
+  assert.deepEqual(events, [
+    "input",
+    "cell",
+    "input:Escape",
+    "calendar:hidden",
+  ]);
 });
 
 function visiblePersonnelTaskSheetRaw(overrides = {}) {
