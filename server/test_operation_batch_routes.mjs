@@ -12,6 +12,25 @@ const nodeBin = process.execPath;
 const pythonBin = process.env.CODEX_PYTHON || "python3";
 const taskStateScript = path.join(rootDir, "server", "task_state_db.py");
 
+function seedTask(runtimeDir, task) {
+  execFileSync(pythonBin, [taskStateScript, path.join(runtimeDir, "task_state.sqlite3"), "create"], {
+    input: JSON.stringify(task),
+  });
+}
+
+function fanweiImportPayload({ serialNo, requirementFieldsList }) {
+  return {
+    serialNo,
+    fanwei: {
+      fields: {
+        "运控流水号": serialNo,
+        "项目名称": "测试项目",
+      },
+    },
+    requirementFieldsList,
+  };
+}
+
 function seedProjectSourceTask(runtimeDir, taskId, { batchNameMode = "auto", batchName = "湖北邮政社招_2026年8月" } = {}) {
   const autoValue = "湖北邮政社招_2026年8月";
   const requirement = {
@@ -138,6 +157,43 @@ test("operation batch route test reserves a kernel-assigned loopback port", asyn
   const port = await reserveLoopbackPort();
   assert.equal(Number.isInteger(port), true);
   assert.ok(port > 0);
+});
+
+test("rejects reducing Easy Exam requirements after batch creation", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-operation-batch-routes-"));
+  const taskId = "batch-schedule-delete-task";
+  seedTask(runtimeDir, {
+    taskId,
+    projectName: "测试项目",
+    config: {
+      projectCard: { sourceKey: "R0031682" },
+      operationBatchCode: "EZT260003",
+      examRequirements: [
+        { id: "requirement-1", fields: { "考试名称": "日程1", "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" } },
+        { id: "requirement-2", fields: { "考试名称": "日程2", "考试日期时间": "2026/08/23 09:00 - 2026/08/23 11:00" } },
+      ],
+    },
+  });
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+    const response = await fetch(`${server.baseUrl}/api/fanwei/requirement-import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fanweiImportPayload({
+        serialNo: "R0031682",
+        requirementFieldsList: [
+          { "考试名称": "日程1", "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" },
+        ],
+      })),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).errorCode, "OPERATION_BATCH_SCHEDULE_DELETE_FORBIDDEN");
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
 });
 
 test("operation batch routes block create but admit reconcile for a persisted reconciling task", async () => {

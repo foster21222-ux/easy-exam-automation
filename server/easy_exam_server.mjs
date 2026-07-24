@@ -1398,6 +1398,16 @@ async function createFanweiRequirementImportFromPayload(payload, req, options = 
   const user = getAuthUserFromRequest(auth, req);
   const ownerEmail = options.ownerEmail || user?.email || "";
   const existingTask = await findFanweiProject(model.fields["运控流水号"] || payload.serialNo, auth.enabled ? ownerEmail : "");
+  const existingOperationBatchCode = existingTask?.config?.operationBatchCode || existingTask?.config?.operationBatch?.code || "";
+  const existingRequirementCount = Array.isArray(existingTask?.config?.examRequirements)
+    ? existingTask.config.examRequirements.length
+    : 0;
+  if (operationBatchCodeIsValid(existingOperationBatchCode) && requirementFieldsList.length < existingRequirementCount) {
+    const error = new Error("批次创建后不允许删除已对应运控日程的易考需求单。");
+    error.status = 409;
+    error.errorCode = "OPERATION_BATCH_SCHEDULE_DELETE_FORBIDDEN";
+    throw error;
+  }
   await fs.writeFile(payloadPath, JSON.stringify(model, null, 2), "utf8");
   await runPythonJson([fanweiWorkbookScript, examRequestTemplatePath, payloadPath, uploadPath]);
   let examRequirements = [];
@@ -1458,7 +1468,14 @@ async function createFanweiRequirementImportFromPayload(payload, req, options = 
 
 async function handleFanweiRequirementImport(req, res) {
   const payload = parseJsonSafe(await readBody(req)) || {};
-  json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));
+  try {
+    json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));
+  } catch (error) {
+    json(res, error.status || 500, {
+      error: error instanceof Error ? error.message : String(error),
+      errorCode: error.errorCode,
+    });
+  }
 }
 
 async function handleProjectWorkflow(taskId, req, res) {
