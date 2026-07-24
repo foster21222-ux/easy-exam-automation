@@ -501,6 +501,20 @@ export function operationPersonnelDirectoryPeopleFromVisibleTexts(values = []) {
   });
 }
 
+export function operationPersonnelMailPeopleFromVisibleTexts(values = []) {
+  const seen = new Set();
+  return [...values].flatMap((value) => (
+    [...text(value).matchAll(/([^\s(),;]+@[^\s(),;]+)(?:\s+\(([^()]+)\))?/g)]
+      .flatMap((match) => {
+        const id = text(match[1]);
+        const name = text(match[2]);
+        if (!id || seen.has(id)) return [];
+        seen.add(id);
+        return [{ id, name }];
+      })
+  ));
+}
+
 export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
   const values = visibleRowMap(raw.keyValueRows);
   if (values.get("监考类型") !== "分散监考"
@@ -1660,8 +1674,7 @@ async function readVisibleMailRecipients(page) {
         clean(field?.innerText),
         ...[...(field?.querySelectorAll("input, textarea") || [])].map((input) => clean(input.value)),
       ].join(" ");
-      return [...values.matchAll(/([^\s(),;]+@[^\s(),;]+)\s+\(([^()]+)\)/g)]
-        .map((match) => `${match[1]} (${match[2]})`);
+      return [values];
     };
     return {
       modalCount: 1,
@@ -1671,8 +1684,8 @@ async function readVisibleMailRecipients(page) {
   });
   if (raw.modalCount !== 1) throw operationControlError("邮件发送弹窗", raw.modalCount);
   return {
-    to: operationPersonnelDirectoryPeopleFromVisibleTexts(raw.to),
-    cc: operationPersonnelDirectoryPeopleFromVisibleTexts(raw.cc),
+    to: operationPersonnelMailPeopleFromVisibleTexts(raw.to),
+    cc: operationPersonnelMailPeopleFromVisibleTexts(raw.cc),
   };
 }
 
@@ -2236,7 +2249,17 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     const actual = targetRecipients({
       directoryMatch: await operationMethod(page, options, "readSelectedRecipients")(page, instruction),
     });
-    return assertReadback("select_recipients", recipients, actual);
+    const hydrateNames = (actualPeople, expectedPeople) => {
+      const expectedById = new Map(expectedPeople.map((item) => [item.id, item.name]));
+      return actualPeople.map((item) => ({
+        ...item,
+        name: item.name || expectedById.get(item.id) || "",
+      }));
+    };
+    return assertReadback("select_recipients", recipients, {
+      to: hydrateNames(actual.to, recipients.to),
+      cc: hydrateNames(actual.cc, recipients.cc),
+    });
   };
   await runPersonnelCheckpoint({
     name: OPERATION_PERSONNEL_CHECKPOINTS[7],

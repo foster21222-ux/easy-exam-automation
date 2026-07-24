@@ -392,6 +392,15 @@ test("current personnel directory labels map exact email identities", () => {
   );
 });
 
+test("selected mail recipients may display the email without repeating the name", () => {
+  assert.deepEqual(
+    operationPersonnelRunner.operationPersonnelMailPeopleFromVisibleTexts([
+      "zhanglexiang@ata.net.cn",
+    ]),
+    [{ id: "zhanglexiang@ata.net.cn", name: "" }],
+  );
+});
+
 function fakePersonnelTaskListPage(rows = [], {
   searchInitiallyMissing = false,
   taskSheetTextHasNoExactNode = false,
