@@ -356,6 +356,125 @@ test("does not write unchanged existing schedule fields", async () => {
   assert.deepEqual(page.writes, [["日程1.考试名称", "只改名称"]]);
 });
 
+function mutatingActions(page) {
+  return page.actions.filter((action) => ["新增日程", "保存"].includes(action));
+}
+
+async function assertInvalidChangePlan(instruction) {
+  const { page, adapter } = fakeOperationBatchPage();
+  await assert.rejects(
+    () => runOperationBatchManagedUpdate(
+      instruction,
+      { page, adapter, baseUrl: "http://operation" },
+    ),
+    (error) => error?.code === "OPERATION_BATCH_CHANGES_INVALID",
+  );
+  assert.deepEqual(page.writes, []);
+  assert.deepEqual(mutatingActions(page), []);
+}
+
+test("rejects an undeclared appended row before any mutation", async () => {
+  const instruction = structuredClone(instructionWithOneEditAndOneAppend);
+  instruction.changes = instruction.changes.filter(
+    (change) => change.path !== "schedules[1]",
+  );
+
+  await assertInvalidChangePlan(instruction);
+});
+
+test("rejects a whole-row change path for an existing schedule before any mutation", async () => {
+  const instruction = structuredClone(instructionWithOneEditAndOneAppend);
+  instruction.changes = [
+    ...instruction.changes.filter((change) => !change.path.startsWith("schedules[0]")),
+    {
+      path: "schedules[0]",
+      before: "日程一",
+      after: "日程一新名称",
+      requirementIndex: 0,
+    },
+  ];
+
+  await assertInvalidChangePlan(instruction);
+});
+
+test("rejects stale change values and mismatched requirement indices before any mutation", async () => {
+  const variants = [
+    (instruction) => {
+      instruction.changes.find((change) => change.path === "batchName").before = "过期批次名称";
+    },
+    (instruction) => {
+      instruction.changes.find((change) => change.path === "examEndDate").after = "2026-09-04";
+    },
+    (instruction) => {
+      instruction.changes.find(
+        (change) => change.path === "schedules[0].name",
+      ).requirementIndex = 1;
+    },
+  ];
+  for (const mutate of variants) {
+    const instruction = structuredClone(instructionWithOneEditAndOneAppend);
+    mutate(instruction);
+    await assertInvalidChangePlan(instruction);
+  }
+});
+
+test("rejects a partial field-level declaration for a new row before any mutation", async () => {
+  const instruction = structuredClone(instructionWithOneEditAndOneAppend);
+  instruction.changes = [
+    ...instruction.changes.filter((change) => change.path !== "schedules[1]"),
+    {
+      path: "schedules[1].name",
+      before: "",
+      after: desiredSnapshot.schedules[1].name,
+      requirementIndex: 1,
+    },
+    {
+      path: "schedules[1].start",
+      before: "",
+      after: desiredSnapshot.schedules[1].start,
+      requirementIndex: 1,
+    },
+  ];
+
+  await assertInvalidChangePlan(instruction);
+});
+
+test("rejects duplicate change paths before any mutation", async () => {
+  const instruction = structuredClone(instructionWithOneEditAndOneAppend);
+  instruction.changes.push(structuredClone(
+    instruction.changes.find((change) => change.path === "batchName"),
+  ));
+
+  await assertInvalidChangePlan(instruction);
+});
+
+test("accepts a complete exact field-level declaration for a new tail row", async () => {
+  const instruction = structuredClone(instructionWithOneEditAndOneAppend);
+  instruction.changes = [
+    ...instruction.changes.filter((change) => change.path !== "schedules[1]"),
+    ...["name", "start", "end"].map((field) => ({
+      path: `schedules[1].${field}`,
+      before: "",
+      after: desiredSnapshot.schedules[1][field],
+      requirementIndex: 1,
+    })),
+  ];
+  const { page, adapter } = fakeOperationBatchPage();
+
+  const result = await runOperationBatchManagedUpdate(
+    instruction,
+    { page, adapter, baseUrl: "http://operation" },
+  );
+
+  assert.equal(result.verified, true);
+  assert.deepEqual(page.writes.slice(-4), [
+    ["新增日程2", true],
+    ["日程2.考试名称", "日程二"],
+    ["日程2.开始时间", "2026-09-03 09:00"],
+    ["日程2.结束时间", "2026-09-03 11:00"],
+  ]);
+});
+
 test("rejects a schedule count decrease before any write or save", async () => {
   const currentSchedules = [
     existingSchedule,

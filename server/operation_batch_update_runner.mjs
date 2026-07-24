@@ -465,37 +465,131 @@ function completeDesiredSnapshot(instruction, initialization = false) {
   }
 }
 
-function changedManagedFields(changes = []) {
-  if (!Array.isArray(changes)) {
-    throw errorWithCode("运营批次修改清单格式不合法", "OPERATION_BATCH_CHANGES_INVALID");
+function invalidChanges(message) {
+  throw errorWithCode(message, "OPERATION_BATCH_CHANGES_INVALID");
+}
+
+function assertExactChange(change, {
+  before,
+  after,
+  requirementIndex,
+}) {
+  if (
+    !Object.hasOwn(change, "before")
+    || !Object.hasOwn(change, "after")
+    || change.before !== before
+    || change.after !== after
+    || (
+      requirementIndex !== undefined
+      && change.requirementIndex !== requirementIndex
+    )
+  ) {
+    invalidChanges(`运营批次修改声明与当前或期望快照不一致：${change.path}`);
   }
+}
+
+function validatedManagedFields(changes, current, desired) {
+  if (!Array.isArray(changes)) {
+    invalidChanges("运营批次修改清单格式不合法");
+  }
+  const changesByPath = new Map();
+  for (const change of changes) {
+    const changePath = typeof change?.path === "string" ? change.path : "";
+    if (!changePath || changesByPath.has(changePath)) {
+      invalidChanges(`运营批次修改清单包含空路径或重复路径：${changePath}`);
+    }
+    changesByPath.set(changePath, change);
+  }
+
   const fields = {
     overview: new Set(),
     schedules: new Map(),
     appended: new Set(),
   };
-  for (const change of changes) {
-    const changePath = text(change?.path);
-    if (["batchName", "examStartDate", "examEndDate"].includes(changePath)) {
-      fields.overview.add(changePath);
-      continue;
+
+  for (const [field] of overviewFields) {
+    const change = changesByPath.get(field);
+    if (current[field] === desired[field]) {
+      if (change) invalidChanges(`运营批次修改清单包含未变化字段：${field}`);
+    } else {
+      if (!change) invalidChanges(`运营批次修改清单缺少字段：${field}`);
+      assertExactChange(change, {
+        before: current[field],
+        after: desired[field],
+      });
+      fields.overview.add(field);
+      changesByPath.delete(field);
     }
-    const parentMatch = changePath.match(/^schedules\[(\d+)]$/);
-    if (parentMatch) {
-      fields.appended.add(Number(parentMatch[1]));
-      continue;
+  }
+
+  for (let index = 0; index < current.schedules.length; index += 1) {
+    const wholePath = `schedules[${index}]`;
+    if (changesByPath.has(wholePath)) {
+      invalidChanges(`已有运营批次日程不接受整行修改声明：${wholePath}`);
     }
-    const fieldMatch = changePath.match(/^schedules\[(\d+)]\.(name|start|end)$/);
-    if (!fieldMatch) {
-      throw errorWithCode(
-        `运营批次修改清单包含非受管字段：${changePath}`,
-        "OPERATION_BATCH_CHANGES_INVALID",
-      );
+    const changed = new Set();
+    for (const [field] of scheduleFields) {
+      const changePath = `${wholePath}.${field}`;
+      const change = changesByPath.get(changePath);
+      if (current.schedules[index][field] === desired.schedules[index][field]) {
+        if (change) invalidChanges(`运营批次修改清单包含未变化字段：${changePath}`);
+      } else {
+        if (!change) invalidChanges(`运营批次修改清单缺少字段：${changePath}`);
+        assertExactChange(change, {
+          before: current.schedules[index][field],
+          after: desired.schedules[index][field],
+          requirementIndex: index,
+        });
+        changed.add(field);
+        changesByPath.delete(changePath);
+      }
     }
-    const index = Number(fieldMatch[1]);
-    const names = fields.schedules.get(index) || new Set();
-    names.add(fieldMatch[2]);
-    fields.schedules.set(index, names);
+    if (changed.size) fields.schedules.set(index, changed);
+  }
+
+  for (let index = current.schedules.length; index < desired.schedules.length; index += 1) {
+    const wholePath = `schedules[${index}]`;
+    const wholeChange = changesByPath.get(wholePath);
+    const fieldChanges = new Map(scheduleFields.map(([field]) => [
+      field,
+      changesByPath.get(`${wholePath}.${field}`),
+    ]));
+    const fieldCount = [...fieldChanges.values()].filter(Boolean).length;
+    if (wholeChange && fieldCount) {
+      invalidChanges(`新增运营批次日程不能混用整行和字段声明：${wholePath}`);
+    }
+    if (wholeChange) {
+      assertExactChange(wholeChange, {
+        before: "",
+        after: desired.schedules[index].name,
+        requirementIndex: index,
+      });
+      changesByPath.delete(wholePath);
+    } else {
+      if (fieldCount !== scheduleFields.length) {
+        invalidChanges(`新增运营批次日程缺少完整字段声明：${wholePath}`);
+      }
+      const changed = new Set();
+      for (const [field] of scheduleFields) {
+        const changePath = `${wholePath}.${field}`;
+        const change = fieldChanges.get(field);
+        assertExactChange(change, {
+          before: "",
+          after: desired.schedules[index][field],
+          requirementIndex: index,
+        });
+        changed.add(field);
+        changesByPath.delete(changePath);
+      }
+      fields.schedules.set(index, changed);
+    }
+    fields.appended.add(index);
+  }
+
+  if (changesByPath.size) {
+    invalidChanges(
+      `运营批次修改清单包含额外或非受管字段：${[...changesByPath.keys()].join("、")}`,
+    );
   }
   return fields;
 }
@@ -529,13 +623,13 @@ async function writeManagedChanges(
   }
   for (let index = 0; index < desired.schedules.length; index += 1) {
     const isNew = index >= current.schedules.length;
-    if (isNew) {
+    if (isNew && (initialize || fields.appended.has(index))) {
       await pageAdapter.appendSchedule(page, index);
       writeCount += 1;
     }
     const changed = fields.schedules.get(index) || new Set();
     for (const [field, label] of scheduleFields) {
-      if (initialize || isNew || fields.appended.has(index) || changed.has(field)) {
+      if (initialize || fields.appended.has(index) || changed.has(field)) {
         const value = field === "name"
           ? desired.schedules[index][field]
           : visibleDateTime(desired.schedules[index][field]);
@@ -577,7 +671,6 @@ export async function inspectOperationBatchManagedSnapshot(instruction, options 
 export async function runOperationBatchManagedUpdate(instruction, options = {}) {
   const code = batchCode(instruction);
   const desired = completeDesiredSnapshot(instruction);
-  const fields = changedManagedFields(instruction.changes);
   return withPage(options, async (page) => {
     const inspected = await inspectOnPage(page, instruction, options);
     const current = inspected.snapshot;
@@ -606,6 +699,7 @@ export async function runOperationBatchManagedUpdate(instruction, options = {}) 
         { expected, actual: current },
       );
     }
+    const fields = validatedManagedFields(instruction.changes, current, desired);
     const writeCount = await writeManagedChanges(
       page,
       inspected.pageAdapter,
