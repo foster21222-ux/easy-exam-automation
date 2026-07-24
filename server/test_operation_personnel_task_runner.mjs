@@ -401,6 +401,20 @@ test("selected mail recipients may display the email without repeating the name"
   );
 });
 
+test("checked inline mail recipients are split between to and cc", () => {
+  assert.deepEqual(
+    operationPersonnelRunner.operationPersonnelCheckedMailPeopleFromVisibleEntries([
+      { section: "to", value: "演练组" },
+      { section: "to", value: "zhanglexiang@ata.net.cn (张乐翔)" },
+      { section: "cc", value: "jiesuan1@ata.net.cn (结算一)" },
+    ]),
+    {
+      to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+      cc: [{ id: "jiesuan1@ata.net.cn", name: "结算一" }],
+    },
+  );
+});
+
 function fakePersonnelTaskListPage(rows = [], {
   searchInitiallyMissing = false,
   taskSheetTextHasNoExactNode = false,
@@ -717,6 +731,84 @@ test("directory probe uses its reviewed summary in the built-in resend flow", as
     "click:发送任务单",
     "fill:人员落实结束日期：2026-08-18 → 2026-08-19",
     "click:下一步",
+  ]);
+});
+
+test("current operation console opens the inline 邮件发送 dialog directly", async () => {
+  const taskDialog = {
+    count: async () => 1,
+    getByRole: () => ({
+      count: async () => 1,
+      click: async () => {},
+    }),
+  };
+  const mailDialog = { count: async () => 1 };
+  const missingDialog = {
+    count: async () => 0,
+    first() {
+      return this;
+    },
+    waitFor: async () => {
+      throw new Error("legacy mail dialog title was not rendered");
+    },
+  };
+  const page = {
+    locator(selector) {
+      if (selector === ".ant-modal:visible") {
+        return {
+          filter: ({ hasText }) => {
+            if (hasText === "任务单发送需满足以下条件") return taskDialog;
+            if (hasText === "邮件发送") return mailDialog;
+            if (hasText instanceof RegExp && hasText.test("邮件发送")) return mailDialog;
+            return missingDialog;
+          },
+        };
+      }
+      if (selector.includes('placeholder="请填写任务单变更内容"')) {
+        return { count: async () => 0 };
+      }
+      throw new Error(`unexpected selector: ${selector}`);
+    },
+  };
+
+  assert.equal(
+    await operationPersonnelRunner.openVisiblePersonnelMailDialog(page),
+    mailDialog,
+  );
+});
+
+test("inline mail directory selects recipients without clicking the final confirm button", async () => {
+  const events = [];
+  const checkbox = (name) => ({
+    count: async () => 1,
+    click: async () => events.push(`click:${name}`),
+    check: async () => events.push(`check:${name}`),
+  });
+  const mailDialog = {
+    getByRole: (role, { name }) => {
+      assert.equal(role, "checkbox");
+      return checkbox(name);
+    },
+  };
+  const page = {
+    getByRole: () => {
+      throw new Error("inline directory must not open or confirm a nested dialog");
+    },
+  };
+
+  await operationPersonnelRunner.selectVisiblePersonnelRecipients(
+    page,
+    mailDialog,
+    {
+      to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+      cc: [],
+    },
+    { toGroup: "演练组", ccGroup: "" },
+  );
+
+  assert.deepEqual(events, [
+    "click:演练组",
+    "check:zhanglexiang@ata.net.cn (张乐翔)",
   ]);
 });
 

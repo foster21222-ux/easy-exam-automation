@@ -515,6 +515,17 @@ export function operationPersonnelMailPeopleFromVisibleTexts(values = []) {
   ));
 }
 
+export function operationPersonnelCheckedMailPeopleFromVisibleEntries(entries = []) {
+  return {
+    to: operationPersonnelMailPeopleFromVisibleTexts(
+      entries.filter((entry) => entry?.section === "to").map((entry) => entry.value),
+    ),
+    cc: operationPersonnelMailPeopleFromVisibleTexts(
+      entries.filter((entry) => entry?.section === "cc").map((entry) => entry.value),
+    ),
+  };
+}
+
 export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
   const values = visibleRowMap(raw.keyValueRows);
   if (values.get("监考类型") !== "分散监考"
@@ -1259,6 +1270,22 @@ async function uniqueVisibleModalWithText(page, value, label) {
   return uniqueVisibleControl(modals, label);
 }
 
+async function visiblePersonnelMailDialog(page) {
+  const visibleModals = page.locator(".ant-modal:visible");
+  if (typeof visibleModals?.filter !== "function") {
+    return topVisibleDialog(page, "邮件发送弹窗");
+  }
+  for (const title of ["填写收件人邮箱", "邮件发送"]) {
+    const modal = visibleModals.filter({ hasText: title });
+    if (await modal.count() === 1) return modal;
+  }
+  const modal = visibleModals.filter({ hasText: /填写收件人邮箱|邮件发送/ });
+  if (await modal.count() === 0) {
+    await modal.first().waitFor({ state: "visible", timeout: 10_000 });
+  }
+  return uniqueVisibleControl(modal, "邮件发送弹窗");
+}
+
 async function clickUniqueNamedButton(container, names, label) {
   const matches = [];
   for (const name of names) {
@@ -1537,6 +1564,36 @@ async function selectVisiblePeople(dialog, groupName, people) {
   }
 }
 
+export async function selectVisiblePersonnelRecipients(
+  page,
+  mailDialog,
+  recipients,
+  rule,
+) {
+  const inlineGroup = mailDialog.getByRole("checkbox", {
+    name: rule.toGroup,
+    exact: true,
+  });
+  if (await inlineGroup.count() === 1) {
+    await selectVisiblePeople(mailDialog, rule.toGroup, recipients.to);
+    if (recipients.cc.length) {
+      await selectVisiblePeople(mailDialog, rule.ccGroup, recipients.cc);
+    }
+    return;
+  }
+
+  await openVisibleMailRecipientDirectory(mailDialog, "收件人");
+  let directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
+  await selectVisiblePeople(directoryDialog, rule.toGroup, recipients.to);
+  await confirmVisibleDirectory(page);
+  if (recipients.cc.length) {
+    await openVisibleMailRecipientDirectory(mailDialog, "抄送（C）");
+    directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
+    await selectVisiblePeople(directoryDialog, rule.ccGroup, recipients.cc);
+    await confirmVisibleDirectory(page);
+  }
+}
+
 async function visibleDirectoryPeople(dialog) {
   const values = await dialog.evaluate((node) => {
     const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
@@ -1605,11 +1662,7 @@ export async function cancelVisibleDirectory(page) {
 }
 
 async function closeVisibleMailDialog(page) {
-  const mailDialog = await uniqueVisibleModalWithText(
-    page,
-    "填写收件人邮箱",
-    "邮件发送弹窗",
-  );
+  const mailDialog = await visiblePersonnelMailDialog(page);
   const close = mailDialog.locator(".ant-modal-close:visible");
   const closeCount = await close.count();
   if (closeCount === 1) {
@@ -1651,7 +1704,7 @@ export async function openVisiblePersonnelMailDialog(page, instruction = {}) {
     );
   }
 
-  return uniqueVisibleModalWithText(page, "填写收件人邮箱", "邮件发送弹窗");
+  return visiblePersonnelMailDialog(page);
 }
 
 async function readVisibleMailRecipients(page) {
@@ -1663,8 +1716,29 @@ async function readVisibleMailRecipients(page) {
     const modals = [...document.querySelectorAll(".ant-modal")].filter((element) => (
       visible(element) && clean(element.innerText).includes("填写收件人邮箱")
     ));
-    if (modals.length !== 1) return { modalCount: modals.length, to: [], cc: [] };
+    if (modals.length !== 1) {
+      const mailModals = [...document.querySelectorAll(".ant-modal")].filter((element) => (
+        visible(element) && clean(element.innerText).includes("邮件发送")
+      ));
+      if (mailModals.length !== 1) {
+        return { modalCount: modals.length + mailModals.length, checked: [], to: [], cc: [] };
+      }
+      modals.push(mailModals[0]);
+    }
     const modal = modals[0];
+    const ccLabel = [...modal.querySelectorAll("*")].find((element) => (
+      visible(element)
+      && element.children.length === 0
+      && clean(element.textContent) === "抄送（C）"
+    ));
+    const ccTop = ccLabel?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
+    const checked = [...modal.querySelectorAll('input[type="checkbox"]:checked')].map((input) => {
+      const owner = input.closest("label") || input.parentElement;
+      return {
+        section: input.getBoundingClientRect().top < ccTop ? "to" : "cc",
+        value: clean(owner?.innerText || owner?.textContent),
+      };
+    });
     const read = (label) => {
       const labels = [...modal.querySelectorAll("*")].filter((element) => (
         visible(element)
@@ -1681,11 +1755,14 @@ async function readVisibleMailRecipients(page) {
     };
     return {
       modalCount: 1,
+      checked,
       to: read("收件人"),
       cc: read("抄送（C）"),
     };
   });
   if (raw.modalCount !== 1) throw operationControlError("邮件发送弹窗", raw.modalCount);
+  const checked = operationPersonnelCheckedMailPeopleFromVisibleEntries(raw.checked);
+  if (checked.to.length || checked.cc.length) return checked;
   return {
     to: operationPersonnelMailPeopleFromVisibleTexts(raw.to),
     cc: operationPersonnelMailPeopleFromVisibleTexts(raw.cc),
@@ -1868,26 +1945,13 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
       || recipients.cc.length !== rule.ccCount) {
       throw operationControlError("固定收件人与抄送人", 0);
     }
-    await openVisibleMailRecipientDirectory(mailDialog, "收件人");
-    let directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
-    await selectVisiblePeople(directoryDialog, rule.toGroup, recipients.to);
-    await confirmVisibleDirectory(page);
-    if (recipients.cc.length) {
-      await openVisibleMailRecipientDirectory(mailDialog, "抄送（C）");
-      directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
-      await selectVisiblePeople(directoryDialog, rule.ccGroup, recipients.cc);
-      await confirmVisibleDirectory(page);
-    }
+    await selectVisiblePersonnelRecipients(page, mailDialog, recipients, rule);
   },
 
   readSelectedRecipients: (page) => readVisibleMailRecipients(page),
 
   async confirmSend(page) {
-    const mailDialog = await uniqueVisibleModalWithText(
-      page,
-      "填写收件人邮箱",
-      "邮件发送弹窗",
-    );
+    const mailDialog = await visiblePersonnelMailDialog(page);
     await clickUniqueNamedButton(
       mailDialog,
       ["确 定", "确定"],
