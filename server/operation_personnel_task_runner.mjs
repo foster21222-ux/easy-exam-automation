@@ -1190,8 +1190,13 @@ async function labeledVisibleControl(page, label, selector) {
     "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]",
   );
   const itemCount = await item.count();
-  if (itemCount !== 1) throw operationControlError(`${label}表单项`, itemCount);
-  return uniqueVisibleControl(item.locator(selector), label);
+  if (itemCount > 1) throw operationControlError(`${label}表单项`, itemCount);
+  if (itemCount === 1) return uniqueVisibleControl(item.locator(selector), label);
+  const row = labelNode.locator(
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-row ')][1]",
+  );
+  if (await row.count() !== 1) throw operationControlError(`${label}表单行`, await row.count());
+  return uniqueVisibleControl(row.locator(":scope > .ant-col").nth(1), label);
 }
 
 async function fillVisibleField(page, label, value) {
@@ -1323,7 +1328,7 @@ async function expandVisibleDirectoryGroup(dialog, groupName) {
   return members;
 }
 
-async function openVisibleMailRecipientDirectory(mailDialog, label) {
+export async function openVisibleMailRecipientDirectory(mailDialog, label) {
   const control = await labeledVisibleControl(
     mailDialog,
     label,

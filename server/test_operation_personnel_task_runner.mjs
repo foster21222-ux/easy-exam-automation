@@ -578,6 +578,44 @@ test("directory probe uses its reviewed summary in the built-in resend flow", as
   ]);
 });
 
+test("recorded recipient grid opens from the value column next to its label", async () => {
+  const events = [];
+  const control = {
+    count: async () => 1,
+    click: async () => events.push("recipient-value:click"),
+  };
+  const row = {
+    count: async () => 1,
+    locator: (selector) => {
+      assert.equal(selector, ":scope > .ant-col");
+      return { nth: (index) => {
+        assert.equal(index, 1);
+        return control;
+      } };
+    },
+  };
+  const label = {
+    count: async () => 1,
+    locator(selector) {
+      if (selector.includes("ant-form-item")) return { count: async () => 0 };
+      if (selector.includes("ant-row")) return row;
+      throw new Error(`unexpected label selector: ${selector}`);
+    },
+  };
+  const dialog = {
+    getByLabel: () => ({ count: async () => 0 }),
+    getByText: (name, { exact }) => {
+      assert.equal(name, "收件人");
+      assert.equal(exact, true);
+      return label;
+    },
+  };
+
+  await operationPersonnelRunner.openVisibleMailRecipientDirectory(dialog, "收件人");
+
+  assert.deepEqual(events, ["recipient-value:click"]);
+});
+
 function validInstruction(overrides = {}) {
   const target = {
     batch: {
