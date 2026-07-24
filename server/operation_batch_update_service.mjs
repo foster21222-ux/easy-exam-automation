@@ -16,6 +16,11 @@ import {
 const PREVIEW_TTL_MS = 10 * 60 * 1000;
 const ACTIVE_ATTEMPT_STATUSES = new Set(["pending", "running"]);
 const TERMINAL_ATTEMPT_STATUSES = new Set(["succeeded", "conflict", "failed"]);
+const PERSISTED_UPDATE_RECOVERY_STATUSES = new Set([
+  "updating",
+  "update_failed",
+  "update_conflict",
+]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -47,6 +52,13 @@ function tokenMatches(token, expectedHash) {
 
 function nowIso(now) {
   return new Date(now()).toISOString();
+}
+
+function operationBatchPageStatus(persistedStatus, computedStatus) {
+  const persisted = text(persistedStatus);
+  return PERSISTED_UPDATE_RECOVERY_STATUSES.has(persisted)
+    ? persisted
+    : text(computedStatus);
 }
 
 function normalizedActor(actor = {}) {
@@ -277,7 +289,7 @@ export function createOperationBatchUpdateService(dependencies = {}) {
       desiredSnapshot: desired.snapshot,
       appliedSnapshot: managedSnapshot(task),
       missing: desired.missing,
-      pageStatus: text(current.status) || localState.status,
+      pageStatus: operationBatchPageStatus(current.status, localState.status),
     };
   }
 

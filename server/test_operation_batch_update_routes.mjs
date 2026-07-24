@@ -42,7 +42,12 @@ function snapshot(name = "日程1") {
   };
 }
 
-function task({ desired = snapshot("日程1-更新"), applied = snapshot() } = {}) {
+function task({
+  desired = snapshot("日程1-更新"),
+  applied = snapshot(),
+  status = "created_unpublished",
+  incompleteSchedule = false,
+} = {}) {
   return {
     taskId: "task-a",
     ownerEmail: actor.email,
@@ -54,12 +59,14 @@ function task({ desired = snapshot("日程1-更新"), applied = snapshot() } = {
         version: 1,
         fields: {
           "考试名称": desired.schedules[0].name,
-          "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+          "考试日期时间": incompleteSchedule
+            ? ""
+            : "2026/08/22 09:00 - 2026/08/22 11:00",
         },
       }],
       operationBatch: {
         code: "EZT260003",
-        status: "created_unpublished",
+        status,
         managedSnapshot: structuredClone(applied),
         managedSnapshotVersion: 1,
       },
@@ -219,6 +226,7 @@ test("update-state returns desired, applied, page state, and fresh task workflow
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.body.state.status, "update_available");
+    assert.equal(response.body.pageStatus, "update_available");
     assert.deepEqual(response.body.desiredSnapshot, snapshot("日程1-更新"));
     assert.deepEqual(response.body.appliedSnapshot, snapshot());
     assert.equal(response.body.task.taskId, "task-a");
@@ -227,6 +235,33 @@ test("update-state returns desired, applied, page state, and fresh task workflow
       batchStatus: "created_unpublished",
       managedSnapshotVersion: 1,
     });
+  });
+});
+
+test("update-state does not let persisted success hide a fresh managed update", async () => {
+  await withRuntime({ status: "success" }, async ({ api }) => {
+    const response = await api.state("task-a", actor);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.state.status, "update_available");
+    assert.equal(response.body.pageStatus, "update_available");
+  });
+});
+
+test("update-state does not let persisted success hide fresh missing schedules", async () => {
+  await withRuntime({
+    status: "success",
+    incompleteSchedule: true,
+  }, async ({ api }) => {
+    const response = await api.state("task-a", actor);
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.state.status, "waiting_schedule");
+    assert.equal(response.body.pageStatus, "waiting_schedule");
+    assert.deepEqual(response.body.missing, [{
+      requirementIndex: 0,
+      fields: ["考试日期时间"],
+    }]);
   });
 });
 

@@ -667,6 +667,14 @@ test("operation batch update state helpers keep create states separate from upda
   );
   const operationBatchUpdateAttemptCopy = compileInlineFunction(
     "      function operationBatchUpdateAttemptCopy(attempt = {}) {",
+    "\n      function operationBatchUpdateDisplayValue",
+  );
+  const operationBatchUpdateDisplayValue = compileInlineFunction(
+    "      function operationBatchUpdateDisplayValue(value) {",
+    "\n      function operationBatchUpdateCountdownTransition",
+  );
+  const operationBatchUpdateCountdownTransition = compileInlineFunction(
+    "      function operationBatchUpdateCountdownTransition(attempt = {}) {",
     "\n      function renderOperationBatchUpdatePreview",
   );
 
@@ -681,7 +689,11 @@ test("operation batch update state helpers keep create states separate from upda
   assert.equal(operationBatchUpdateStatus({
     pageStatus: "success",
     state: { status: "update_available" },
-  }), "success");
+  }), "update_available");
+  assert.equal(operationBatchUpdateStatus({
+    pageStatus: "success",
+    state: { status: "waiting_schedule" },
+  }), "waiting_schedule");
   assert.deepEqual(operationBatchUpdateActionState({
     state: { status: "waiting_schedule" },
   }), {
@@ -737,9 +749,67 @@ test("operation batch update state helpers keep create states separate from upda
     }),
     "当前检查点：manual_review",
   );
+
+  const operationBatchUpdateBtn = { hidden: true, disabled: true, textContent: "" };
+  const operationBatchUpdateStateText = {
+    hidden: true,
+    textContent: "",
+    innerHTML: "",
+  };
+  const safeText = (value) => String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
+  );
+  const renderOperationBatchUpdateState = compileInlineFunction(
+    "      function renderOperationBatchUpdateState(state = {}) {",
+    "\n      function invalidateOperationBatchUpdateRequests",
+    {
+      operationBatchUpdateStatus,
+      operationBatchUpdateActionState,
+      operationBatchUpdateMissingCopy,
+      operationBatchUpdateAttemptCopy,
+      operationBatchUpdateDisplayValue,
+      operationBatchUpdateBtn,
+      operationBatchUpdateStateText,
+      safeText,
+    },
+  );
+
+  renderOperationBatchUpdateState({
+    pageStatus: "success",
+    state: { status: "update_available" },
+  });
+  assert.equal(operationBatchUpdateBtn.hidden, false);
+  assert.equal(operationBatchUpdateBtn.disabled, false);
+  assert.equal(operationBatchUpdateBtn.textContent, "修改批次信息");
+
+  renderOperationBatchUpdateState({
+    pageStatus: "success",
+    state: {
+      status: "waiting_schedule",
+      missing: [{ requirementIndex: 1, fields: ["考试日期时间"] }],
+    },
+  });
+  assert.equal(operationBatchUpdateBtn.hidden, true);
+  assert.equal(operationBatchUpdateStateText.hidden, false);
+  assert.ok(operationBatchUpdateStateText.innerHTML.includes("等待补全日程"));
+  assert.ok(operationBatchUpdateStateText.innerHTML.includes("易考需求单 2：考试日期时间"));
+
+  assert.deepEqual(operationBatchUpdateCountdownTransition({
+    completed: true,
+    remainingSeconds: 2,
+  }), {
+    attempt: { completed: true, remainingSeconds: 0 },
+    shouldSchedule: false,
+    shouldPoll: false,
+  });
 });
 
 test("operation batch preview renders only escaped server changes by overview and schedule", () => {
+  const operationBatchUpdateDisplayValue = compileInlineFunction(
+    "      function operationBatchUpdateDisplayValue(value) {",
+    "\n      function operationBatchUpdateCountdownTransition",
+  );
   const renderOperationBatchUpdatePreview = compileInlineFunction(
     "      function renderOperationBatchUpdatePreview(preview = {}) {",
     "\n      function operationBatchUpdateConfirmAllowed",
@@ -748,6 +818,7 @@ test("operation batch preview renders only escaped server changes by overview an
         /[&<>"']/g,
         (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
       ),
+      operationBatchUpdateDisplayValue,
     },
   );
   const previewHtml = renderOperationBatchUpdatePreview({
@@ -776,6 +847,130 @@ test("operation batch preview renders only escaped server changes by overview an
     ],
   });
   assert.ok(appendedScheduleHtml.includes("<h4>新增日程 2</h4>"));
+});
+
+test("operation batch conflict objects render exact stable values with safe escaping", () => {
+  const operationBatchUpdateStatus = compileInlineFunction(
+    "      function operationBatchUpdateStatus(state = {}) {",
+    "\n      function operationBatchUpdateActionState",
+  );
+  const operationBatchUpdateActionState = compileInlineFunction(
+    "      function operationBatchUpdateActionState(state = {}) {",
+    "\n      function operationBatchUpdateMissingCopy",
+    { operationBatchUpdateStatus },
+  );
+  const operationBatchUpdateMissingCopy = compileInlineFunction(
+    "      function operationBatchUpdateMissingCopy(missing = []) {",
+    "\n      function operationBatchUpdateAttemptCopy",
+  );
+  const operationBatchUpdateAttemptCopy = compileInlineFunction(
+    "      function operationBatchUpdateAttemptCopy(attempt = {}) {",
+    "\n      function operationBatchUpdateDisplayValue",
+  );
+  const operationBatchUpdateDisplayValue = compileInlineFunction(
+    "      function operationBatchUpdateDisplayValue(value) {",
+    "\n      function operationBatchUpdateCountdownTransition",
+  );
+  const operationBatchUpdateBtn = { hidden: true, disabled: true, textContent: "" };
+  const operationBatchUpdateStateText = { hidden: true, textContent: "", innerHTML: "" };
+  const safeText = (value) => String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
+  );
+  const renderOperationBatchUpdateState = compileInlineFunction(
+    "      function renderOperationBatchUpdateState(state = {}) {",
+    "\n      function invalidateOperationBatchUpdateRequests",
+    {
+      operationBatchUpdateStatus,
+      operationBatchUpdateActionState,
+      operationBatchUpdateMissingCopy,
+      operationBatchUpdateAttemptCopy,
+      operationBatchUpdateDisplayValue,
+      operationBatchUpdateBtn,
+      operationBatchUpdateStateText,
+      safeText,
+    },
+  );
+  const extraSchedule = {
+    requirementIndex: 1,
+    name: "人工日程<script>alert(1)</script>",
+    start: "2026-08-24T09:00:00",
+    end: "2026-08-24T11:00:00",
+  };
+  const missingSchedule = {
+    requirementIndex: 2,
+    name: "缺失日程<img src=x onerror=alert(2)>",
+    start: "2026-08-25T09:00:00",
+    end: "2026-08-25T11:00:00",
+  };
+
+  assert.equal(
+    operationBatchUpdateDisplayValue(extraSchedule),
+    "requirementIndex=1；name=人工日程<script>alert(1)</script>；start=2026-08-24T09:00:00；end=2026-08-24T11:00:00",
+  );
+  assert.equal(
+    operationBatchUpdateDisplayValue({ z: 1, a: { y: 2, x: 3 } }),
+    '{"a":{"x":3,"y":2},"z":1}',
+  );
+
+  renderOperationBatchUpdateState({
+    pageStatus: "update_conflict",
+    errorMessage: "日程结构冲突<script>",
+    differingFields: [
+      { path: "schedules[1]", expected: "", actual: extraSchedule },
+      { path: "schedules[2]", expected: missingSchedule, actual: "" },
+    ],
+  });
+
+  assert.equal(operationBatchUpdateStateText.innerHTML.includes("[object Object]"), false);
+  assert.ok(operationBatchUpdateStateText.innerHTML.includes("requirementIndex=1"));
+  assert.ok(operationBatchUpdateStateText.innerHTML.includes("requirementIndex=2"));
+  assert.ok(operationBatchUpdateStateText.innerHTML.includes("人工日程&lt;script&gt;alert(1)&lt;/script&gt;"));
+  assert.ok(operationBatchUpdateStateText.innerHTML.includes("缺失日程&lt;img src=x onerror=alert(2)&gt;"));
+  assert.equal(operationBatchUpdateStateText.innerHTML.includes("<script>"), false);
+  assert.equal(operationBatchUpdateStateText.innerHTML.includes("<img"), false);
+});
+
+test("operation batch countdown reaches zero before polling and terminal attempts stop", () => {
+  const operationBatchUpdateCountdownTransition = compileInlineFunction(
+    "      function operationBatchUpdateCountdownTransition(attempt = {}) {",
+    "\n      function renderOperationBatchUpdatePreview",
+  );
+  let attempt = {
+    completed: false,
+    remainingSeconds: 2,
+    countdownKind: "next_status_poll",
+  };
+  const visible = [attempt.remainingSeconds];
+  const polls = [];
+
+  for (let tick = 0; tick < 2; tick += 1) {
+    const transition = operationBatchUpdateCountdownTransition(attempt);
+    attempt = transition.attempt;
+    visible.push(attempt.remainingSeconds);
+    polls.push(transition.shouldPoll);
+  }
+
+  assert.deepEqual(visible, [2, 1, 0]);
+  assert.deepEqual(polls, [false, true]);
+  assert.deepEqual(operationBatchUpdateCountdownTransition({
+    completed: true,
+    remainingSeconds: 9,
+  }), {
+    attempt: { completed: true, remainingSeconds: 0 },
+    shouldSchedule: false,
+    shouldPoll: false,
+  });
+
+  const schedulerSource = sourceBetween(
+    "      function scheduleOperationBatchUpdatePoll(taskId, attemptId, requestToken, attempt) {",
+    "\n      async function pollOperationBatchUpdateAttempt",
+  );
+  assert.ok(schedulerSource.includes("operationBatchUpdateRequestIsCurrent(taskId, requestToken)"));
+  assert.ok(schedulerSource.includes("operationBatchUpdateCountdownTransition(attempt)"));
+  assert.ok(schedulerSource.includes("renderOperationBatchUpdateAttempt(transition.attempt)"));
+  assert.ok(schedulerSource.includes("if (transition.shouldPoll)"));
+  assert.match(schedulerSource, /setTimeout\([\s\S]*?1000/);
 });
 
 test("operation batch confirmation is disabled without differences and posts only the preview token", () => {
@@ -861,8 +1056,8 @@ test("operation batch terminal state preserves fresh context and exact conflict 
   assert.ok(pollSource.includes("/operation-batch/update-attempts/"));
   assert.ok(pollSource.includes("operationBatchUpdateTerminalState"));
   assert.ok(pollSource.includes("applyOperationBatchUpdateFreshContext(result)"));
-  assert.ok(pollSource.includes("result.remainingSeconds - 1"));
-  assert.match(pollSource, /setTimeout\([\s\S]*?1000/);
+  assert.ok(pollSource.includes("scheduleOperationBatchUpdatePoll(taskId, attemptId, requestToken, result)"));
+  assert.equal(pollSource.includes("result.remainingSeconds - 1"), false);
 });
 
 test("personnel operation panel exposes one confirmation and recovery controls", () => {

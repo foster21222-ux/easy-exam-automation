@@ -9277,14 +9277,7 @@
 
       function operationBatchUpdateStatus(state = {}) {
         const pageStatus = String(state.pageStatus || "");
-        if ([
-          "success",
-          "waiting_schedule",
-          "update_available",
-          "updating",
-          "update_conflict",
-          "update_failed",
-        ].includes(pageStatus)) return pageStatus;
+        if (["updating", "update_conflict", "update_failed"].includes(pageStatus)) return pageStatus;
         return String(state.state?.status || pageStatus || "");
       }
 
@@ -9321,6 +9314,53 @@
         return parts.join(" · ");
       }
 
+      function operationBatchUpdateDisplayValue(value) {
+        if (value === "" || value === null || value === undefined) return "空";
+        if (typeof value !== "object") return String(value);
+        const stableValue = (item) => {
+          if (Array.isArray(item)) return item.map(stableValue);
+          if (item && typeof item === "object") {
+            return Object.keys(item).sort().reduce((result, key) => {
+              result[key] = stableValue(item[key]);
+              return result;
+            }, {});
+          }
+          return item;
+        };
+        const scheduleFields = ["requirementIndex", "name", "start", "end"];
+        const scheduleKeys = scheduleFields.filter((key) => Object.hasOwn(value, key));
+        if (scheduleKeys.length) {
+          const extraKeys = Object.keys(value)
+            .filter((key) => !scheduleFields.includes(key))
+            .sort();
+          return [...scheduleKeys, ...extraKeys].map((key) => {
+            const item = value[key];
+            const rendered = item && typeof item === "object"
+              ? JSON.stringify(stableValue(item))
+              : String(item ?? "");
+            return `${key}=${rendered}`;
+          }).join("；");
+        }
+        return JSON.stringify(stableValue(value));
+      }
+
+      function operationBatchUpdateCountdownTransition(attempt = {}) {
+        if (attempt.completed) {
+          return {
+            attempt: { ...attempt, remainingSeconds: 0 },
+            shouldSchedule: false,
+            shouldPoll: false,
+          };
+        }
+        const current = Math.max(0, Math.floor(Number(attempt.remainingSeconds || 0)));
+        const remainingSeconds = Math.max(0, current - 1);
+        return {
+          attempt: { ...attempt, remainingSeconds },
+          shouldSchedule: remainingSeconds > 0,
+          shouldPoll: remainingSeconds === 0,
+        };
+      }
+
       function renderOperationBatchUpdatePreview(preview = {}) {
         const changes = Array.isArray(preview.changes) ? preview.changes : [];
         if (!changes.length) {
@@ -9338,12 +9378,8 @@
           }
         });
         const renderChange = (change) => {
-          const before = change?.before === "" || change?.before === null || change?.before === undefined
-            ? "空"
-            : String(change.before);
-          const after = change?.after === "" || change?.after === null || change?.after === undefined
-            ? "空"
-            : String(change.after);
+          const before = operationBatchUpdateDisplayValue(change?.before);
+          const after = operationBatchUpdateDisplayValue(change?.after);
           return `<li data-operation-batch-change="${safeText(change?.path || "")}"><strong>${safeText(change?.label || change?.path || "--")}</strong><div class="task-meta">${safeText(before)} → ${safeText(after)}</div></li>`;
         };
         const overviewHtml = overview.length
@@ -9384,6 +9420,10 @@
         const failed = result.status === "conflict" || result.status === "failed";
         return {
           ...previous,
+          state: {
+            ...(previous.state || {}),
+            ...(result.status === "succeeded" ? { status: "success" } : {}),
+          },
           task: result.task || previous.task,
           workflow: result.workflow || previous.workflow,
           pageStatus: taskStatus || fallbackStatus,
@@ -9421,7 +9461,7 @@
           ? `<ul>${differences.map((item) => {
             const expected = item?.expected ?? item?.before ?? "";
             const actual = item?.actual ?? item?.after ?? "";
-            return `<li>${safeText(item?.path || "--")}：期望 ${safeText(expected)}，实际 ${safeText(actual)}</li>`;
+            return `<li>${safeText(item?.path || "--")}：期望 ${safeText(operationBatchUpdateDisplayValue(expected))}，实际 ${safeText(operationBatchUpdateDisplayValue(actual))}</li>`;
           }).join("")}</ul>`
           : "";
         const details = [
@@ -9607,6 +9647,35 @@
           || (attempt.completed && attempt.status === "succeeded" ? "批次信息修改完成并已通过回读验证。" : "正在读取修改进度...");
       }
 
+      function scheduleOperationBatchUpdatePoll(taskId, attemptId, requestToken, attempt) {
+        if (taskViewState.operationBatchUpdatePollTimer) {
+          clearTimeout(taskViewState.operationBatchUpdatePollTimer);
+        }
+        taskViewState.operationBatchUpdatePollTimer = setTimeout(() => {
+          if (!operationBatchUpdateRequestIsCurrent(taskId, requestToken)) return;
+          const transition = operationBatchUpdateCountdownTransition(attempt);
+          renderOperationBatchUpdateAttempt(transition.attempt);
+          taskViewState.operationBatchUpdateState = {
+            ...(taskViewState.operationBatchUpdateState || {}),
+            attempt: transition.attempt,
+          };
+          renderOperationBatchUpdateState(taskViewState.operationBatchUpdateState);
+          taskViewState.operationBatchUpdatePollTimer = null;
+          if (transition.shouldPoll) {
+            void pollOperationBatchUpdateAttempt(taskId, attemptId, requestToken);
+            return;
+          }
+          if (transition.shouldSchedule) {
+            scheduleOperationBatchUpdatePoll(
+              taskId,
+              attemptId,
+              requestToken,
+              transition.attempt,
+            );
+          }
+        }, 1000);
+      }
+
       async function pollOperationBatchUpdateAttempt(taskId, attemptId, requestToken) {
         try {
           const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-batch/update-attempts/${encodeURIComponent(attemptId)}?_=${Date.now()}`);
@@ -9624,22 +9693,7 @@
               differingFields: [],
             };
             renderOperationBatchUpdateState(taskViewState.operationBatchUpdateState);
-            if (taskViewState.operationBatchUpdatePollTimer) {
-              clearTimeout(taskViewState.operationBatchUpdatePollTimer);
-            }
-            taskViewState.operationBatchUpdatePollTimer = setTimeout(() => {
-              const countdown = {
-                ...result,
-                remainingSeconds: Math.max(0, Number(result.remainingSeconds - 1)),
-              };
-              renderOperationBatchUpdateAttempt(countdown);
-              taskViewState.operationBatchUpdateState = {
-                ...(taskViewState.operationBatchUpdateState || {}),
-                attempt: countdown,
-              };
-              renderOperationBatchUpdateState(taskViewState.operationBatchUpdateState);
-              void pollOperationBatchUpdateAttempt(taskId, attemptId, requestToken);
-            }, 1000);
+            scheduleOperationBatchUpdatePoll(taskId, attemptId, requestToken, result);
             return result;
           }
           taskViewState.operationBatchUpdatePollTimer = null;
