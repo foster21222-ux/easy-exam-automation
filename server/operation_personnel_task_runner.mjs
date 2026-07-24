@@ -1472,8 +1472,8 @@ async function exactVisibleRequirementRow(drawer, name) {
   const matches = [];
   for (let index = 0; index < await rows.count(); index += 1) {
     const row = rows.nth(index);
-    const firstCell = text(await row.locator("td").first().innerText());
-    if (firstCell === text(name)) matches.push(row);
+    const cells = (await row.locator("td").allInnerTexts()).map(text);
+    if (cells.includes(text(name))) matches.push(row);
   }
   if (matches.length !== 1) {
     throw operationControlError(`考务需求 ${text(name)} 行`, matches.length);
