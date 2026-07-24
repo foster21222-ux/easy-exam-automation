@@ -1,5 +1,6 @@
 import { operationBatchCodeIsValid, operationBatchNeedsReconciliation } from "./operation_batch.mjs";
 import { defaultOperationBatchName, resolveOperationBatchName } from "./operation_batch_name.mjs";
+import { operationBatchUpdateState } from "./operation_batch_update.mjs";
 import { buildOperationPersonnelTaskDraft, buildOperationPersonnelTaskStatus } from "./operation_personnel_task.mjs";
 
 function text(value) {
@@ -230,6 +231,7 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
   const archiveDraft = buildOperationArchiveDraft(task);
   const contentReady = examRequirements.length > 0 && examRequirements.every((requirement) => Boolean(requirement.fields?.["考试名称"] && requirement.fields?.["考试日期时间"]));
   const hasActualSession = (task.sessions || []).some((session) => text(session.session_id));
+  const batchUpdate = operationBatchUpdateState(task);
   return {
     sources: {
       fanwei: { ready: Boolean(business.operation_serial_number && business.project_code), version: task.config?.fanweiSource?.version || 0 },
@@ -239,11 +241,14 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
     steps: {
       batch: {
         status: hasBatchCode
-          ? "success"
+          ? batchUpdate.status
           : operationBatchNeedsReconciliation(task)
             ? "reconciliation_required"
             : (batchDraft?.warnings?.length ? "needs_review" : "ready"),
         code: batchCode,
+        baselineRequired: batchUpdate.baselineRequired,
+        missingSchedules: batchUpdate.missing,
+        managedChanges: batchUpdate.changes,
       },
       personnel: personnelNotRequired ? { status: "skipped", actions: [] } : { status: personnelStatus.status, actions: personnelStatus.actions },
       content: { status: hasBatchCode ? (contentReady ? "ready" : "needs_review") : "waiting_batch" },

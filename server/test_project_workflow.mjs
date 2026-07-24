@@ -204,3 +204,66 @@ test("workflow keeps malformed non-empty batch codes pending and downstream step
   assert.equal(workflow.steps.content.status, "waiting_batch");
   assert.equal(workflow.steps.archive.status, "waiting_execution");
 });
+
+test("workflow exposes managed batch update state without treating subjects as managed", () => {
+  const task = {
+    config: {
+      operationBatchCode: "EZT260003",
+      businessRequirement: {
+        batch_name: "湖北邮政社招_2026年8月",
+        ata_invigilator_arrangement: "不需要安排人工监考",
+      },
+      operationBatch: {
+        managedSnapshot: {
+          batchName: "湖北邮政社招_2026年8月",
+          examStartDate: "2026-08-22",
+          examEndDate: "2026-08-22",
+          schedules: [{
+            requirementIndex: 0,
+            name: "笔试",
+            start: "2026-08-22T09:00:00",
+            end: "2026-08-22T11:00:00",
+          }],
+        },
+      },
+      examRequirements: [{
+        fields: {
+          "考试名称": "笔试",
+          "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+          "科目信息": "新科目",
+        },
+      }],
+    },
+    sessions: [],
+  };
+
+  const workflow = buildProjectWorkflow(task, { warnings: [] });
+
+  assert.equal(workflow.steps.batch.status, "success");
+  assert.equal(workflow.steps.batch.baselineRequired, false);
+  assert.deepEqual(workflow.steps.batch.missingSchedules, []);
+  assert.deepEqual(workflow.steps.batch.managedChanges, []);
+});
+
+test("workflow exposes incomplete managed schedules for an existing batch", () => {
+  const workflow = buildProjectWorkflow({
+    config: {
+      operationBatchCode: "EZT260003",
+      businessRequirement: { batch_name: "批次" },
+      operationBatch: {},
+      examRequirements: [
+        { fields: { "考试名称": "第一场", "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00" } },
+        { fields: { "考试名称": "第二场", "考试日期时间": "" } },
+      ],
+    },
+    sessions: [],
+  }, { warnings: [] });
+
+  assert.equal(workflow.steps.batch.status, "waiting_schedule");
+  assert.equal(workflow.steps.batch.baselineRequired, true);
+  assert.deepEqual(workflow.steps.batch.missingSchedules, [{
+    requirementIndex: 1,
+    fields: ["考试日期时间"],
+  }]);
+  assert.deepEqual(workflow.steps.batch.managedChanges, []);
+});
