@@ -1381,7 +1381,9 @@ export async function openVisiblePersonnelMailDialog(page, instruction = {}) {
   const summaryCount = await summary.count();
   if (summaryCount > 1) throw operationControlError("任务单变更内容", summaryCount);
   if (summaryCount === 1) {
-    const changeSummary = text(instruction.changeSummary);
+    const changeSummary = text(
+      instruction.changeSummary || instruction.directoryProbeSummary,
+    );
     if (!changeSummary) throw new Error("重新发送人员任务必须填写变化摘要");
     await summary.fill(changeSummary);
     const dialog = await topVisibleDialog(page, "任务单变更内容弹窗");

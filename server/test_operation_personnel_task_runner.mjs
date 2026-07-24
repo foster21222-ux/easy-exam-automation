@@ -519,6 +519,63 @@ test("current top-right send record reader uses the visible task sheet table", a
   );
 });
 
+test("directory probe uses its reviewed summary in the built-in resend flow", async () => {
+  const events = [];
+  const button = (name) => ({
+    count: async () => 1,
+    click: async () => events.push(`click:${name}`),
+  });
+  const taskDialog = {
+    count: async () => 1,
+    getByRole: (role, { name }) => {
+      assert.equal(role, "button");
+      return button(name);
+    },
+  };
+  const mailDialog = { count: async () => 1 };
+  const changeDialog = {
+    getByRole: (role, { name }) => {
+      assert.equal(role, "button");
+      return button(name);
+    },
+  };
+  const page = {
+    locator(selector) {
+      if (selector === ".ant-modal:visible") {
+        return {
+          filter: ({ hasText }) => (
+            hasText === "任务单发送需满足以下条件" ? taskDialog : mailDialog
+          ),
+        };
+      }
+      if (selector.includes('placeholder="请填写任务单变更内容"')) {
+        return {
+          count: async () => 1,
+          fill: async (value) => events.push(`fill:${value}`),
+        };
+      }
+      throw new Error(`unexpected selector: ${selector}`);
+    },
+    getByRole(role) {
+      assert.equal(role, "dialog");
+      return {
+        count: async () => 1,
+        last: () => changeDialog,
+      };
+    },
+  };
+
+  await operationPersonnelRunner.openVisiblePersonnelMailDialog(page, {
+    directoryProbeSummary: "人员落实结束日期：2026-08-18 → 2026-08-19",
+  });
+
+  assert.deepEqual(events, [
+    "click:发送任务单",
+    "fill:人员落实结束日期：2026-08-18 → 2026-08-19",
+    "click:下一步",
+  ]);
+});
+
 function validInstruction(overrides = {}) {
   const target = {
     batch: {
