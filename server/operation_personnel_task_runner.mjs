@@ -1351,7 +1351,11 @@ async function cancelVisibleDirectory(page) {
 }
 
 async function closeVisibleMailDialog(page) {
-  const mailDialog = await uniqueVisibleModalWithText(page, "邮件发送", "邮件发送弹窗");
+  const mailDialog = await uniqueVisibleModalWithText(
+    page,
+    "填写收件人邮箱",
+    "邮件发送弹窗",
+  );
   const close = mailDialog.locator(".ant-modal-close:visible");
   const closeCount = await close.count();
   if (closeCount === 1) {
@@ -1393,7 +1397,7 @@ export async function openVisiblePersonnelMailDialog(page, instruction = {}) {
     );
   }
 
-  return uniqueVisibleModalWithText(page, "邮件发送", "邮件发送弹窗");
+  return uniqueVisibleModalWithText(page, "填写收件人邮箱", "邮件发送弹窗");
 }
 
 async function readVisibleMailRecipients(page) {
@@ -1403,7 +1407,7 @@ async function readVisibleMailRecipients(page) {
       element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length),
     );
     const modals = [...document.querySelectorAll(".ant-modal")].filter((element) => (
-      visible(element) && clean(element.innerText).includes("邮件发送")
+      visible(element) && clean(element.innerText).includes("填写收件人邮箱")
     ));
     if (modals.length !== 1) return { modalCount: modals.length, to: [], cc: [] };
     const modal = modals[0];
@@ -1606,7 +1610,11 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
   readSelectedRecipients: (page) => readVisibleMailRecipients(page),
 
   async confirmSend(page) {
-    const mailDialog = await uniqueVisibleModalWithText(page, "邮件发送", "邮件发送弹窗");
+    const mailDialog = await uniqueVisibleModalWithText(
+      page,
+      "填写收件人邮箱",
+      "邮件发送弹窗",
+    );
     await clickUniqueNamedButton(
       mailDialog,
       ["确 定", "确定"],

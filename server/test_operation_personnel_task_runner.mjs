@@ -543,9 +543,11 @@ test("directory probe uses its reviewed summary in the built-in resend flow", as
     locator(selector) {
       if (selector === ".ant-modal:visible") {
         return {
-          filter: ({ hasText }) => (
-            hasText === "任务单发送需满足以下条件" ? taskDialog : mailDialog
-          ),
+          filter: ({ hasText }) => {
+            if (hasText === "任务单发送需满足以下条件") return taskDialog;
+            assert.equal(hasText, "填写收件人邮箱");
+            return mailDialog;
+          },
         };
       }
       if (selector.includes('placeholder="请填写任务单变更内容"')) {
