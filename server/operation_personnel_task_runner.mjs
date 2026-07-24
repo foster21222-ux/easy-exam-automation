@@ -1346,8 +1346,14 @@ async function confirmVisibleDirectory(page) {
   );
 }
 
-async function cancelVisibleDirectory(page) {
+export async function cancelVisibleDirectory(page) {
   const dialog = await topVisibleDialog(page, "人员目录弹窗");
+  const inlineDirectory = typeof dialog?.getByText === "function"
+    ? dialog.getByText("填写收件人邮箱", { exact: false })
+    : null;
+  if (typeof inlineDirectory?.count === "function" && await inlineDirectory.count() > 0) {
+    return;
+  }
   await clickUniqueNamedButton(
     dialog,
     ["取 消", "取消"],

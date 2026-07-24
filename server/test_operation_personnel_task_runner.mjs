@@ -616,6 +616,26 @@ test("recorded recipient grid opens from the value column next to its label", as
   assert.deepEqual(events, ["recipient-value:click"]);
 });
 
+test("inline recorded directory does not require a nonexistent cancel button", async () => {
+  const dialog = {
+    getByText: (value) => {
+      assert.equal(value, "填写收件人邮箱");
+      return { count: async () => 1 };
+    },
+  };
+  const page = {
+    getByRole: (role) => {
+      assert.equal(role, "dialog");
+      return {
+        count: async () => 2,
+        last: () => dialog,
+      };
+    },
+  };
+
+  await operationPersonnelRunner.cancelVisibleDirectory(page);
+});
+
 function validInstruction(overrides = {}) {
   const target = {
     batch: {
