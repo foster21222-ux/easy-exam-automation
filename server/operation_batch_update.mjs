@@ -62,7 +62,7 @@ function parseRange(value) {
   if (!match) return null;
   const startParts = dateTimeParts(match[1]);
   const endParts = dateTimeParts(match[2]);
-  if (!startParts || !endParts || dateTimeValue(startParts) > dateTimeValue(endParts)) return null;
+  if (!startParts || !endParts || dateTimeValue(startParts) >= dateTimeValue(endParts)) return null;
   return {
     start: dateTimeString(startParts),
     end: dateTimeString(endParts),
@@ -285,7 +285,7 @@ function normalizedManagedSnapshot(snapshot) {
       || !name
       || !startParts
       || !endParts
-      || dateTimeValue(startParts) > dateTimeValue(endParts)
+      || dateTimeValue(startParts) >= dateTimeValue(endParts)
     ) {
       throw new Error("运营批次受管快照不完整或格式不合法");
     }

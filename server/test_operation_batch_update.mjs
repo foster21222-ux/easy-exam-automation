@@ -105,6 +105,22 @@ test("strict date parsing rejects impossible and reversed ranges", () => {
   assert.deepEqual(desired.snapshot.schedules, []);
 });
 
+test("zero-duration requirement remains incomplete and waits for a valid schedule", () => {
+  const task = taskWithRequirements([
+    { name: "零时长日程", range: "2026/08/22 09:00 - 2026/08/22 09:00" },
+  ]);
+
+  const desired = buildDesiredOperationBatchSnapshot(task);
+
+  assert.equal(desired.complete, false);
+  assert.deepEqual(desired.missing, [{
+    requirementIndex: 0,
+    fields: ["考试日期时间"],
+  }]);
+  assert.deepEqual(desired.snapshot.schedules, []);
+  assert.equal(operationBatchUpdateState(task).status, "waiting_schedule");
+});
+
 test("reports every missing managed schedule field in stable order", () => {
   const desired = buildDesiredOperationBatchSnapshot(taskWithRequirements([
     { name: "", range: "" },
@@ -317,6 +333,28 @@ test("rejects an invalid verified managed snapshot", () => {
           requirementIndex: 0,
           name: "日程",
           start: "2026-08-22T11:00:00",
+          end: "2026-08-22T09:00:00",
+        }],
+      },
+    }),
+    /受管快照/,
+  );
+});
+
+test("rejects a zero-duration verified managed schedule", () => {
+  const task = taskWithRequirements([]);
+
+  assert.throws(
+    () => applyOperationBatchManagedResult(task, {
+      verified: true,
+      snapshot: {
+        batchName: "批次",
+        examStartDate: "2026-08-22",
+        examEndDate: "2026-08-22",
+        schedules: [{
+          requirementIndex: 0,
+          name: "零时长日程",
+          start: "2026-08-22T09:00:00",
           end: "2026-08-22T09:00:00",
         }],
       },
