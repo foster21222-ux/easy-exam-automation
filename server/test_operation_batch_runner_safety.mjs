@@ -168,7 +168,7 @@ test("table action does not accept stable stale cards from before the matched re
     { code: "YKT260038", name: "旧批次二" },
   ]);
   const targetPage = fakeBatchCardsPage([
-    { code: "EZT260004", name: "目标批次" },
+    { code: "EZT260004", name: "目标 批次" },
   ]);
   let snapshotReads = 0;
   const responseUrl = "http://operation/api/batch/list";
@@ -187,7 +187,7 @@ test("table action does not accept stable stale cards from before the matched re
         totalCount: 1,
         _items: [{
           batch_code: "EZT260004",
-          batch_name: "目标批次",
+          batch_name: "目标   批次",
         }],
       },
     }),
@@ -213,7 +213,7 @@ test("table action does not accept stable stale cards from before the matched re
       batchListUrl: "http://operation/batch/batchList",
       expectedBatchName: "EZT260004",
     },
-  ), [["EZT260004", "目标批次"]]);
+  ), [["EZT260004", "目标 批次"]]);
   assert.equal(snapshotReads >= 4, true);
 });
 

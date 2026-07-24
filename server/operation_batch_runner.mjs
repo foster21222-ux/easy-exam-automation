@@ -483,11 +483,18 @@ export async function operationBatchListSnapshot(page) {
   };
 }
 
+function operationBatchIdentityText(value) {
+  return text(value).replace(/\s+/g, " ");
+}
+
 function operationBatchSnapshotIdentities(snapshot) {
   const codeIndex = snapshot.headers.indexOf("批次代码");
   const nameIndex = snapshot.headers.indexOf("批次名称");
   if (codeIndex < 0 || nameIndex < 0) return null;
-  return snapshot.rows.map((row) => [text(row[codeIndex]), text(row[nameIndex])]);
+  return snapshot.rows.map((row) => [
+    operationBatchIdentityText(row[codeIndex]),
+    operationBatchIdentityText(row[nameIndex]),
+  ]);
 }
 
 async function operationBatchResponseIdentities(response) {
@@ -496,8 +503,8 @@ async function operationBatchResponseIdentities(response) {
     const items = (await response.json())?.data?._items;
     if (!Array.isArray(items) || !items.length) return null;
     const identities = items.map((item) => [
-      text(item?.batch_code),
-      text(item?.batch_name),
+      operationBatchIdentityText(item?.batch_code),
+      operationBatchIdentityText(item?.batch_name),
     ]);
     return identities.every(([code, name]) => code && name) ? identities : null;
   } catch {
