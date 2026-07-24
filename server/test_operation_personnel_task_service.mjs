@@ -365,6 +365,47 @@ test("visible prior send record adopts an external resend baseline in two inspec
   assert.equal(preview.state.activePreview.kind, "resend");
 });
 
+test("test external baseline excludes allowed identity and equivalent schedule display differences", async () => {
+  const harness = serviceHarness({ externalBaseline: true });
+  const draft = buildOperationPersonnelTaskDraft(harness.task, {
+    environment: "test",
+    now: new Date(START).toISOString(),
+  });
+  const current = inspectionFor(harness.task, "test");
+  current.batch = {
+    ...draft.batch,
+    projectCode: "4473-26",
+    projectName: "测试运控项目",
+    published: true,
+  };
+  current.schedules = draft.schedules.map((schedule) => ({
+    scheduleEntryId: "",
+    scheduleCode: schedule.scheduleCode,
+    subjectCode: "",
+    subjectName: schedule.subjectName,
+    start: schedule.start.replaceAll("/", "-"),
+    end: schedule.end.replaceAll("/", "-"),
+    durationMinutes: 120,
+    earlyLoginMinutes: schedule.earlyLoginMinutes,
+  }));
+  current.personnel = {
+    ...draft.personnel,
+    candidateBasis: "",
+    monitorCount: 3,
+  };
+  current.dates = { ...draft.dates, end: "2026-08-18" };
+  harness.setInspection(current);
+
+  const preview = await harness.service.preview("task-a", owner(), {});
+  const paths = preview.operationChanges.map((item) => item.path);
+
+  assert.equal(paths.includes("batch.projectCode"), false);
+  assert.equal(paths.includes("batch.projectName"), false);
+  assert.equal(paths.includes("schedules"), false);
+  assert.equal(paths.includes("personnel.monitorCount"), true);
+  assert.equal(paths.includes("dates.end"), true);
+});
+
 test("unchanged external baseline blocks before directory inspection", async () => {
   const harness = serviceHarness({ externalBaseline: true });
   const draft = buildOperationPersonnelTaskDraft(harness.task, {

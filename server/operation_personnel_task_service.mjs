@@ -137,15 +137,55 @@ function normalizedState(task, environment, draft = null) {
   };
 }
 
+function visibleScheduleMoment(value) {
+  return text(value).replaceAll("/", "-").replace(/\s+/g, " ");
+}
+
+function visibleScheduleDuration(schedule = {}) {
+  const explicit = Number(schedule.durationMinutes);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const start = Date.parse(visibleScheduleMoment(schedule.start).replace(" ", "T"));
+  const end = Date.parse(visibleScheduleMoment(schedule.end).replace(" ", "T"));
+  return Number.isFinite(start) && Number.isFinite(end) && end > start
+    ? (end - start) / 60_000
+    : "";
+}
+
+function equivalentVisibleSchedule(target = {}, actual = {}) {
+  return text(target.scheduleCode) === text(actual.scheduleCode)
+    && text(target.subjectName) === text(actual.subjectName)
+    && visibleScheduleMoment(target.start) === visibleScheduleMoment(actual.start)
+    && visibleScheduleMoment(target.end) === visibleScheduleMoment(actual.end)
+    && text(target.earlyLoginMinutes) === text(actual.earlyLoginMinutes)
+    && text(visibleScheduleDuration(target)) === text(visibleScheduleDuration(actual))
+    && (!text(actual.subjectCode) || text(actual.subjectCode) === text(target.subjectCode))
+    && (!text(actual.scheduleEntryId)
+      || text(actual.scheduleEntryId) === text(target.scheduleEntryId));
+}
+
 function targetFromDraft(draft = {}, snapshot = {}) {
+  const batch = {
+    ...(snapshot.batch || {}),
+    ...(draft.operationBatch || {}),
+    ...(draft.batch || {}),
+    published: true,
+  };
+  if (draft.environment === "test") {
+    if (text(snapshot.batch?.projectCode)) batch.projectCode = snapshot.batch.projectCode;
+    if (text(snapshot.batch?.projectName)) batch.projectName = snapshot.batch.projectName;
+  }
+  const actualSchedules = new Map(
+    (snapshot.schedules || []).map((schedule) => [text(schedule.scheduleCode), schedule]),
+  );
+  const schedules = (draft.schedules || []).map((schedule) => {
+    const actual = actualSchedules.get(text(schedule.scheduleCode));
+    return actual && equivalentVisibleSchedule(schedule, actual)
+      ? structuredClone(actual)
+      : structuredClone(schedule);
+  });
   return normalizeOperationPersonnelSnapshot({
-    batch: {
-      ...(snapshot.batch || {}),
-      ...(draft.operationBatch || {}),
-      ...(draft.batch || {}),
-      published: true,
-    },
-    schedules: draft.schedules || [],
+    batch,
+    schedules,
     personnel: draft.personnel || {},
     dates: draft.dates || {},
     requirements: draft.operationRequirements || snapshot.requirements || [],
