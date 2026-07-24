@@ -168,6 +168,21 @@ test("current personnel task sheet maps visible tables into a normalized snapsho
   }]);
 });
 
+test("current personnel task sheet splits the recorded combined personnel date range", () => {
+  const raw = visiblePersonnelTaskSheetRaw();
+  raw.keyValueRows = raw.keyValueRows
+    .filter(([label]) => !["人员落实开始日期", "人员落实结束日期"].includes(label))
+    .concat([["人员落实日期", "2026-07-24 ~ 2026-08-18"]]);
+
+  const snapshot = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(raw);
+
+  assert.deepEqual(snapshot.dates, {
+    start: "2026-07-24",
+    end: "2026-08-18",
+    nameListDue: "2026-08-19",
+  });
+});
+
 test("current personnel task sheet blocks a missing schedule header", () => {
   assert.equal(
     typeof operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw,

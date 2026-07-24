@@ -449,6 +449,9 @@ export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
     name: text(name),
     satisfied: visibleConditionSatisfied(name),
   }));
+  const [combinedStart = "", combinedEnd = ""] = text(values.get("人员落实日期"))
+    .split("~")
+    .map(text);
 
   return normalizeOperationPersonnelSnapshot({
     batch: {
@@ -470,8 +473,8 @@ export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
       trialIncluded: false,
     },
     dates: {
-      start: values.get("人员落实开始日期"),
-      end: values.get("人员落实结束日期"),
+      start: values.get("人员落实开始日期") || combinedStart,
+      end: values.get("人员落实结束日期") || combinedEnd,
       nameListDue: values.get("人员名单提交日期"),
     },
     requirements: requirementNames.map((name) => ({
@@ -560,6 +563,43 @@ export async function readVisiblePersonnelTaskSheet(page) {
   if (dialogCount !== 1) {
     throw operationControlError("分散在线监考任务单弹窗", dialogCount);
   }
+  if (typeof page.waitForFunction === "function") {
+    await page.waitForFunction(() => {
+      const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
+      const visible = (node) => Boolean(
+        node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length),
+      );
+      const modal = [...document.querySelectorAll(".ant-modal")].find((node) => (
+        visible(node)
+        && clean(node.innerText).includes("任务单发送需满足以下条件")
+      ));
+      if (!modal) return false;
+      const rowValue = (label) => {
+        for (const row of modal.querySelectorAll(".order-item, .m_bottom.ant-row")) {
+          if (!visible(row)) continue;
+          const title = row.querySelector(":scope > .order-title-1");
+          if (clean(title?.textContent).replace(/[：:]\s*$/, "") !== label) continue;
+          const value = [...row.children]
+            .filter((node) => node !== title)
+            .map((node) => clean(node.textContent))
+            .find(Boolean);
+          return value || "";
+        }
+        return "";
+      };
+      const schedule = [...modal.querySelectorAll("table")].find((table) => {
+        const headers = [...table.querySelectorAll("thead th")].map((cell) => clean(cell.textContent));
+        return visible(table) && headers.includes("日程代码") && headers.includes("科目名称");
+      });
+      return Boolean(
+        rowValue("批次名称")
+        && rowValue("批次名称") !== "—"
+        && rowValue("正式考试-监考人员安排")
+        && rowValue("正式考试-监考人员安排") !== "—"
+        && schedule,
+      );
+    }, undefined, { timeout: 10_000 });
+  }
   const raw = await page.evaluate(() => {
     const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
     const visible = (node) => Boolean(
@@ -583,17 +623,42 @@ export async function readVisiblePersonnelTaskSheet(page) {
         && headers.includes("日程")
         && headers.includes("科目名称");
     });
-    const keyValueRows = tables
+    const tableKeyValueRows = tables
       .filter((table) => table !== sendTable && table !== scheduleTable)
       .flatMap(tableRows)
       .filter((row) => row.length === 2);
+    const layoutKeyValueRows = [...modal.querySelectorAll(".order-item, .m_bottom.ant-row")]
+      .filter(visible)
+      .flatMap((row) => {
+        const title = row.querySelector(":scope > .order-title-1");
+        const label = clean(title?.textContent).replace(/[：:]\s*$/, "");
+        if (!label) return [];
+        const value = [...row.children]
+          .filter((node) => node !== title)
+          .map((node) => clean(node.textContent))
+          .find(Boolean) || "";
+        return [[label, value]];
+      });
+    const keyValueRows = layoutKeyValueRows.length
+      ? layoutKeyValueRows
+      : tableKeyValueRows;
     const scheduleHeaders = scheduleTable
       ? [...scheduleTable.querySelectorAll("thead th")].map((cell) => clean(cell.textContent))
       : [];
     const scheduleRows = scheduleTable
       ? [...scheduleTable.querySelectorAll("tbody tr")].filter(visible).map(cells)
       : [];
-    const sendRecordRows = sendTable ? tableRows(sendTable) : [];
+    const timelineSendRows = [...modal.querySelectorAll(".ant-timeline-item-content")]
+      .filter(visible)
+      .flatMap((node) => {
+        const match = clean(node.textContent).match(
+          /^(首次发送|再次发送)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})$/,
+        );
+        return match ? [[match[2], match[1]]] : [];
+      });
+    const sendRecordRows = sendTable
+      ? tableRows(sendTable)
+      : [["发送时间", "变更内容"], ...timelineSendRows];
     const modalText = String(modal.innerText ?? "");
     const conditions = [...modalText.matchAll(
       /\d+、\s*(.*?)(?=\s*\d+、|基本信息)/gs,
