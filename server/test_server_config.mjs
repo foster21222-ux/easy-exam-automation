@@ -62,6 +62,39 @@ test("server wires exact personnel task routes to one environment-bound service"
   assert.equal(recheckHandler.includes("json(res, 200, result)"), false);
 });
 
+test("server wires operation batch update state preview start and attempt routes", () => {
+  assert.match(serverSource, /from "\.\/operation_batch_update_service\.mjs"/);
+  assert.match(serverSource, /createOperationBatchUpdateService/);
+  assert.match(serverSource, /createOperationBatchUpdateApi/);
+  assert.match(serverSource, /inspectOperationBatchManagedSnapshot/);
+  assert.match(serverSource, /runOperationBatchManagedUpdate/);
+  assert.match(serverSource, /coordinator: operationBatchCoordinator/);
+  assert.match(
+    serverSource,
+    /updateTaskConfig: \(taskId, config\) => runTaskState\("update_config", \{ taskId, config \}\)/,
+  );
+  for (const route of [
+    "operation-batch\\/update-state$/",
+    "operation-batch\\/update-preview$/",
+    "operation-batch\\/update$/",
+    "operation-batch\\/update-attempts\\/([^/]+)$/",
+  ]) {
+    assert.ok(serverSource.includes(route), `missing exact operation batch update route: ${route}`);
+  }
+  const serviceWiring = serverSource.slice(
+    serverSource.indexOf("function getOperationBatchUpdateApi"),
+    serverSource.indexOf("function getOperationPersonnelTaskService"),
+  );
+  assert.ok(serviceWiring.includes(
+    "assertAutomationEnabled: assertOperationBatchUpdateAutomationEnabled",
+  ));
+  const attemptHandler = serverSource.slice(
+    serverSource.indexOf("async function handleOperationBatchUpdateAttempt"),
+    serverSource.indexOf("async function operationBatchLockConflictResponse"),
+  );
+  assert.equal(attemptHandler.includes("assertOperationBatchUpdateAutomationEnabled"), false);
+});
+
 test("task state subprocess decodes UTF-8 across stdout chunk boundaries", () => {
   const runTaskStateBlock = serverSource.slice(
     serverSource.indexOf("async function runTaskState"),

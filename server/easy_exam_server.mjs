@@ -71,7 +71,15 @@ import {
   applyOperationBatchManagedResult,
   buildDesiredOperationBatchSnapshot,
 } from "./operation_batch_update.mjs";
-import { runOperationBatchScheduleInitialization } from "./operation_batch_update_runner.mjs";
+import {
+  inspectOperationBatchManagedSnapshot,
+  runOperationBatchManagedUpdate,
+  runOperationBatchScheduleInitialization,
+} from "./operation_batch_update_runner.mjs";
+import {
+  createOperationBatchUpdateApi,
+  createOperationBatchUpdateService,
+} from "./operation_batch_update_service.mjs";
 import {
   checkOperationConsoleAutomationEnvironment,
   enableOperationConsoleAutomation,
@@ -5459,8 +5467,57 @@ const operationBatchCoordinator = createOperationBatchCoordinator({
   taskInFlight: operationBatchResultInFlight,
   profileKey: operationBatchAutomationLockKey,
 });
+let operationBatchUpdateApi;
 const operationPersonnelTaskActiveAttempts = new Set();
 let operationPersonnelTaskService;
+
+function operationBatchUpdateRunnerOptions() {
+  return {
+    baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
+    userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
+  };
+}
+
+function assertOperationBatchUpdateAutomationEnabled() {
+  if (process.env.OPERATION_CONSOLE_AUTOMATION_ENABLED === "1") return;
+  const error = new Error(
+    "运营控制台浏览器自动化未启用。请先确认测试环境已登录，并设置 OPERATION_CONSOLE_AUTOMATION_ENABLED=1 后重启服务。",
+  );
+  error.status = 409;
+  error.code = "OPERATION_BATCH_AUTOMATION_DISABLED";
+  throw error;
+}
+
+function getOperationBatchUpdateApi() {
+  if (operationBatchUpdateApi) return operationBatchUpdateApi;
+  const readTask = (taskId) => runTaskState("get", { taskId });
+  const service = createOperationBatchUpdateService({
+    readTask,
+    updateTaskConfig: (taskId, config) => runTaskState("update_config", { taskId, config }),
+    coordinator: operationBatchCoordinator,
+    runInspection: (instruction) => inspectOperationBatchManagedSnapshot(
+      instruction,
+      operationBatchUpdateRunnerOptions(),
+    ),
+    runUpdate: (instruction) => runOperationBatchManagedUpdate(
+      instruction,
+      operationBatchUpdateRunnerOptions(),
+    ),
+    assertAutomationEnabled: assertOperationBatchUpdateAutomationEnabled,
+  });
+  operationBatchUpdateApi = createOperationBatchUpdateApi({
+    service,
+    readTask,
+    workflowForTask: (task) => {
+      const batchDraft = buildOperationBatchDraft(
+        task,
+        operationBatchDraftOverridesFromTask(task),
+      );
+      return buildProjectWorkflow(task, batchDraft);
+    },
+  });
+  return operationBatchUpdateApi;
+}
 
 function getOperationPersonnelTaskService() {
   if (operationPersonnelTaskService) return operationPersonnelTaskService;
@@ -5642,6 +5699,74 @@ async function handleOperationPersonnelTaskRecheck(taskId, req, res) {
   } catch (error) {
     return operationPersonnelTaskError(res, error);
   }
+}
+
+async function readOperationBatchUpdatePayload(req) {
+  const body = await readBody(req);
+  if (!body.toString("utf8").trim()) return {};
+  const payload = parseJsonSafe(body);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) return payload;
+  const error = new Error("请求 JSON 格式无效");
+  error.status = 400;
+  error.code = "OPERATION_BATCH_UPDATE_INVALID_JSON";
+  throw error;
+}
+
+function sendOperationBatchUpdateResponse(res, result) {
+  return json(res, result.statusCode, result.body);
+}
+
+async function handleOperationBatchUpdateState(taskId, req, res) {
+  const result = await getOperationBatchUpdateApi().state(
+    taskId,
+    operationPersonnelTaskActor(req),
+  );
+  return sendOperationBatchUpdateResponse(res, result);
+}
+
+async function handleOperationBatchUpdatePreview(taskId, req, res) {
+  let payload;
+  try {
+    payload = await readOperationBatchUpdatePayload(req);
+  } catch (error) {
+    return json(res, error.status || 400, {
+      error: error.message,
+      errorCode: error.code,
+    });
+  }
+  const result = await getOperationBatchUpdateApi().preview(
+    taskId,
+    operationPersonnelTaskActor(req),
+    payload,
+  );
+  return sendOperationBatchUpdateResponse(res, result);
+}
+
+async function handleOperationBatchUpdateStart(taskId, req, res) {
+  let payload;
+  try {
+    payload = await readOperationBatchUpdatePayload(req);
+  } catch (error) {
+    return json(res, error.status || 400, {
+      error: error.message,
+      errorCode: error.code,
+    });
+  }
+  const result = await getOperationBatchUpdateApi().start(
+    taskId,
+    payload,
+    operationPersonnelTaskActor(req),
+  );
+  return sendOperationBatchUpdateResponse(res, result);
+}
+
+async function handleOperationBatchUpdateAttempt(taskId, attemptId, req, res) {
+  const result = await getOperationBatchUpdateApi().attempt(
+    taskId,
+    attemptId,
+    operationPersonnelTaskActor(req),
+  );
+  return sendOperationBatchUpdateResponse(res, result);
 }
 
 async function operationBatchLockConflictResponse(taskId, task, res, error) {
@@ -6718,6 +6843,27 @@ async function requestHandler(req, res) {
     const operationBatchResultMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/result$/);
     if (req.method === "POST" && operationBatchResultMatch) {
       return await handleOperationBatchResult(decodeURIComponent(operationBatchResultMatch[1]), req, res);
+    }
+    const operationBatchUpdateStateMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/update-state$/);
+    if (req.method === "GET" && operationBatchUpdateStateMatch) {
+      return await handleOperationBatchUpdateState(decodeURIComponent(operationBatchUpdateStateMatch[1]), req, res);
+    }
+    const operationBatchUpdatePreviewMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/update-preview$/);
+    if (req.method === "POST" && operationBatchUpdatePreviewMatch) {
+      return await handleOperationBatchUpdatePreview(decodeURIComponent(operationBatchUpdatePreviewMatch[1]), req, res);
+    }
+    const operationBatchUpdateMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/update$/);
+    if (req.method === "POST" && operationBatchUpdateMatch) {
+      return await handleOperationBatchUpdateStart(decodeURIComponent(operationBatchUpdateMatch[1]), req, res);
+    }
+    const operationBatchUpdateAttemptMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-batch\/update-attempts\/([^/]+)$/);
+    if (req.method === "GET" && operationBatchUpdateAttemptMatch) {
+      return await handleOperationBatchUpdateAttempt(
+        decodeURIComponent(operationBatchUpdateAttemptMatch[1]),
+        decodeURIComponent(operationBatchUpdateAttemptMatch[2]),
+        req,
+        res,
+      );
     }
     const personnelStateMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/operation-personnel-task$/);
     if (req.method === "GET" && personnelStateMatch) {

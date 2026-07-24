@@ -141,6 +141,38 @@ const EXPECTED_SERVER_DISPATCHER_REGION = {
       afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
       beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
     },
+    {
+      name: "operation batch update state route",
+      kind: "js-route-pair",
+      startAnchor: "const operationBatchUpdateStateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/update-state$/);",
+      routeAnchor: "if (req.method === \"GET\" && operationBatchUpdateStateMatch) {",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
+    {
+      name: "operation batch update preview route",
+      kind: "js-route-pair",
+      startAnchor: "const operationBatchUpdatePreviewMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/update-preview$/);",
+      routeAnchor: "if (req.method === \"POST\" && operationBatchUpdatePreviewMatch) {",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
+    {
+      name: "operation batch update route",
+      kind: "js-route-pair",
+      startAnchor: "const operationBatchUpdateMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/update$/);",
+      routeAnchor: "if (req.method === \"POST\" && operationBatchUpdateMatch) {",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
+    {
+      name: "operation batch update attempt route",
+      kind: "js-route-pair",
+      startAnchor: "const operationBatchUpdateAttemptMatch = url.pathname.match(/^\\/api\\/tasks\\/([^/]+)\\/operation-batch\\/update-attempts\\/([^/]+)$/);",
+      routeAnchor: "if (req.method === \"GET\" && operationBatchUpdateAttemptMatch) {",
+      afterAnchor: "if (req.method === \"POST\" && taskRetryMatch) {",
+      beforeAnchor: "const sharedSheetFillMatch = url.pathname.match(",
+    },
   ],
 };
 
