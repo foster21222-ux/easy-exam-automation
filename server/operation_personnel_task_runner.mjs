@@ -1419,6 +1419,26 @@ export async function selectVisiblePersonnelDate(page, dialog, placeholder, valu
   }
 }
 
+export async function selectVisiblePersonnelDateRange(page, dialog, start, end) {
+  const input = await uniqueVisibleControl(
+    dialog.locator('input[placeholder="开始日期"]:visible'),
+    "开始日期输入框",
+  );
+  await input.click();
+  await clickUniqueVisible(
+    page.locator(`[title="${operationDateTitle(start)}"]:visible`),
+    `${text(start)}日期单元格`,
+  );
+  await clickUniqueVisible(
+    page.locator(`[title="${operationDateTitle(end)}"]:visible`),
+    `${text(end)}日期单元格`,
+  );
+  const calendars = page.locator(".ant-calendar-picker-container:visible");
+  if (await calendars.count() > 0) {
+    await calendars.waitFor({ state: "hidden", timeout: 10_000 });
+  }
+}
+
 async function chooseVisibleRadio(dialog, name) {
   await clickUniqueVisible(
     dialog.getByRole("radio", { name: text(name), exact: true }),
@@ -1783,11 +1803,9 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
     await ensureVisiblePersonnelPage(page, instruction);
     await openVisiblePersonnelSectionEditor(page, "配置项");
     const dialog = await visiblePersonnelConfigDialog(page);
-    if (text(current.start) !== text(dates.start)) {
-      await selectVisiblePersonnelDate(page, dialog, "开始日期", dates.start);
-    }
-    if (text(current.end) !== text(dates.end)) {
-      await selectVisiblePersonnelDate(page, dialog, "结束日期", dates.end);
+    if (text(current.start) !== text(dates.start)
+      || text(current.end) !== text(dates.end)) {
+      await selectVisiblePersonnelDateRange(page, dialog, dates.start, dates.end);
     }
     if (text(current.nameListDue) !== text(dates.nameListDue)) {
       await selectVisiblePersonnelDate(page, dialog, "请选择日期", dates.nameListDue);

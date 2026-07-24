@@ -175,6 +175,34 @@ test("readonly personnel dates are selected through the exact calendar cell", as
   ]);
 });
 
+test("personnel date range selects both endpoints before saving", async () => {
+  const events = [];
+  const control = (label, count = 1) => ({
+    count: async () => count,
+    click: async () => events.push(label),
+    waitFor: async (options) => events.push(`${label}:${options.state}`),
+  });
+  const dialog = {
+    locator: () => control("input"),
+  };
+  const page = {
+    locator: (selector) => {
+      if (selector.includes("2026年7月24日")) return control("start");
+      if (selector.includes("2026年8月19日")) return control("end");
+      return control("calendar", 0);
+    },
+  };
+
+  await operationPersonnelRunner.selectVisiblePersonnelDateRange(
+    page,
+    dialog,
+    "2026-07-24",
+    "2026-08-19",
+  );
+
+  assert.deepEqual(events, ["input", "start", "end"]);
+});
+
 function visiblePersonnelTaskSheetRaw(overrides = {}) {
   return {
     conditions: [
