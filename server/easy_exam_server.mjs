@@ -891,6 +891,8 @@ async function runTaskState(action, payload = {}) {
   });
   let stdout = "";
   let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
   child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
   child.stdin.end(JSON.stringify(payload));

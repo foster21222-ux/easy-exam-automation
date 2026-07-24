@@ -62,6 +62,15 @@ test("server wires exact personnel task routes to one environment-bound service"
   assert.equal(recheckHandler.includes("json(res, 200, result)"), false);
 });
 
+test("task state subprocess decodes UTF-8 across stdout chunk boundaries", () => {
+  const runTaskStateBlock = serverSource.slice(
+    serverSource.indexOf("async function runTaskState"),
+    serverSource.indexOf("async function runRequirementState"),
+  );
+  assert.ok(runTaskStateBlock.includes('child.stdout.setEncoding("utf8")'));
+  assert.ok(runTaskStateBlock.includes('child.stderr.setEncoding("utf8")'));
+});
+
 test("global email and operation environment mutations require administrators", () => {
   const requestHandler = serverSource.slice(
     serverSource.indexOf("async function requestHandler"),
