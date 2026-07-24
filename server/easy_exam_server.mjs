@@ -1727,9 +1727,39 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
     };
     const examRequirements = currentRequirements.length ? [...currentRequirements] : [examRequirement];
     examRequirements[requirementIndex] = examRequirement;
+    const currentSource = task.config?.fanweiSource || {};
+    const currentRaw = currentSource.raw || {};
+    const currentBusinessRequirement = task.config?.businessRequirement || {};
+    const batchName = resolveOperationBatchName({
+      previousValue: currentRaw.fields?.["批次名称"] || currentBusinessRequirement.batch_name,
+      previousMode: currentSource.batchNameMode || currentBusinessRequirement.batch_name_mode,
+      generatedValue: defaultOperationBatchName({
+        customerName: currentBusinessRequirement.customer_name || currentRaw.fields?.["客户名称"],
+        projectName: currentBusinessRequirement.project_name || currentRaw.fields?.["项目名称"],
+        examStart: examRequirements[0]?.fields?.["考试日期时间"],
+      }),
+      submittedValue: currentRaw.fields?.["批次名称"] || currentBusinessRequirement.batch_name,
+    });
+    const fanweiSource = {
+      ...currentSource,
+      batchNameMode: batchName.mode,
+      batchNameAutoValue: batchName.autoValue,
+      raw: {
+        ...currentRaw,
+        fields: { ...(currentRaw.fields || {}), "批次名称": batchName.value },
+      },
+    };
+    const businessRequirement = {
+      ...currentBusinessRequirement,
+      batch_name: batchName.value,
+      batch_name_mode: batchName.mode,
+      batch_name_auto_value: batchName.autoValue,
+    };
     configPatch = {
       examRequirements,
       examRequirement: examRequirements[0],
+      fanweiSource,
+      businessRequirement,
       projectSourceChangeHistory: appendProjectSourceChangeHistory(task, {
         source: "examRequirement",
         reviewStatus: "auto_confirmed",

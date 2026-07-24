@@ -10,6 +10,49 @@ import { fileURLToPath } from "node:url";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const nodeBin = process.execPath;
 const pythonBin = process.env.CODEX_PYTHON || "python3";
+const taskStateScript = path.join(rootDir, "server", "task_state_db.py");
+
+function seedProjectSourceTask(runtimeDir, taskId, { batchNameMode = "auto", batchName = "湖北邮政社招_2026年8月" } = {}) {
+  const autoValue = "湖北邮政社招_2026年8月";
+  const requirement = {
+    id: "requirement-1",
+    version: 1,
+    fields: {
+      "考试名称": "社会招聘考试",
+      "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+    },
+    config: {},
+  };
+  execFileSync(pythonBin, [taskStateScript, path.join(runtimeDir, "task_state.sqlite3"), "create"], {
+    input: JSON.stringify({
+      taskId,
+      projectName: "中国邮政集团公司湖北省分公司社会招聘考试",
+      config: {
+        fanweiSource: {
+          version: 1,
+          batchNameMode,
+          batchNameAutoValue: autoValue,
+          raw: {
+            fields: {
+              "项目名称": "中国邮政集团公司湖北省分公司社会招聘考试",
+              "客户名称": "中国邮政集团公司湖北省分公司",
+              "批次名称": batchName,
+            },
+          },
+        },
+        businessRequirement: {
+          customer_name: "中国邮政集团公司湖北省分公司",
+          project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
+          batch_name: batchName,
+          batch_name_mode: batchNameMode,
+          batch_name_auto_value: autoValue,
+        },
+        examRequirements: [requirement],
+        examRequirement: requirement,
+      },
+    }),
+  });
+}
 
 async function reserveLoopbackPort() {
   const server = net.createServer();
@@ -121,6 +164,61 @@ test("operation batch routes block create but admit reconcile for a persisted re
     assert.equal(reconcile.status, 409);
     assert.match(reconcileBody.error, /浏览器自动化未启用/);
     assert.doesNotMatch(reconcileBody.error, /没有待同步结果/);
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
+test("project source updates recalculate automatic batch names and preserve manual batch names", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-project-source-routes-"));
+  const autoTaskId = "auto-batch-task";
+  const manualTaskId = "manual-batch-task";
+  seedProjectSourceTask(runtimeDir, autoTaskId);
+  seedProjectSourceTask(runtimeDir, manualTaskId, { batchNameMode: "manual", batchName: "客户指定批次" });
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+    const septemberFields = {
+      "考试名称": "社会招聘考试",
+      "考试日期时间": "2026/09/22 09:00 - 2026/09/22 11:00",
+    };
+    const autoResponse = await fetch(`${server.baseUrl}/api/tasks/${autoTaskId}/source-snapshot`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "examRequirement", requirementIndex: 0, fields: septemberFields }),
+    });
+    const autoBody = await autoResponse.json();
+    assert.equal(autoResponse.status, 200);
+    assert.equal(autoBody.task.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年9月");
+    assert.equal(autoBody.task.config.businessRequirement.batch_name, "湖北邮政社招_2026年9月");
+    assert.equal(autoBody.task.config.businessRequirement.batch_name_auto_value, "湖北邮政社招_2026年9月");
+
+    const manualResponse = await fetch(`${server.baseUrl}/api/tasks/${manualTaskId}/source-snapshot`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "examRequirement", requirementIndex: 0, fields: septemberFields }),
+    });
+    const manualBody = await manualResponse.json();
+    assert.equal(manualResponse.status, 200);
+    assert.equal(manualBody.task.config.fanweiSource.raw.fields["批次名称"], "客户指定批次");
+    assert.equal(manualBody.task.config.businessRequirement.batch_name, "客户指定批次");
+    assert.equal(manualBody.task.config.businessRequirement.batch_name_auto_value, "湖北邮政社招_2026年9月");
+
+    const restoreResponse = await fetch(`${server.baseUrl}/api/tasks/${manualTaskId}/source-snapshot`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "fanwei",
+        fields: manualBody.task.config.fanweiSource.raw.fields,
+        restoreBatchNameAuto: true,
+      }),
+    });
+    const restoreBody = await restoreResponse.json();
+    assert.equal(restoreResponse.status, 200);
+    assert.equal(restoreBody.task.config.businessRequirement.batch_name, "湖北邮政社招_2026年9月");
+    assert.equal(restoreBody.task.config.businessRequirement.batch_name_mode, "auto");
   } finally {
     await stopServer(child);
     rmSync(runtimeDir, { recursive: true, force: true });
