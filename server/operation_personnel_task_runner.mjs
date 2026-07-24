@@ -1594,6 +1594,23 @@ export async function selectVisiblePersonnelRecipients(
   }
 }
 
+export async function readVisibleExpectedMailRecipients(mailDialog, expected) {
+  const read = async (people) => {
+    const selected = [];
+    for (const person of people) {
+      const label = `${person.id} (${person.name})`;
+      const candidate = mailDialog.getByRole("checkbox", { name: label, exact: true });
+      const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
+      if (await exact.isChecked()) selected.push(person);
+    }
+    return selected;
+  };
+  return {
+    to: await read(expected.to || []),
+    cc: await read(expected.cc || []),
+  };
+}
+
 async function visibleDirectoryPeople(dialog) {
   const values = await dialog.evaluate((node) => {
     const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
@@ -1740,7 +1757,18 @@ export async function openVisiblePersonnelMailDialog(page, instruction = {}) {
   return visiblePersonnelMailDialog(page);
 }
 
-async function readVisibleMailRecipients(page) {
+async function readVisibleMailRecipients(page, instruction = {}) {
+  const mailDialog = await visiblePersonnelMailDialog(page);
+  const rule = RECIPIENT_RULES[text(instruction.environment)];
+  const expected = targetRecipients(instruction.target || {});
+  const inlineGroup = rule
+    ? mailDialog.getByRole("checkbox", { name: rule.toGroup, exact: true })
+    : null;
+  if ((expected.to.length || expected.cc.length)
+    && await inlineGroup?.count() === 1) {
+    return readVisibleExpectedMailRecipients(mailDialog, expected);
+  }
+
   const raw = await page.evaluate(() => {
     const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
     const visible = (element) => Boolean(
@@ -1969,7 +1997,9 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
     await selectVisiblePersonnelRecipients(page, mailDialog, recipients, rule);
   },
 
-  readSelectedRecipients: (page) => readVisibleMailRecipients(page),
+  readSelectedRecipients: (page, instruction) => (
+    readVisibleMailRecipients(page, instruction)
+  ),
 
   async confirmSend(page) {
     const mailDialog = await visiblePersonnelMailDialog(page);

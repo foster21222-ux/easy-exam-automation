@@ -812,6 +812,33 @@ test("inline mail directory selects recipients without clicking the final confir
   ]);
 });
 
+test("inline mail recipient readback verifies the exact expected checked people", async () => {
+  const checked = new Set(["zhanglexiang@ata.net.cn (张乐翔)"]);
+  const mailDialog = {
+    getByRole: (role, { name }) => {
+      assert.equal(role, "checkbox");
+      return {
+        count: async () => 1,
+        isChecked: async () => checked.has(name),
+      };
+    },
+  };
+
+  assert.deepEqual(
+    await operationPersonnelRunner.readVisibleExpectedMailRecipients(
+      mailDialog,
+      {
+        to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+        cc: [{ id: "jiesuan1@ata.net.cn", name: "结算一" }],
+      },
+    ),
+    {
+      to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+      cc: [],
+    },
+  );
+});
+
 test("recorded recipient grid opens from the value column next to its label", async () => {
   const events = [];
   const control = {
