@@ -636,6 +636,43 @@ test("inline recorded directory does not require a nonexistent cancel button", a
   await operationPersonnelRunner.cancelVisibleDirectory(page);
 });
 
+test("recorded directory waits for its React group checkbox before reading members", async () => {
+  const events = [];
+  let ready = false;
+  let reads = 0;
+  const checkbox = {
+    count: async () => ready ? 1 : 0,
+    waitFor: async ({ state }) => {
+      assert.equal(state, "visible");
+      ready = true;
+      events.push("group:visible");
+    },
+    click: async () => events.push("group:click"),
+  };
+  const dialog = {
+    getByRole: (role, { name, exact }) => {
+      assert.equal(role, "checkbox");
+      assert.equal(name, "演练组");
+      assert.equal(exact, true);
+      return checkbox;
+    },
+    evaluate: async () => (
+      reads++ === 0 ? [] : ["zhanglexiang@ata.net.cn (张乐翔)"]
+    ),
+  };
+
+  const people = await operationPersonnelRunner.expandVisibleDirectoryGroup(
+    dialog,
+    "演练组",
+  );
+
+  assert.deepEqual(events, ["group:visible", "group:click"]);
+  assert.deepEqual(people, [{
+    id: "zhanglexiang@ata.net.cn",
+    name: "张乐翔",
+  }]);
+});
+
 function validInstruction(overrides = {}) {
   const target = {
     batch: {

@@ -1322,10 +1322,14 @@ async function visibleDirectoryPeople(dialog) {
   return operationPersonnelDirectoryPeopleFromVisibleTexts(values);
 }
 
-async function expandVisibleDirectoryGroup(dialog, groupName) {
+export async function expandVisibleDirectoryGroup(dialog, groupName) {
   const before = await visibleDirectoryPeople(dialog);
+  const group = dialog.getByRole("checkbox", { name: groupName, exact: true });
+  if (await group.count() === 0) {
+    await group.waitFor({ state: "visible", timeout: 10_000 });
+  }
   await clickUniqueVisible(
-    dialog.getByRole("checkbox", { name: groupName, exact: true }),
+    group,
     `人员目录组 ${groupName}`,
   );
   const after = await visibleDirectoryPeople(dialog);
