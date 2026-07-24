@@ -898,7 +898,10 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           "重新发送人员任务必须填写已复核的变化摘要",
         );
       }
-      const target = targetFromDraft(state.draft);
+      const target = targetFromDraft(
+        state.draft,
+        state.draft.previewOperationSnapshot || {},
+      );
       const baseline = structuredClone(state.draft.previewBaselineSnapshot || {});
       if (kind === "resend"
         && !operationSnapshotChanges(baseline, target).length) {

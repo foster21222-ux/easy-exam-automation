@@ -404,6 +404,16 @@ test("test external baseline excludes allowed identity and equivalent schedule d
   assert.equal(paths.includes("schedules"), false);
   assert.equal(paths.includes("personnel.monitorCount"), true);
   assert.equal(paths.includes("dates.end"), true);
+
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "人员数量和结束日期已调整",
+  });
+  const attempt = harness.task.config.operationPersonnelTask.activeAttempt;
+  assert.deepEqual(attempt.target.schedules, current.schedules);
+  assert.equal(attempt.target.batch.projectCode, "4473-26");
+  assert.equal(attempt.target.batch.projectName, "测试运控项目");
 });
 
 test("unchanged external baseline blocks before directory inspection", async () => {
