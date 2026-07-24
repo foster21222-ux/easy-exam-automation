@@ -150,6 +150,9 @@ test("readonly personnel dates are selected through the exact calendar cell", as
     },
   };
   const page = {
+    keyboard: {
+      press: async (key) => events.push(`page:${key}`),
+    },
     locator: (selector) => {
       if (selector === '[title="2026年8月19日"]:visible') return control("cell");
       assert.equal(selector, ".ant-calendar-picker-container:visible");
@@ -167,7 +170,7 @@ test("readonly personnel dates are selected through the exact calendar cell", as
   assert.deepEqual(events, [
     "input",
     "cell",
-    "input:Escape",
+    "page:Escape",
     "calendar:hidden",
   ]);
 });

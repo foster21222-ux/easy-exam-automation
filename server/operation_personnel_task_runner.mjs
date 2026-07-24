@@ -1414,7 +1414,7 @@ export async function selectVisiblePersonnelDate(page, dialog, placeholder, valu
     throw operationControlError("人员日期选择浮层", calendarCount);
   }
   if (calendarCount === 1) {
-    await input.press("Escape");
+    await page.keyboard.press("Escape");
     await calendars.waitFor({ state: "hidden", timeout: 10_000 });
   }
 }
