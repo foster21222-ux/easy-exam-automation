@@ -417,6 +417,7 @@ test("test external baseline excludes allowed identity and equivalent schedule d
   assert.equal(paths.includes("schedules"), false);
   assert.equal(paths.includes("personnel.monitorCount"), true);
   assert.equal(paths.includes("dates.end"), true);
+  assert.equal(paths.includes("requirements"), false);
 
   await harness.service.send("task-a", owner(), {
     previewToken: preview.previewToken,

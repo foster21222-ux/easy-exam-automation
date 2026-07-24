@@ -303,7 +303,10 @@ function operationSnapshotChanges(before = {}, after = {}, prefix = "") {
 }
 
 function confirmationOperationChanges(changes = []) {
-  return changes.filter((item) => !text(item.path).startsWith("requirements."));
+  return changes.filter((item) => (
+    text(item.path) !== "requirements"
+    && !text(item.path).startsWith("requirements.")
+  ));
 }
 
 function changeValue(value) {
