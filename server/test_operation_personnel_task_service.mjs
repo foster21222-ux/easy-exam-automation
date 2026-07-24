@@ -862,6 +862,12 @@ test("preview token is consumed once and double submit cannot create two attempt
 
 test("a resumable orphan keeps its attempt id and completed checkpoints", async () => {
   const harness = serviceHarness({ orphanedAttemptCheckpoint: "sync_personnel_dates" });
+  harness.task.config.operationPersonnelTask.activeAttempt.error = {
+    code: "OLD_FAILURE",
+    message: "previous failure",
+  };
+  harness.task.config.operationPersonnelTask.activeAttempt.completedAt =
+    "2026-07-23T02:00:02.000Z";
   const preview = await harness.service.preview("task-a", owner(), {});
   const accepted = await harness.service.send("task-a", owner(), {
     previewToken: preview.previewToken,
@@ -873,6 +879,8 @@ test("a resumable orphan keeps its attempt id and completed checkpoints", async 
     harness.task.config.operationPersonnelTask.checkpoints.sync_personnel_dates.status,
     "running",
   );
+  assert.equal(harness.task.config.operationPersonnelTask.activeAttempt.error, null);
+  assert.equal(harness.task.config.operationPersonnelTask.activeAttempt.completedAt, "");
 });
 
 test("changed resumable target gets a new attempt id and clears old checkpoints", async () => {

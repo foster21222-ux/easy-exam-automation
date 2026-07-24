@@ -983,6 +983,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         changeSummary,
         createdAt,
         status: "queued",
+        error: null,
+        completedAt: "",
         target,
         baseline,
         previewBinding,
