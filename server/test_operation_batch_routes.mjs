@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -159,6 +159,17 @@ test("operation batch route test reserves a kernel-assigned loopback port", asyn
   assert.ok(port > 0);
 });
 
+test("operation batch create route surfaces initialization failure as update_failed", () => {
+  const source = readFileSync(
+    path.join(rootDir, "server", "easy_exam_server.mjs"),
+    "utf8",
+  );
+  assert.match(source, /runOperationBatchCreationFlow\(\{/);
+  assert.match(source, /error\?\.operationBatchStatus === "update_failed"/);
+  assert.match(source, /status: "update_failed"/);
+  assert.match(source, /operationBatchCode: error\.operationBatchCode/);
+});
+
 test("rejects reducing Easy Exam requirements after batch creation", async () => {
   const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-operation-batch-routes-"));
   const taskId = "batch-schedule-delete-task";
@@ -306,6 +317,40 @@ test("operation batch routes block create but admit reconcile for a persisted re
     assert.equal(reconcile.status, 409);
     assert.match(reconcileBody.error, /浏览器自动化未启用/);
     assert.doesNotMatch(reconcileBody.error, /没有待同步结果/);
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
+test("operation batch draft route does not regenerate a missing business batch name", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-operation-batch-routes-"));
+  const taskId = "missing-business-batch-name";
+  seedTask(runtimeDir, {
+    taskId,
+    projectName: "不能回退使用的项目名",
+    config: {
+      businessRequirement: {
+        project_name: "也不能用于重建批次名称",
+        exam_schedule: [{ exam_date: "2026-08-22" }],
+      },
+    },
+  });
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+    const response = await fetch(
+      `${server.baseUrl}/api/tasks/${taskId}/operation-batch/draft`,
+    );
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.draft.fields.batchName.value, "");
+    assert.equal(body.draft.fields.batchName.source, "business_requirement");
+    assert.deepEqual(
+      body.draft.warnings.find((item) => item.field === "batchName"),
+      { field: "batchName", message: "批次名称缺失，需要人工补充" },
+    );
   } finally {
     await stopServer(child);
     rmSync(runtimeDir, { recursive: true, force: true });

@@ -60,12 +60,18 @@ import {
   releaseOperationBatchCreation,
   resolveOperationBatchResultWrite,
 } from "./operation_batch.mjs";
+import { runOperationBatchCreationFlow } from "./operation_batch_creation_flow.mjs";
 import {
   createOperationBatchCoordinator,
   operationBatchCreationFailureResponse,
   readFreshOperationBatchTask,
   withFreshOperationBatchTask,
 } from "./operation_batch_coordinator.mjs";
+import {
+  applyOperationBatchManagedResult,
+  buildDesiredOperationBatchSnapshot,
+} from "./operation_batch_update.mjs";
+import { runOperationBatchScheduleInitialization } from "./operation_batch_update_runner.mjs";
 import {
   checkOperationConsoleAutomationEnvironment,
   enableOperationConsoleAutomation,
@@ -5739,36 +5745,106 @@ async function handleOperationBatchCreate(taskId, req, res) {
             },
           },
         });
-        const created = await runOperationBatchCreation(draft, {
-          baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
-          userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
-          allowTaskMismatch: process.env.OPERATION_CONSOLE_ALLOW_TEST_TASK_MISMATCH === "1",
+        const result = await runOperationBatchCreationFlow({
+          taskId,
+          task: lockedTask,
+          desired: buildDesiredOperationBatchSnapshot(lockedTask),
+          createBatch: async () => {
+            const created = await runOperationBatchCreation(draft, {
+              baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
+              userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
+              allowTaskMismatch: process.env.OPERATION_CONSOLE_ALLOW_TEST_TASK_MISMATCH === "1",
+            });
+            externalBatchConfirmed = true;
+            return created;
+          },
+          persistBatch: async (created) => {
+            const freshTask = await runTaskState("get", { taskId });
+            if (!freshTask) {
+              const error = new Error("运营批次已创建，但本地任务已不存在，无法保存创建结果");
+              error.status = 409;
+              throw error;
+            }
+            const saved = await persistOperationBatchResult(taskId, freshTask, {
+              ...created,
+              eventType: "operation_batch_created",
+            });
+            if (saved.status === "conflict") {
+              const error = new Error(
+                `运营批次代码冲突：当前为 ${saved.existingOperationBatchCode}，本次为 ${saved.operationBatchCode}`,
+              );
+              error.status = 409;
+              error.operationBatchConflict = saved;
+              throw error;
+            }
+            return saved;
+          },
+          initializeSchedules: (instruction) => runOperationBatchScheduleInitialization(
+            instruction,
+            {
+              baseUrl: process.env.OPERATION_CONSOLE_BASE_URL,
+              userDataDir: process.env.OPERATION_CONSOLE_USER_DATA_DIR,
+            },
+          ),
+          persistManaged: async (managedResult) => {
+            const freshTask = await runTaskState("get", { taskId });
+            if (!freshTask) {
+              const error = new Error("运营批次已初始化，但本地任务已不存在，无法保存回读结果");
+              error.status = 409;
+              throw error;
+            }
+            const updated = await runTaskState("update_config", {
+              taskId,
+              config: applyOperationBatchManagedResult(freshTask, managedResult),
+            });
+            return { task: updated };
+          },
+          persistFailure: async (error) => {
+            const freshTask = await runTaskState("get", { taskId });
+            if (!freshTask) {
+              const missing = new Error("运营批次代码已保存，但本地任务已不存在，无法保存初始化失败状态");
+              missing.status = 409;
+              throw missing;
+            }
+            const current = freshTask.config?.operationBatch || {};
+            const updated = await runTaskState("update_config", {
+              taskId,
+              config: {
+                operationBatch: {
+                  ...current,
+                  status: "update_failed",
+                  errorCode: String(error?.code || ""),
+                  errorMessage: error instanceof Error ? error.message : String(error),
+                  updatedAt: new Date().toISOString(),
+                },
+              },
+            });
+            return { task: updated };
+          },
         });
-        externalBatchConfirmed = true;
-        const freshTask = await runTaskState("get", { taskId });
-        if (!freshTask) {
-          const error = new Error("运营批次已创建，但本地任务已不存在，无法保存创建结果");
-          error.status = 409;
-          throw error;
-        }
-        const saved = await persistOperationBatchResult(taskId, freshTask, {
-          ...created,
-          eventType: "operation_batch_created",
-        });
-        if (saved.status === "conflict") {
-          return json(res, 409, {
-            error: `运营批次代码冲突：当前为 ${saved.existingOperationBatchCode}，本次为 ${saved.operationBatchCode}`,
-            task: saved.task,
-          });
-        }
         return json(res, 200, {
           ok: true,
-          task: saved.task,
-          operationBatch: saved.task.config?.operationBatch || {},
-          operationBatchCode: saved.operationBatchCode,
-          ...(saved.status === "idempotent" ? { skipped: "operation_batch_result_already_recorded" } : {}),
+          status: result.status,
+          task: result.task,
+          operationBatch: result.task.config?.operationBatch || {},
+          operationBatchCode: result.operationBatchCode,
         });
       } catch (error) {
+        if (error?.operationBatchConflict) {
+          return json(res, 409, {
+            error: error.message,
+            task: error.operationBatchConflict.task,
+          });
+        }
+        if (error?.operationBatchStatus === "update_failed") {
+          return json(res, error.status || 409, {
+            error: error.message,
+            ...(error.code ? { errorCode: error.code } : {}),
+            status: "update_failed",
+            operationBatchCode: error.operationBatchCode,
+            task: error.task,
+          });
+        }
         const failure = operationBatchFailureState(error, externalBatchConfirmed);
         let failedTask;
         try {

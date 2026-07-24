@@ -36,15 +36,6 @@ function scheduleDates(business = {}) {
   return { start: matches[0] || "", end: matches[matches.length - 1] || matches[0] || "" };
 }
 
-function batchNameFromBusiness(business = {}) {
-  const projectName = text(business.project_name || business.exam_name);
-  const { start } = scheduleDates(business);
-  if (!projectName) return "";
-  if (!start) return projectName;
-  const match = start.match(/^(\d{4})-(\d{1,2})-/);
-  return match ? `${projectName}_${match[1]}年${Number(match[2])}月` : projectName;
-}
-
 function centralVenueNotRequired(value) {
   const normalized = text(value);
   return normalized === "不需要" || normalized.includes("不需要");
@@ -95,7 +86,7 @@ export function buildOperationBatchDraft(task = {}, overrides = {}) {
     businessDirection: field(business.business_direction, "business_requirement", "业务方向"),
     businessDepartment: field(businessDepartment.value, businessDepartment.source, "业务部归属"),
     businessOwner: field(business.applicant, "business_requirement", "业务负责人"),
-    batchName: field(batchNameFromBusiness(business), "default_rule", "批次名称"),
+    batchName: field(business.batch_name, "business_requirement", "批次名称"),
     projectDepartment: field("项目实施五部", "default_rule", "项目部归属"),
     examStartDate: field(dates.start, "business_requirement", "考试开始日期"),
     examEndDate: field(dates.end, "business_requirement", "考试结束日期"),

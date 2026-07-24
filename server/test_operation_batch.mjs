@@ -143,6 +143,7 @@ test("buildOperationBatchDraft maps business requirement fields with explicit so
         operation_serial_number: "R0031682",
         project_code: "F0012393",
         project_name: "浙江省对外服务有限公司社会招聘项目",
+        batch_name: "浙江外服社招_2026年7月",
         business_direction: "政府",
         applicant_department: "地方业务中心",
         ata_invigilator_arrangement: "不需要",
@@ -176,9 +177,28 @@ test("buildOperationBatchDraft maps business requirement fields with explicit so
   assert.equal(draft.fields.billingBasis.value, "按开考科次结算");
   assert.equal(draft.fields.examStartDate.value, "2026-07-10");
   assert.equal(draft.fields.examEndDate.value, "2026-07-10");
-  assert.equal(draft.fields.batchName.source, "default_rule");
-  assert.ok(draft.fields.batchName.value.includes("2026年7月"));
+  assert.equal(draft.fields.batchName.source, "business_requirement");
+  assert.equal(draft.fields.batchName.value, "浙江外服社招_2026年7月");
   assert.equal(draft.warnings.some((item) => item.field === "projectDepartment"), false);
+});
+
+test("buildOperationBatchDraft keeps a missing business batch name as a required warning", () => {
+  const draft = buildOperationBatchDraft({
+    projectName: "不能回退使用的项目名",
+    config: {
+      businessRequirement: {
+        project_name: "也不能用于重建批次名称",
+        exam_schedule: [{ exam_date: "2026-07-10" }],
+      },
+    },
+  });
+
+  assert.equal(draft.fields.batchName.value, "");
+  assert.equal(draft.fields.batchName.source, "business_requirement");
+  assert.deepEqual(
+    draft.warnings.find((item) => item.field === "batchName"),
+    { field: "batchName", message: "批次名称缺失，需要人工补充" },
+  );
 });
 
 test("buildOperationBatchDraft normalizes office department and personnel service defaults", () => {
