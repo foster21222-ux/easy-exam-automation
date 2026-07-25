@@ -87,6 +87,16 @@ const EXPECTED_TASK4_FANWEI_IMPORT_ERROR_MAPPING_CHANGE = {
   baseline: "  json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));\n",
 };
 
+const EXPECTED_TASK10_TASK_DETAIL_RESPONSE_ENRICHMENT_CHANGE = {
+  name: "Task 10 legacy batch-name response enrichment",
+  current: `  return json(res, 200, {
+    ...withOperationBatchNameEditorDefaults(enrichedTask),
+    sessionChangeFeatureEnabled,
+  });
+`,
+  baseline: "  return json(res, 200, { ...enrichedTask, sessionChangeFeatureEnabled });\n",
+};
+
 const EXPECTED_SERVER_DISPATCHER_REGION = {
   name: "server dispatcher with approved PR 5 route slots",
   kind: "allowlisted-anchor-range",
@@ -207,7 +217,12 @@ const EXPECTED_SHARED_REGIONS = {
     { name: "auto-config progress state handler", kind: "js-block", startAnchor: "function handleJobState(job, res) {" },
     { name: "auto-config events handler", kind: "js-block", startAnchor: "function handleEvents(job, req, res) {" },
     { name: "exam list handler", kind: "js-block", startAnchor: "async function handleExamList(req, res) {" },
-    { name: "exam detail handler", kind: "js-block", startAnchor: "async function handleTaskDetail(taskId, req, res) {" },
+    {
+      name: "exam detail handler",
+      kind: "allowlisted-js-block",
+      startAnchor: "async function handleTaskDetail(taskId, req, res) {",
+      allowedChanges: [EXPECTED_TASK10_TASK_DETAIL_RESPONSE_ENRICHMENT_CHANGE],
+    },
     { name: "Fanwei preview route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/fanwei/requirement-preview\") {" },
     { name: "Fanwei import route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/fanwei/requirement-import\") {" },
     { name: "Fanwei status route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/fanwei/auto-read/status\") {" },
@@ -783,6 +798,33 @@ test("PR 5 Task 4 Fanwei allowlist rejects changed or unapproved protected text"
   assert.throws(
     () => assertFileRegionsMatch(relativePath, task4Regions, unapprovedMutationSource, deployedSource),
     /protected region "Fanwei import task creation" differs/,
+  );
+});
+
+test("PR 5 Task 10 detail allowlist rejects changed or unapproved protected text", () => {
+  const relativePath = "server/easy_exam_server.mjs";
+  const currentSource = readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  const deployedSource = baselineFile(relativePath).toString("utf8");
+  const detailRegion = PROTECTED_SHARED_REGIONS[relativePath].filter(
+    (region) => region.name === "exam detail handler",
+  );
+
+  const changedAllowlistSource = currentSource.replace(
+    "    ...withOperationBatchNameEditorDefaults(enrichedTask),\n",
+    "    ...withOperationBatchNameEditorDefaults(syncedTask),\n",
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(relativePath, detailRegion, changedAllowlistSource, deployedSource),
+    /authorized change Task 10 legacy batch-name response enrichment must appear exactly once/,
+  );
+
+  const unapprovedMutationSource = currentSource.replace(
+    "  let syncedTask = task;\n",
+    "  let syncedTask = { ...task };\n",
+  );
+  assert.throws(
+    () => assertFileRegionsMatch(relativePath, detailRegion, unapprovedMutationSource, deployedSource),
+    /protected region "exam detail handler" differs/,
   );
 });
 

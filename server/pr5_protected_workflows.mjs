@@ -75,6 +75,16 @@ const TASK4_FANWEI_IMPORT_ERROR_MAPPING_CHANGE = {
   baseline: "  json(res, 200, await createFanweiRequirementImportFromPayload(payload, req));\n",
 };
 
+const TASK10_TASK_DETAIL_RESPONSE_ENRICHMENT_CHANGE = {
+  name: "Task 10 legacy batch-name response enrichment",
+  current: `  return json(res, 200, {
+    ...withOperationBatchNameEditorDefaults(enrichedTask),
+    sessionChangeFeatureEnabled,
+  });
+`,
+  baseline: "  return json(res, 200, { ...enrichedTask, sessionChangeFeatureEnabled });\n",
+};
+
 export const PROTECTED_SHARED_REGIONS = {
   "server/easy_exam_server.mjs": [
     { name: "import workbook task creation", kind: "js-block", startAnchor: "async function createImportFromWorkbook({" },
@@ -106,7 +116,12 @@ export const PROTECTED_SHARED_REGIONS = {
     { name: "auto-config progress state handler", kind: "js-block", startAnchor: "function handleJobState(job, res) {" },
     { name: "auto-config events handler", kind: "js-block", startAnchor: "function handleEvents(job, req, res) {" },
     { name: "exam list handler", kind: "js-block", startAnchor: "async function handleExamList(req, res) {" },
-    { name: "exam detail handler", kind: "js-block", startAnchor: "async function handleTaskDetail(taskId, req, res) {" },
+    {
+      name: "exam detail handler",
+      kind: "allowlisted-js-block",
+      startAnchor: "async function handleTaskDetail(taskId, req, res) {",
+      allowedChanges: [TASK10_TASK_DETAIL_RESPONSE_ENRICHMENT_CHANGE],
+    },
     { name: "Fanwei preview route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/fanwei/requirement-preview\") {" },
     { name: "Fanwei import route", kind: "js-block", startAnchor: "if (req.method === \"POST\" && url.pathname === \"/api/fanwei/requirement-import\") {" },
     { name: "Fanwei status route", kind: "js-block", startAnchor: "if (req.method === \"GET\" && url.pathname === \"/api/fanwei/auto-read/status\") {" },

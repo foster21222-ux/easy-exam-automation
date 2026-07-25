@@ -145,7 +145,11 @@ import {
   buildProjectWorkflow,
   normalizeFanweiBusinessRequirement,
 } from "./project_workflow.mjs";
-import { defaultOperationBatchName, resolveOperationBatchName } from "./operation_batch_name.mjs";
+import {
+  defaultOperationBatchName,
+  resolveOperationBatchName,
+  withOperationBatchNameEditorDefaults,
+} from "./operation_batch_name.mjs";
 import { buildAutoConfigFromRequirement } from "./requirement_auto_config_adapter.mjs";
 import {
   buildWindowsChromeLaunchArgs,
@@ -4481,7 +4485,10 @@ async function handleTaskDetail(taskId, req, res) {
     syncedTask.candidates = [];
   }
   const enrichedTask = await enrichTaskPaperUnitInfoForDetail(req, syncedTask);
-  return json(res, 200, { ...enrichedTask, sessionChangeFeatureEnabled });
+  return json(res, 200, {
+    ...withOperationBatchNameEditorDefaults(enrichedTask),
+    sessionChangeFeatureEnabled,
+  });
 }
 
 function sessionChangeDisabled(res) {

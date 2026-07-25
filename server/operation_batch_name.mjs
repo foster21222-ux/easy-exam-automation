@@ -30,6 +30,54 @@ export function resolveOperationBatchName(input = {}) {
   };
 }
 
+export function withOperationBatchNameEditorDefaults(task) {
+  const config = task?.config;
+  const fanweiSource = config?.fanweiSource;
+  if (!fanweiSource || typeof fanweiSource !== "object") return task;
+
+  const raw = fanweiSource.raw && typeof fanweiSource.raw === "object" ? fanweiSource.raw : {};
+  const fields = raw.fields && typeof raw.fields === "object" ? raw.fields : {};
+  const businessRequirement = config.businessRequirement && typeof config.businessRequirement === "object"
+    ? config.businessRequirement
+    : {};
+  const requirements = Array.isArray(config.examRequirements) && config.examRequirements.length
+    ? config.examRequirements
+    : config.examRequirement ? [config.examRequirement] : [];
+  const hasRawBatchName = Object.hasOwn(fields, "批次名称");
+  const batchName = resolveOperationBatchName({
+    previousValue: hasRawBatchName ? fields["批次名称"] : businessRequirement.batch_name,
+    previousMode: fanweiSource.batchNameMode || businessRequirement.batch_name_mode,
+    generatedValue: defaultOperationBatchName({
+      customerName: businessRequirement.customer_name || fields["客户名称"],
+      projectName: businessRequirement.project_name || fields["项目名称"],
+      examStart: requirements[0]?.fields?.["考试日期时间"],
+    }),
+    submittedValue: hasRawBatchName ? fields["批次名称"] : businessRequirement.batch_name,
+  });
+  if (
+    hasRawBatchName
+    && fields["批次名称"] === batchName.value
+    && fanweiSource.batchNameMode === batchName.mode
+    && fanweiSource.batchNameAutoValue === batchName.autoValue
+  ) return task;
+
+  return {
+    ...task,
+    config: {
+      ...config,
+      fanweiSource: {
+        ...fanweiSource,
+        batchNameMode: batchName.mode,
+        batchNameAutoValue: batchName.autoValue,
+        raw: {
+          ...raw,
+          fields: { ...fields, "批次名称": batchName.value },
+        },
+      },
+    },
+  };
+}
+
 function text(value) {
   return typeof value === "string" ? value.trim() : "";
 }

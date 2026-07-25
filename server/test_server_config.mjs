@@ -564,6 +564,13 @@ test("candidate import and auto rooms write back task detail state", () => {
     serverSource.indexOf("async function handleTaskHide"),
   );
   assert.ok(detailHandler.includes("syncTaskDetailSessionState(req, task)"));
+  const responseEnrichment = [
+    "return json(res, 200, {",
+    "    ...withOperationBatchNameEditorDefaults(enrichedTask),",
+    "    sessionChangeFeatureEnabled,",
+    "  });",
+  ].join("\n");
+  assert.ok(detailHandler.includes(responseEnrichment));
 });
 
 test("task progress updates stay isolated by requirement index", () => {
