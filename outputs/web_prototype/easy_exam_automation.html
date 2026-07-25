@@ -9502,9 +9502,10 @@
         if (!currentTask || String(currentTask.taskId || "") !== String(incomingTask.taskId || "")) return incomingTask;
         const currentSource = currentTask.config?.fanweiSource;
         const incomingSource = incomingTask.config?.fanweiSource;
-        const currentBatchName = currentSource?.raw?.fields?.["批次名称"];
+        const currentFields = currentSource?.raw?.fields || {};
+        const currentBatchName = currentFields["批次名称"];
         const incomingFields = incomingSource?.raw?.fields || {};
-        if (!String(currentBatchName || "").trim() || Object.hasOwn(incomingFields, "批次名称")) return incomingTask;
+        if (!Object.hasOwn(currentFields, "批次名称") || Object.hasOwn(incomingFields, "批次名称")) return incomingTask;
         return {
           ...incomingTask,
           config: {

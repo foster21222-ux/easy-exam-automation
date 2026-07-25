@@ -1121,6 +1121,22 @@ test("API task updates preserve response-only batch defaults only when the incom
   assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameAutoValue, "");
   assert.strictEqual(rendered.at(-1), incomingEmpty);
 
+  assert.equal(applyOperationBatchUpdateFreshContext({
+    task: {
+      taskId: "project-a",
+      config: {
+        operationBatch: { status: "waiting_for_changes" },
+        fanweiSource: { version: 3, raw: { fields: {} } },
+      },
+    },
+  }), true);
+  const preservedEmptyFields = taskViewState.currentProject.config.fanweiSource.raw.fields;
+  assert.equal(taskViewState.currentProject.config.operationBatch.status, "waiting_for_changes");
+  assert.equal(Object.hasOwn(preservedEmptyFields, "批次名称"), true);
+  assert.equal(preservedEmptyFields["批次名称"], "");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameMode, "auto");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameAutoValue, "");
+
   const incomingManual = {
     taskId: "project-a",
     config: {
