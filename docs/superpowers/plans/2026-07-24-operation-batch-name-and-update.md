@@ -1090,3 +1090,99 @@ Report:
 - current branch and commit IDs;
 - whether real operation write verification remains pending;
 - `git status --short`, including the preserved unrelated evidence file.
+
+---
+
+### Task 10: Legacy Project Batch-Name Editor Compatibility
+
+**Files:**
+- Modify: `server/operation_batch_name.mjs`
+- Modify: `server/easy_exam_server.mjs`
+- Modify: `server/test_operation_batch_name.mjs`
+- Modify: `server/test_server_config.mjs`
+
+**Interfaces:**
+- Consumes: `defaultOperationBatchName({ customerName, projectName, examStart })`.
+- Produces: `withOperationBatchNameEditorDefaults(task)`, a pure task-response
+  enrichment that never mutates or persists the supplied task.
+
+- [ ] **Step 1: Write failing domain tests**
+
+Add tests proving that a Fanwei task whose saved `raw.fields` lacks
+`批次名称` receives a response-only field and automatic metadata, while the
+input object remains unchanged. Add a second assertion that an existing manual
+name and mode are preserved.
+
+- [ ] **Step 2: Write a failing task-detail wiring test**
+
+In `server/test_server_config.mjs`, assert that `handleTaskDetail` applies
+`withOperationBatchNameEditorDefaults` to the enriched task immediately before
+returning JSON.
+
+- [ ] **Step 3: Run tests and verify RED**
+
+```bash
+/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test \
+  server/test_operation_batch_name.mjs \
+  server/test_server_config.mjs
+```
+
+Expected: the new tests fail because the response enrichment does not exist.
+
+- [ ] **Step 4: Implement the pure response enrichment**
+
+In `server/operation_batch_name.mjs`, add
+`withOperationBatchNameEditorDefaults(task)`. It must:
+
+- return non-Fanwei tasks unchanged;
+- clone only the task/config/Fanwei objects it changes;
+- derive the first requirement date from `examRequirements[0]` with singular
+  fallback;
+- preserve existing `raw.fields["批次名称"]` or
+  `businessRequirement.batch_name`;
+- otherwise call `defaultOperationBatchName`;
+- always add the `批次名称` key for a Fanwei project, including an empty value;
+- populate response-only `batchNameMode` and `batchNameAutoValue`;
+- never mutate the input task.
+
+- [ ] **Step 5: Wire task-detail response and verify GREEN**
+
+Import the helper in `server/easy_exam_server.mjs` and return:
+
+```js
+return json(res, 200, {
+  ...withOperationBatchNameEditorDefaults(enrichedTask),
+  sessionChangeFeatureEnabled,
+});
+```
+
+Run:
+
+```bash
+/Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test \
+  server/test_operation_batch_name.mjs \
+  server/test_server_config.mjs \
+  server/test_ui_views.mjs \
+  server/test_pr5_protected_workflows.mjs
+```
+
+Expected: all tests pass with zero failures.
+
+- [ ] **Step 6: Commit, deploy, and verify the historical project**
+
+```bash
+git add \
+  docs/superpowers/specs/2026-07-24-operation-batch-name-and-update-design.md \
+  docs/superpowers/plans/2026-07-24-operation-batch-name-and-update.md \
+  server/operation_batch_name.mjs \
+  server/easy_exam_server.mjs \
+  server/test_operation_batch_name.mjs \
+  server/test_server_config.mjs \
+  server/test_pr5_protected_workflows.mjs
+git commit -m "fix: show batch names for legacy projects"
+```
+
+Then run the full Node and Python suites, deploy with
+`scripts/deploy_launchd_runtime.mjs`, restart the 8765 LaunchAgent, and verify
+project `R0031682` shows a “批次名称” input without having written the database
+before the user saves.
