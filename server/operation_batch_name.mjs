@@ -44,15 +44,16 @@ export function withOperationBatchNameEditorDefaults(task) {
     ? config.examRequirements
     : config.examRequirement ? [config.examRequirement] : [];
   const hasRawBatchName = Object.hasOwn(fields, "批次名称");
+  const savedBatchName = text(fields["批次名称"]) || text(businessRequirement.batch_name);
   const batchName = resolveOperationBatchName({
-    previousValue: hasRawBatchName ? fields["批次名称"] : businessRequirement.batch_name,
-    previousMode: fanweiSource.batchNameMode || businessRequirement.batch_name_mode,
+    previousValue: savedBatchName,
+    previousMode: fanweiSource.batchNameMode || businessRequirement.batch_name_mode || (savedBatchName ? "manual" : ""),
     generatedValue: defaultOperationBatchName({
       customerName: businessRequirement.customer_name || fields["客户名称"],
       projectName: businessRequirement.project_name || fields["项目名称"],
       examStart: requirements[0]?.fields?.["考试日期时间"],
     }),
-    submittedValue: hasRawBatchName ? fields["批次名称"] : businessRequirement.batch_name,
+    submittedValue: savedBatchName,
   });
   if (
     hasRawBatchName

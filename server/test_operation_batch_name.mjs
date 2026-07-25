@@ -99,6 +99,60 @@ test("preserves an existing manual batch name and mode for legacy Fanwei tasks",
   assert.equal(enriched.config.fanweiSource.batchNameMode, "manual");
 });
 
+test("preserves a saved raw legacy batch name when mode metadata is absent", () => {
+  const task = {
+    config: {
+      fanweiSource: {
+        raw: {
+          fields: {
+            "客户名称": "中国邮政集团公司湖北省分公司",
+            "项目名称": "中国邮政集团公司湖北省分公司社会招聘考试",
+            "批次名称": "历史人工名称",
+          },
+        },
+      },
+      businessRequirement: {
+        customer_name: "中国邮政集团公司湖北省分公司",
+        project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
+      },
+      examRequirement: { fields: { "考试日期时间": "2026-08-22 09:00" } },
+    },
+  };
+
+  const enriched = withOperationBatchNameEditorDefaults(task);
+
+  assert.equal(enriched.config.fanweiSource.raw.fields["批次名称"], "历史人工名称");
+  assert.equal(enriched.config.fanweiSource.batchNameMode, "manual");
+  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "湖北邮政社招_2026年8月");
+});
+
+test("preserves a saved business legacy batch name when raw fields lack it", () => {
+  const task = {
+    config: {
+      fanweiSource: {
+        raw: {
+          fields: {
+            "客户名称": "中国邮政集团公司湖北省分公司",
+            "项目名称": "中国邮政集团公司湖北省分公司社会招聘考试",
+          },
+        },
+      },
+      businessRequirement: {
+        customer_name: "中国邮政集团公司湖北省分公司",
+        project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
+        batch_name: "历史业务名称",
+      },
+      examRequirement: { fields: { "考试日期时间": "2026-08-22 09:00" } },
+    },
+  };
+
+  const enriched = withOperationBatchNameEditorDefaults(task);
+
+  assert.equal(enriched.config.fanweiSource.raw.fields["批次名称"], "历史业务名称");
+  assert.equal(enriched.config.fanweiSource.batchNameMode, "manual");
+  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "湖北邮政社招_2026年8月");
+});
+
 test("keeps non-Fanwei tasks unchanged", () => {
   const task = { config: { businessRequirement: { batch_name: "不应补全" } } };
 
