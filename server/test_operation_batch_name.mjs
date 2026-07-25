@@ -60,6 +60,19 @@ test("keeps a first unchanged generated submission in automatic mode", () => {
   });
 });
 
+test("keeps an unchanged saved custom name manual when mode metadata is absent", () => {
+  assert.deepEqual(resolveOperationBatchName({
+    previousValue: "历史人工名称",
+    previousMode: "",
+    generatedValue: "湖北邮政社招_2026年8月",
+    submittedValue: "历史人工名称",
+  }), {
+    value: "历史人工名称",
+    mode: "manual",
+    autoValue: "湖北邮政社招_2026年8月",
+  });
+});
+
 test("adds response-only automatic batch-name editor defaults for legacy Fanwei tasks", () => {
   const task = {
     id: "R0031682",

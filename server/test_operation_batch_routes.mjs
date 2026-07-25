@@ -492,6 +492,76 @@ test("legacy automatic batch name survives workflow reload and unchanged source 
   }
 });
 
+test("legacy custom batch name without mode stays manual on unchanged source save", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-project-source-routes-"));
+  const taskId = "legacy-custom-batch-task";
+  const requirement = {
+    id: "requirement-1",
+    version: 1,
+    fields: {
+      "考试名称": "社会招聘考试",
+      "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+    },
+    config: {},
+  };
+  seedTask(runtimeDir, {
+    taskId,
+    projectName: "中国邮政集团公司湖北省分公司社会招聘考试",
+    config: {
+      fanweiSource: {
+        version: 1,
+        raw: {
+          fields: {
+            "项目名称": "中国邮政集团公司湖北省分公司社会招聘考试",
+            "客户名称": "中国邮政集团公司湖北省分公司",
+            "批次名称": "历史人工名称",
+          },
+        },
+      },
+      businessRequirement: {
+        customer_name: "中国邮政集团公司湖北省分公司",
+        project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
+        batch_name: "历史人工名称",
+      },
+      examRequirements: [requirement],
+      examRequirement: requirement,
+    },
+  });
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+
+    const detailResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}`);
+    const detail = await detailResponse.json();
+    assert.equal(detailResponse.status, 200);
+    assert.equal(detail.config.fanweiSource.raw.fields["批次名称"], "历史人工名称");
+    assert.equal(detail.config.fanweiSource.batchNameMode, "manual");
+
+    const saveResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}/source-snapshot`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "fanwei",
+        fields: detail.config.fanweiSource.raw.fields,
+      }),
+    });
+    const saved = await saveResponse.json();
+    assert.equal(saveResponse.status, 200);
+    assert.equal(saved.task.config.fanweiSource.raw.fields["批次名称"], "历史人工名称");
+    assert.equal(saved.task.config.fanweiSource.batchNameMode, "manual");
+    assert.equal(saved.task.config.businessRequirement.batch_name, "历史人工名称");
+    assert.equal(saved.task.config.businessRequirement.batch_name_mode, "manual");
+    const batchNameAudit = (saved.task.config.projectSourceChangeHistory || [])
+      .flatMap((record) => record.changes || [])
+      .filter((change) => change.field === "泛微需求 / 批次名称");
+    assert.deepEqual(batchNameAudit, []);
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
 test("project source updates recalculate automatic batch names and preserve manual batch names", async () => {
   const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-project-source-routes-"));
   const autoTaskId = "auto-batch-task";

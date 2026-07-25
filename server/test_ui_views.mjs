@@ -1060,6 +1060,74 @@ test("operation batch terminal state preserves fresh context and exact conflict 
   assert.equal(pollSource.includes("result.remainingSeconds - 1"), false);
 });
 
+test("API task updates preserve response-only batch defaults unless incoming has a real value", () => {
+  assert.ok(html.includes("      function mergeProjectTaskResponse(currentTask, incomingTask) {"));
+  const mergeProjectTaskResponse = compileInlineFunction(
+    "      function mergeProjectTaskResponse(currentTask, incomingTask) {",
+    "\n      function applyOperationBatchUpdateFreshContext",
+  );
+  const currentProject = {
+    taskId: "project-a",
+    config: {
+      fanweiSource: {
+        batchNameMode: "auto",
+        batchNameAutoValue: "湖北邮政社招_2026年8月",
+        raw: { fields: { "批次名称": "湖北邮政社招_2026年8月" } },
+      },
+    },
+  };
+  const taskViewState = { currentProject, currentProjectWorkflow: null };
+  const rendered = [];
+  const applyOperationBatchUpdateFreshContext = compileInlineFunction(
+    "      function applyOperationBatchUpdateFreshContext(result = {}) {",
+    "\n      async function loadOperationBatchUpdateState",
+    {
+      taskViewState,
+      mergeProjectTaskResponse,
+      isCurrentProject: (taskId) => taskId === "project-a",
+      renderOperationBatchFromTask: (task) => rendered.push(task),
+      renderProjectWorkflow: () => {},
+    },
+  );
+
+  assert.equal(applyOperationBatchUpdateFreshContext({
+    task: {
+      taskId: "project-a",
+      config: {
+        operationBatch: { status: "update_available" },
+        fanweiSource: { version: 2, raw: { fields: {} } },
+      },
+    },
+  }), true);
+  assert.equal(taskViewState.currentProject.config.operationBatch.status, "update_available");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameMode, "auto");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameAutoValue, "湖北邮政社招_2026年8月");
+
+  const incomingManual = {
+    taskId: "project-a",
+    config: {
+      fanweiSource: {
+        batchNameMode: "manual",
+        batchNameAutoValue: "湖北邮政社招_2026年9月",
+        raw: { fields: { "批次名称": "服务端真实名称" } },
+      },
+    },
+  };
+  assert.equal(applyOperationBatchUpdateFreshContext({ task: incomingManual }), true);
+  assert.strictEqual(taskViewState.currentProject, incomingManual);
+  assert.equal(taskViewState.currentProject.config.fanweiSource.raw.fields["批次名称"], "服务端真实名称");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameMode, "manual");
+  assert.strictEqual(rendered.at(-1), incomingManual);
+
+  assert.equal(
+    (html.match(/taskViewState\.currentProject = mergeProjectTaskResponse\(/g) || []).length,
+    10,
+  );
+  assert.equal(html.includes("taskViewState.currentProject = result.task || task"), false);
+  assert.equal(html.includes("taskViewState.currentProject = error.response.task"), false);
+});
+
 test("personnel operation panel exposes one confirmation and recovery controls", () => {
   assert.ok(html.includes('id="operationPersonnelTaskState"'));
   assert.ok(html.includes('id="operationPersonnelTaskActionBtn"'));
@@ -2282,6 +2350,7 @@ test("operation batch create applies a persisted reconciliation task from a 409 
     "\n      async function reconcileProjectOperationBatch() {",
     {
       taskViewState,
+      mergeProjectTaskResponse: (_current, incoming) => incoming,
       fetchJson: async () => { throw error; },
       isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
       renderOperationBatchFromTask: (task) => renderedTasks.push(task),
@@ -2320,7 +2389,7 @@ test("operation batch create and reconcile directly consume persisted tasks from
   for (const handler of [createHandler, reconcileHandler]) {
     assert.ok(handler.includes("error?.status === 409"));
     assert.ok(handler.includes("error.response?.task"));
-    assert.ok(handler.includes("taskViewState.currentProject = error.response.task"));
+    assert.ok(handler.includes("taskViewState.currentProject = mergeProjectTaskResponse(taskViewState.currentProject, error.response.task)"));
     assert.ok(handler.includes("renderOperationBatchFromTask(taskViewState.currentProject)"));
     assert.ok(handler.includes("renderProjectWorkflow("));
   }
@@ -2349,6 +2418,7 @@ test("operation batch reconciliation only calls its API and applies a persisted 
     "\n      async function recordProjectOperationBatchCode() {",
     {
       taskViewState,
+      mergeProjectTaskResponse: (_current, incoming) => incoming,
       fetchJson: async (url) => {
         requestedUrls.push(url);
         throw error;
@@ -2387,6 +2457,7 @@ test("successful operation batch reconciliation refreshes the complete server wo
     "\n      async function recordProjectOperationBatchCode() {",
     {
       taskViewState,
+      mergeProjectTaskResponse: (_current, incoming) => incoming,
       fetchJson: async () => ({ task: reconciledTask, operationBatchCode: "EZT260003" }),
       isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
       renderOperationBatchFromTask: () => {},
@@ -2424,6 +2495,7 @@ test("operation batch reconciliation does not overwrite a newly selected project
     "\n      async function recordProjectOperationBatchCode() {",
     {
       taskViewState,
+      mergeProjectTaskResponse: (_current, incoming) => incoming,
       fetchJson: async () => ({ task: reconciledTask, operationBatchCode: "EZT260003" }),
       isCurrentProject: (taskId) => taskViewState.currentProjectId === taskId,
       renderOperationBatchFromTask: () => {},
