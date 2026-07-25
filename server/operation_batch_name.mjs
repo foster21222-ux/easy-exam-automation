@@ -16,21 +16,23 @@ export function defaultOperationBatchName({ customerName, projectName, examStart
 
 export function resolveOperationBatchName(input = {}) {
   const generated = text(input.generatedValue);
-  if (input.restoreAuto || text(input.previousMode) !== "manual") {
-    const submitted = text(input.submittedValue);
-    const edited = !input.restoreAuto
-      && text(input.previousMode) !== "auto"
-      && submitted
-      && submitted !== generated;
-    return edited
-      ? { value: submitted, mode: "manual", autoValue: generated }
-      : { value: generated, mode: "auto", autoValue: generated };
+  const previous = text(input.previousValue);
+  const previousMode = text(input.previousMode);
+  const submitted = text(input.submittedValue);
+  if (input.restoreAuto) return { value: generated, mode: "auto", autoValue: generated };
+  if (previousMode === "manual") {
+    return {
+      value: text(input.submittedValue || input.previousValue),
+      mode: "manual",
+      autoValue: generated,
+    };
   }
-  return {
-    value: text(input.submittedValue || input.previousValue),
-    mode: "manual",
-    autoValue: generated,
-  };
+  const edited = previousMode === "auto"
+    ? Boolean(submitted && submitted !== previous && submitted !== generated)
+    : Boolean(submitted && submitted !== generated);
+  return edited
+    ? { value: submitted, mode: "manual", autoValue: generated }
+    : { value: generated, mode: "auto", autoValue: generated };
 }
 
 export function withOperationBatchNameEditorDefaults(task) {

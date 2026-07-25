@@ -60,6 +60,45 @@ test("keeps a first unchanged generated submission in automatic mode", () => {
   });
 });
 
+test("switches automatic mode to manual when the user submits a new custom name", () => {
+  assert.deepEqual(resolveOperationBatchName({
+    previousValue: "湖北邮政社招_2026年8月",
+    previousMode: "auto",
+    generatedValue: "湖北邮政社招_2026年8月",
+    submittedValue: "用户改名",
+  }), {
+    value: "用户改名",
+    mode: "manual",
+    autoValue: "湖北邮政社招_2026年8月",
+  });
+});
+
+test("updates an unchanged automatic value when the generated value changes", () => {
+  assert.deepEqual(resolveOperationBatchName({
+    previousValue: "湖北邮政社招_2026年8月",
+    previousMode: "auto",
+    generatedValue: "湖北邮政社招_2026年9月",
+    submittedValue: "湖北邮政社招_2026年8月",
+  }), {
+    value: "湖北邮政社招_2026年9月",
+    mode: "auto",
+    autoValue: "湖北邮政社招_2026年9月",
+  });
+});
+
+test("keeps an empty automatic submission on the generated value", () => {
+  assert.deepEqual(resolveOperationBatchName({
+    previousValue: "湖北邮政社招_2026年8月",
+    previousMode: "auto",
+    generatedValue: "湖北邮政社招_2026年9月",
+    submittedValue: "",
+  }), {
+    value: "湖北邮政社招_2026年9月",
+    mode: "auto",
+    autoValue: "湖北邮政社招_2026年9月",
+  });
+});
+
 test("keeps an unchanged saved custom name manual when mode metadata is absent", () => {
   assert.deepEqual(resolveOperationBatchName({
     previousValue: "历史人工名称",

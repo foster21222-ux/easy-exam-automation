@@ -1060,7 +1060,7 @@ test("operation batch terminal state preserves fresh context and exact conflict 
   assert.equal(pollSource.includes("result.remainingSeconds - 1"), false);
 });
 
-test("API task updates preserve response-only batch defaults unless incoming has a real value", () => {
+test("API task updates preserve response-only batch defaults only when the incoming property is missing", () => {
   assert.ok(html.includes("      function mergeProjectTaskResponse(currentTask, incomingTask) {"));
   const mergeProjectTaskResponse = compileInlineFunction(
     "      function mergeProjectTaskResponse(currentTask, incomingTask) {",
@@ -1103,6 +1103,23 @@ test("API task updates preserve response-only batch defaults unless incoming has
   assert.equal(taskViewState.currentProject.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
   assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameMode, "auto");
   assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameAutoValue, "湖北邮政社招_2026年8月");
+
+  const incomingEmpty = {
+    taskId: "project-a",
+    config: {
+      fanweiSource: {
+        batchNameMode: "auto",
+        batchNameAutoValue: "",
+        raw: { fields: { "批次名称": "" } },
+      },
+    },
+  };
+  assert.equal(applyOperationBatchUpdateFreshContext({ task: incomingEmpty }), true);
+  assert.strictEqual(taskViewState.currentProject, incomingEmpty);
+  assert.equal(taskViewState.currentProject.config.fanweiSource.raw.fields["批次名称"], "");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameMode, "auto");
+  assert.equal(taskViewState.currentProject.config.fanweiSource.batchNameAutoValue, "");
+  assert.strictEqual(rendered.at(-1), incomingEmpty);
 
   const incomingManual = {
     taskId: "project-a",

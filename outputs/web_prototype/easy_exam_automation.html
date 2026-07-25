@@ -9503,8 +9503,8 @@
         const currentSource = currentTask.config?.fanweiSource;
         const incomingSource = incomingTask.config?.fanweiSource;
         const currentBatchName = currentSource?.raw?.fields?.["批次名称"];
-        const incomingBatchName = incomingSource?.raw?.fields?.["批次名称"];
-        if (!String(currentBatchName || "").trim() || String(incomingBatchName || "").trim()) return incomingTask;
+        const incomingFields = incomingSource?.raw?.fields || {};
+        if (!String(currentBatchName || "").trim() || Object.hasOwn(incomingFields, "批次名称")) return incomingTask;
         return {
           ...incomingTask,
           config: {
@@ -9516,7 +9516,7 @@
               raw: {
                 ...(incomingSource?.raw || {}),
                 fields: {
-                  ...(incomingSource?.raw?.fields || {}),
+                  ...incomingFields,
                   "批次名称": currentBatchName,
                 },
               },
