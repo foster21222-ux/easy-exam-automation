@@ -18,7 +18,7 @@ export function resolveOperationBatchName(input = {}) {
   const generated = text(input.generatedValue);
   if (input.restoreAuto || text(input.previousMode) !== "manual") {
     const submitted = text(input.submittedValue);
-    const edited = submitted && submitted !== text(input.previousValue);
+    const edited = submitted && submitted !== text(input.previousValue) && submitted !== generated;
     return edited
       ? { value: submitted, mode: "manual", autoValue: generated }
       : { value: generated, mode: "auto", autoValue: generated };

@@ -1504,7 +1504,7 @@ async function handleProjectWorkflow(taskId, req, res) {
   const task = await runTaskState("get", { taskId });
   if (!task || !visibleByOwner(auth, req, task)) return notFound(res);
   const batchDraft = buildOperationBatchDraft(task, operationBatchDraftOverridesFromTask(task));
-  return json(res, 200, { ok: true, task, batchDraft, workflow: buildProjectWorkflow(task, batchDraft) });
+  return json(res, 200, { ok: true, task: withOperationBatchNameEditorDefaults(task), batchDraft, workflow: buildProjectWorkflow(task, batchDraft) });
 }
 
 function editableStringRecord(value) {

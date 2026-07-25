@@ -47,6 +47,19 @@ test("manual mode survives recalculation until restore-auto is requested", () =>
   }), { value: "湖北邮政社招_2026年9月", mode: "auto", autoValue: "湖北邮政社招_2026年9月" });
 });
 
+test("keeps a first unchanged generated submission in automatic mode", () => {
+  assert.deepEqual(resolveOperationBatchName({
+    previousValue: "",
+    previousMode: "",
+    generatedValue: "湖北邮政社招_2026年8月",
+    submittedValue: "湖北邮政社招_2026年8月",
+  }), {
+    value: "湖北邮政社招_2026年8月",
+    mode: "auto",
+    autoValue: "湖北邮政社招_2026年8月",
+  });
+});
+
 test("adds response-only automatic batch-name editor defaults for legacy Fanwei tasks", () => {
   const task = {
     id: "R0031682",

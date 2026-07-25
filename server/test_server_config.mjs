@@ -297,8 +297,13 @@ test("Fanwei project cards persist dual snapshots and reuse the same serial card
 });
 
 test("project workflow route returns sourced batch personnel content and archive state", () => {
-  assert.ok(serverSource.includes("async function handleProjectWorkflow(taskId, req, res)"));
-  assert.ok(serverSource.includes("buildProjectWorkflow(task, batchDraft)"));
+  const handler = serverSource.slice(
+    serverSource.indexOf("async function handleProjectWorkflow(taskId, req, res)"),
+    serverSource.indexOf("function editableStringRecord"),
+  );
+  assert.ok(handler.includes("buildOperationBatchDraft(task, operationBatchDraftOverridesFromTask(task))"));
+  assert.ok(handler.includes("buildProjectWorkflow(task, batchDraft)"));
+  assert.ok(handler.includes("task: withOperationBatchNameEditorDefaults(task)"));
   assert.ok(serverSource.includes("/operation-workflow$/"));
 });
 

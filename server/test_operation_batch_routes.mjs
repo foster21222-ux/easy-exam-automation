@@ -407,6 +407,91 @@ test("operation batch draft route does not restore a stale saved batch name", as
   }
 });
 
+test("legacy automatic batch name survives workflow reload and unchanged source save", async () => {
+  const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-project-source-routes-"));
+  const taskId = "legacy-auto-batch-task";
+  const requirement = {
+    id: "requirement-1",
+    version: 1,
+    fields: {
+      "考试名称": "社会招聘考试",
+      "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+    },
+    config: {},
+  };
+  seedTask(runtimeDir, {
+    taskId,
+    projectName: "中国邮政集团公司湖北省分公司社会招聘考试",
+    config: {
+      fanweiSource: {
+        version: 1,
+        raw: {
+          fields: {
+            "项目名称": "中国邮政集团公司湖北省分公司社会招聘考试",
+            "客户名称": "中国邮政集团公司湖北省分公司",
+          },
+        },
+      },
+      businessRequirement: {
+        customer_name: "中国邮政集团公司湖北省分公司",
+        project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
+      },
+      examRequirements: [requirement],
+      examRequirement: requirement,
+    },
+  });
+  let child;
+  try {
+    const server = await startServer(runtimeDir);
+    child = server.child;
+
+    const detailResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}`);
+    const detail = await detailResponse.json();
+    assert.equal(detailResponse.status, 200);
+    assert.equal(detail.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
+    assert.equal(detail.config.fanweiSource.batchNameMode, "auto");
+
+    const workflowResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}/operation-workflow`);
+    const workflowBody = await workflowResponse.json();
+    assert.equal(workflowResponse.status, 200);
+    assert.equal(workflowBody.task.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
+    assert.equal(workflowBody.task.config.fanweiSource.batchNameMode, "auto");
+
+    const saveResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}/source-snapshot`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "fanwei",
+        fields: detail.config.fanweiSource.raw.fields,
+      }),
+    });
+    const saved = await saveResponse.json();
+    assert.equal(saveResponse.status, 200);
+    assert.equal(saved.task.config.fanweiSource.batchNameMode, "auto");
+    assert.equal(saved.task.config.businessRequirement.batch_name_mode, "auto");
+
+    const dateResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}/source-snapshot`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "examRequirement",
+        requirementIndex: 0,
+        fields: {
+          "考试名称": "社会招聘考试",
+          "考试日期时间": "2026/09/22 09:00 - 2026/09/22 11:00",
+        },
+      }),
+    });
+    const dated = await dateResponse.json();
+    assert.equal(dateResponse.status, 200);
+    assert.equal(dated.task.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年9月");
+    assert.equal(dated.task.config.fanweiSource.batchNameMode, "auto");
+  } finally {
+    await stopServer(child);
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
+});
+
 test("project source updates recalculate automatic batch names and preserve manual batch names", async () => {
   const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "easy-exam-project-source-routes-"));
   const autoTaskId = "auto-batch-task";
