@@ -833,6 +833,21 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     let releaseProfile;
     try {
       releaseProfile = coordinator.acquireProfile();
+      const freshTask = await readTask(taskId);
+      const freshAttempt = freshTask?.config?.operationPersonnelTask?.activeAttempt;
+      if (!freshTask || freshAttempt?.attemptId !== attemptId) return;
+      const freshManaged = requireManagedSchedules(freshTask);
+      const freshManagedFingerprint = fingerprint(
+        managedScheduleProjection(freshManaged.schedules),
+      );
+      if (freshAttempt.previewBinding?.managedScheduleFingerprint
+          !== freshManagedFingerprint) {
+        throw serviceError(
+          "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+          409,
+          "批次受管日程在排队期间发生变化，请重新检查",
+        );
+      }
       const running = await updateAttemptState(taskId, attemptId, async (state) => ({
         ...state,
         status: "applying_config",
@@ -864,6 +879,14 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     } finally {
       releaseProfile?.();
       activeAttemptIds.delete(attemptId);
+    }
+  }
+
+  async function handleQueuedAttemptRejection(taskId, attemptId, error) {
+    try {
+      await failAttempt(taskId, attemptId, error);
+    } catch {
+      // The deferred job has no caller; a second persistence failure cannot be recovered here.
     }
   }
 
@@ -1046,7 +1069,9 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       activeAttemptIds.add(attemptId);
       return attempt;
     });
-    defer(() => runQueuedAttempt(taskId, queued.attemptId));
+    defer(() => runQueuedAttempt(taskId, queued.attemptId).catch(
+      (error) => handleQueuedAttemptRejection(taskId, queued.attemptId, error),
+    ));
     return { statusCode: 202, attemptId: queued.attemptId };
   }
 

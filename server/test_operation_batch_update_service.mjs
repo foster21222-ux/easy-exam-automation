@@ -75,6 +75,7 @@ function createHarness(options = {}) {
   const updateTaskConfig = async (taskId, patch) => {
     const current = tasks.get(taskId);
     if (!current) return null;
+    await options.beforeUpdateTaskConfig?.(patch, current);
     const next = {
       ...current,
       config: { ...current.config, ...structuredClone(patch) },
@@ -104,7 +105,7 @@ function createHarness(options = {}) {
     },
     now: () => nowValue,
     makeAttemptId: () => `attempt-${updateInstructions.length + jobs.length + 1}`,
-    defer: (job) => jobs.push(job),
+    defer: options.defer || ((job) => jobs.push(job)),
   });
   return {
     service,
@@ -592,4 +593,32 @@ test("queued updates hold the shared automation lock and the per-project lock", 
   assert.equal(harness.taskInFlight.size, 0);
   const taskBPreview = await harness.service.preview("task-b", actor);
   assert.equal(taskBPreview.action, "update");
+});
+
+test("deferred batch update handles a transient attempt persistence rejection", async () => {
+  const launched = [];
+  let rejectApplyingPersistence = true;
+  const { harness, preview } = await previewForChangedTask({
+    defer: (job) => launched.push(Promise.resolve().then(job)),
+    beforeUpdateTaskConfig: async (patch) => {
+      const checkpoint = patch.operationBatch?.updateAttempts?.at(-1)?.checkpoint;
+      if (rejectApplyingPersistence && checkpoint === "applying") {
+        rejectApplyingPersistence = false;
+        throw new Error("transient persistence failure");
+      }
+    },
+  });
+  const started = await harness.service.start(
+    "task-a",
+    { previewToken: preview.previewToken },
+    actor,
+  );
+
+  await assert.doesNotReject(launched[0]);
+  const { attempt } = await harness.service.attempt("task-a", started.attemptId, actor);
+  assert.equal(attempt.status, "failed");
+  assert.equal(attempt.checkpoint, "failed");
+  assert.equal(attempt.error.message, "transient persistence failure");
+  assert.equal(harness.profileInFlight.size, 0);
+  assert.equal(harness.taskInFlight.size, 0);
 });

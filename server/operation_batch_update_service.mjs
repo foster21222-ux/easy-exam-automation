@@ -565,6 +565,21 @@ export function createOperationBatchUpdateService(dependencies = {}) {
     }
   }
 
+  async function handleDeferredAttemptRejection(taskId, attemptId, error) {
+    try {
+      await persistAttempt(taskId, attemptId, {
+        status: "failed",
+        checkpoint: "failed",
+        completedAt: nowIso(now),
+        error: serializedError(error, "OPERATION_BATCH_UPDATE_FAILED"),
+      }, {
+        status: "update_failed",
+      });
+    } catch {
+      // The deferred job has no caller; a second persistence failure cannot be recovered here.
+    }
+  }
+
   async function start(taskId, input = {}, actor) {
     const release = acquireAutomation(coordinator, taskId);
     let transferred = false;
@@ -667,7 +682,9 @@ export function createOperationBatchUpdateService(dependencies = {}) {
       };
       transferred = true;
       try {
-        defer(() => runAttempt(taskId, attemptId, instruction, release));
+        defer(() => runAttempt(taskId, attemptId, instruction, release).catch(
+          (error) => handleDeferredAttemptRejection(taskId, attemptId, error),
+        ));
       } catch (error) {
         transferred = false;
         throw error;

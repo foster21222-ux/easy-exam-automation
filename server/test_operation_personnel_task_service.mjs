@@ -305,6 +305,7 @@ function serviceHarness(options = {}) {
 
   const updateTaskConfig = async (taskId, config) => {
     assert.equal(taskId, task.taskId);
+    await options.beforeUpdateTaskConfig?.(config, task);
     persistedStates.push(structuredClone(config.operationPersonnelTask));
     task.config = { ...task.config, ...structuredClone(config) };
     return task;
@@ -371,7 +372,7 @@ function serviceHarness(options = {}) {
     now: () => currentTime,
     makeToken: () => `preview-${++tokenCounter}`,
     makeAttemptId: () => `attempt-${++attemptCounter}`,
-    defer: (job) => deferredJobs.push(job),
+    defer: options.defer || ((job) => deferredJobs.push(job)),
   });
 
   return {
@@ -1193,6 +1194,65 @@ test("send persists queued attempt and returns before the runner completes", asy
   assert.equal(harness.task.config.operationPersonnelTask.activeAttempt.status, "queued");
   assert.equal(harness.runnerCalls.includes("attempt"), false);
   pending.resolve(successfulAttemptResult());
+});
+
+test("queued send rechecks managed schedules after acquiring the profile lock", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+
+  harness.task.config.examRequirement.fields["考试日期时间"] =
+    "2026/08/22 10:00 - 2026/08/22 12:00";
+  await harness.runDeferred();
+
+  assert.deepEqual(harness.runnerCalls, ["inspection"]);
+  assert.equal(
+    harness.task.config.operationPersonnelTask.activeAttempt.status,
+    "failed_resumable",
+  );
+  assert.equal(
+    harness.task.config.operationPersonnelTask.activeAttempt.error.code,
+    "PERSONNEL_BATCH_UPDATE_REQUIRED",
+  );
+  assert.deepEqual(harness.profileLocks.slice(-2), ["acquire", "release"]);
+});
+
+test("deferred send handles a transient failure while persisting runner failure", async () => {
+  const launched = [];
+  let rejectFailurePersistence = true;
+  const harness = serviceHarness({
+    runnerResult: async () => {
+      throw new Error("runner stopped");
+    },
+    beforeUpdateTaskConfig: async (config) => {
+      if (rejectFailurePersistence
+          && config.operationPersonnelTask?.activeAttempt?.status === "failed_resumable") {
+        rejectFailurePersistence = false;
+        throw new Error("transient persistence failure");
+      }
+    },
+    defer: (job) => launched.push(Promise.resolve().then(job)),
+  });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+
+  await assert.doesNotReject(launched[0]);
+  assert.equal(
+    harness.task.config.operationPersonnelTask.activeAttempt.status,
+    "failed_resumable",
+  );
+  assert.equal(
+    harness.task.config.operationPersonnelTask.activeAttempt.error.message,
+    "transient persistence failure",
+  );
 });
 
 test("resend requires a non-empty reviewed change summary", async () => {
