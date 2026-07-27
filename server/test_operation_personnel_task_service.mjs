@@ -110,7 +110,12 @@ function inspectionFor(task, environment = "test") {
       systemType: "",
       published: false,
     },
-    schedules: [],
+    schedules: [{
+      scheduleCode: 17,
+      subjectName: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+    }],
     personnel: {},
     dates: {},
     requirements: [],
@@ -446,7 +451,7 @@ test("preview blocks when batch update is available or failed", async () => {
   }
 });
 
-test("preview exposes managed schedules without schedule write codes", async () => {
+test("preview exposes managed schedules and read-only operation schedule codes", async () => {
   const harness = serviceHarness({ batchScheduleStatus: "success" });
   const preview = await harness.service.preview("task-a", ADMIN);
   assert.deepEqual(preview.state.draft.managedSchedules, [{
@@ -456,6 +461,32 @@ test("preview exposes managed schedules without schedule write codes", async () 
     end: "2026-08-22T11:00:00",
   }]);
   assert.equal(Object.hasOwn(preview.state.draft.managedSchedules[0], "scheduleCode"), false);
+  assert.deepEqual(preview.state.draft.displaySchedules, [{
+    scheduleCode: 17,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }]);
+  assert.equal(Object.hasOwn(preview.state.draft.displaySchedules[0], "requirementIndex"), false);
+});
+
+test("preview rejects missing operation schedule codes before any send", async () => {
+  const harness = serviceHarness();
+  const inspection = inspectionFor(harness.task);
+  inspection.schedules = [{
+    scheduleCode: "",
+    subjectName: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }];
+  harness.setInspection(inspection);
+
+  await assert.rejects(
+    harness.service.preview("task-a", ADMIN),
+    { code: "PERSONNEL_BATCH_SCHEDULE_CONFLICT", status: 409 },
+  );
+  assert.deepEqual(harness.attempts, []);
+  assert.equal(harness.deferredJobs.length, 0);
 });
 
 test("preview rechecks the batch schedule gate before persisting", async () => {
@@ -521,9 +552,9 @@ test("send keeps managed schedules outside the operation target and forwards the
     scheduleEntryId: "visible-1",
     scheduleCode: 88,
     subjectCode: "C001",
-    subjectName: "综合能力",
-    start: "2026-08-22 09:00:00",
-    end: "2026-08-22 11:00:00",
+    subjectName: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
     durationMinutes: 120,
     earlyLoginMinutes: 30,
   }];
@@ -565,9 +596,9 @@ test("ordinary resend uses draft changes even when operation configuration is un
     scheduleEntryId: "visible-1",
     scheduleCode: 88,
     subjectCode: "C001",
-    subjectName: "综合能力",
-    start: "2026-08-22 09:00:00",
-    end: "2026-08-22 11:00:00",
+    subjectName: "湖北邮政招聘考试",
+    start: "2026-08-22T10:00:00",
+    end: "2026-08-22T12:00:00",
     durationMinutes: 120,
     earlyLoginMinutes: 30,
   }];
@@ -646,6 +677,14 @@ test("changing requirement 2 invalidates a preview even when the singular legacy
       },
     ],
   };
+  const inspection = inspectionFor(harness.task);
+  inspection.schedules.push({
+    scheduleCode: 18,
+    subjectName: "湖北邮政招聘考试（二）",
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  });
+  harness.setInspection(inspection);
   const preview = await harness.service.preview("task-a", owner(), {});
   harness.task.config.examRequirements[1].version += 1;
 
@@ -740,9 +779,9 @@ test("test external baseline excludes allowed identity and equivalent schedule d
     scheduleEntryId: "",
     scheduleCode: schedule.scheduleCode,
     subjectCode: "",
-    subjectName: schedule.subjectName,
-    start: schedule.start.replaceAll("/", "-"),
-    end: schedule.end.replaceAll("/", "-"),
+    subjectName: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
     durationMinutes: 120,
     earlyLoginMinutes: schedule.earlyLoginMinutes,
   }));
@@ -789,7 +828,12 @@ test("unchanged external baseline blocks before directory inspection", async () 
   });
   const current = inspectionFor(harness.task, "test");
   current.batch.published = true;
-  current.schedules = structuredClone(draft.schedules);
+  current.schedules = draft.schedules.map((schedule) => ({
+    ...schedule,
+    subjectName: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }));
   current.personnel = structuredClone(draft.personnel);
   current.dates = structuredClone(draft.dates);
   current.requirements = requirementsForPersonnel(draft.personnel);

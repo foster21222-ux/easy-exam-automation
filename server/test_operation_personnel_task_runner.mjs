@@ -8,8 +8,30 @@ import {
   normalizeOperationPersonnelSnapshot,
   operationPersonnelBatchIdentityFromVisibleRaw,
   operationPersonnelConflicts,
+  operationPersonnelDisplaySchedules,
   runOperationPersonnelInspection,
 } from "./operation_personnel_task_runner.mjs";
+
+test("display schedules use exact operation schedule codes", () => {
+  assert.deepEqual(operationPersonnelDisplaySchedules(
+    [{ requirementIndex: 0, name: "综合能力", start: "2026-08-22 09:00", end: "2026-08-22 11:00" }],
+    [{ scheduleCode: 17, subjectName: "综合能力", start: "2026-08-22 09:00", end: "2026-08-22 11:00" }],
+  ), [{
+    scheduleCode: 17,
+    name: "综合能力",
+    start: "2026-08-22 09:00",
+    end: "2026-08-22 11:00",
+  }]);
+});
+
+test("display schedules reject missing duplicate or unmatched operation codes", () => {
+  const managed = [{ requirementIndex: 0, name: "综合能力", start: "2026-08-22 09:00", end: "2026-08-22 11:00" }];
+  assert.throws(() => operationPersonnelDisplaySchedules(managed, []), /日程/);
+  assert.throws(() => operationPersonnelDisplaySchedules(managed, [
+    { scheduleCode: 17, subjectName: "综合能力", start: "2026-08-22 09:00", end: "2026-08-22 11:00" },
+    { scheduleCode: 17, subjectName: "综合能力", start: "2026-08-22 09:00", end: "2026-08-22 11:00" },
+  ]), /重复/);
+});
 
 test("current operation detail header maps exact visible batch identity", () => {
   assert.deepEqual(operationPersonnelBatchIdentityFromVisibleRaw({
@@ -2261,7 +2283,7 @@ test("inspection reads current task sheet sections after verifying the batch det
   assert.deepEqual(snapshot.directoryMatch, { to: [], cc: [] });
 });
 
-test("unpublished initial preview reads only batch identity without opening a task sheet", async () => {
+test("unpublished initial preview reads schedules without opening a task sheet", async () => {
   const opened = [];
   const snapshot = await inspectOperationPersonnelTask(
     {},
@@ -2278,9 +2300,12 @@ test("unpublished initial preview reads only batch identity without opening a ta
         batchName: "目标批次",
         published: false,
       }),
-      readSchedules: async () => {
-        throw new Error("未发布预览不应读取考试日程");
-      },
+      readSchedules: async () => [{
+        scheduleCode: 17,
+        subjectName: "综合能力",
+        start: "2026-08-22 09:00",
+        end: "2026-08-22 11:00",
+      }],
       readPersonnel: async () => {
         throw new Error("未发布预览不应读取人员配置");
       },
@@ -2305,6 +2330,16 @@ test("unpublished initial preview reads only batch identity without opening a ta
 
   assert.deepEqual(opened, ["batch"]);
   assert.equal(snapshot.batch.published, false);
+  assert.deepEqual(snapshot.schedules, [{
+    scheduleEntryId: "",
+    scheduleCode: 17,
+    subjectCode: "",
+    subjectName: "综合能力",
+    start: "2026-08-22 09:00",
+    end: "2026-08-22 11:00",
+    durationMinutes: "",
+    earlyLoginMinutes: "",
+  }]);
   assert.equal(snapshot.personnel.platform, "");
   assert.deepEqual(snapshot.taskSheet, { type: "", conditions: [], content: "" });
   assert.deepEqual(snapshot.sendRecords, []);

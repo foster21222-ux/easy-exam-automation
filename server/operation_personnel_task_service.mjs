@@ -9,6 +9,7 @@ import {
 import {
   normalizeOperationPersonnelSnapshot,
   operationPersonnelConflicts,
+  operationPersonnelDisplaySchedules,
 } from "./operation_personnel_task_runner.mjs";
 import { operationPersonnelScheduleGate } from "./operation_personnel_schedule_gate.mjs";
 
@@ -558,6 +559,10 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         batchCode: draft.batch.code,
         allowUnpublishedPreview: true,
       }));
+      draft.displaySchedules = operationPersonnelDisplaySchedules(
+        draft.managedSchedules,
+        snapshot.schedules,
+      );
       externalBaseline = !existing.lastSuccessfulFingerprint
         && snapshot.sendRecords.length > 0;
       kind = existing.lastSuccessfulFingerprint || externalBaseline

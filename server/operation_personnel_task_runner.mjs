@@ -57,10 +57,31 @@ function assertScheduleCodes(schedules = []) {
   const seen = new Set();
   for (const schedule of schedules) {
     const code = text(numberOrText(schedule?.scheduleCode));
-    if (!code) throw new Error("考试日程缺少日程代码，不能进行精确比较");
-    if (seen.has(code)) throw new Error(`考试日程代码 ${code} 重复，不能进行精确比较`);
+    if (!code) throw batchScheduleConflict("考试日程缺少日程代码，不能进行精确比较");
+    if (seen.has(code)) throw batchScheduleConflict(`考试日程代码 ${code} 重复，不能进行精确比较`);
     seen.add(code);
   }
+}
+
+export function operationPersonnelDisplaySchedules(managedSchedules = [], operationSchedules = []) {
+  const actual = operationSchedules.map(normalizeSchedule);
+  assertScheduleCodes(actual);
+  return managedSchedules.map((managed) => {
+    const matches = actual.filter((schedule) => (
+      text(schedule.subjectName) === text(managed.name)
+      && text(schedule.start) === text(managed.start)
+      && text(schedule.end) === text(managed.end)
+    ));
+    if (matches.length !== 1) {
+      throw batchScheduleConflict("运控日程代码缺失、重复或不能与易考需求一一对应");
+    }
+    return {
+      scheduleCode: matches[0].scheduleCode,
+      name: managed.name,
+      start: managed.start,
+      end: managed.end,
+    };
+  });
 }
 
 function normalizePersonnel(raw = {}) {
@@ -1156,9 +1177,10 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     text(instruction.environment),
   );
   if (instruction.allowUnpublishedPreview === true && batch.published !== true) {
+    const schedules = await read("readSchedules", "schedules", []);
     return normalizeOperationPersonnelSnapshot({
       batch,
-      schedules: [],
+      schedules,
       personnel: {},
       dates: {},
       requirements: [],
