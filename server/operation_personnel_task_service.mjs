@@ -833,30 +833,35 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     let releaseProfile;
     try {
       releaseProfile = coordinator.acquireProfile();
-      const freshTask = await readTask(taskId);
-      const freshAttempt = freshTask?.config?.operationPersonnelTask?.activeAttempt;
-      if (!freshTask || freshAttempt?.attemptId !== attemptId) return;
-      const freshManaged = requireManagedSchedules(freshTask);
-      const freshManagedFingerprint = fingerprint(
-        managedScheduleProjection(freshManaged.schedules),
-      );
-      if (freshAttempt.previewBinding?.managedScheduleFingerprint
-          !== freshManagedFingerprint) {
-        throw serviceError(
-          "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
-          409,
-          "批次受管日程在排队期间发生变化，请重新检查",
+      const running = await withTaskLock(taskId, async () => {
+        const freshTask = await readTask(taskId);
+        const freshAttempt = freshTask?.config?.operationPersonnelTask?.activeAttempt;
+        if (!freshTask || freshAttempt?.attemptId !== attemptId) return null;
+        const freshManaged = requireManagedSchedules(freshTask);
+        const freshManagedFingerprint = fingerprint(
+          managedScheduleProjection(freshManaged.schedules),
         );
-      }
-      const running = await updateAttemptState(taskId, attemptId, async (state) => ({
-        ...state,
-        status: "applying_config",
-        activeAttempt: {
-          ...state.activeAttempt,
-          status: "running",
-          startedAt: state.activeAttempt.startedAt || nowIso(now),
-        },
-      }));
+        if (freshAttempt.previewBinding?.managedScheduleFingerprint
+            !== freshManagedFingerprint) {
+          throw serviceError(
+            "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+            409,
+            "批次受管日程在排队期间发生变化，请重新检查",
+          );
+        }
+        const state = normalizedState(freshTask, environment);
+        const next = {
+          ...state,
+          status: "applying_config",
+          activeAttempt: {
+            ...state.activeAttempt,
+            status: "running",
+            startedAt: state.activeAttempt.startedAt || nowIso(now),
+          },
+        };
+        await persistState(taskId, next);
+        return next;
+      });
       if (!running) return;
       const attempt = running.activeAttempt;
       const result = await runAttempt({

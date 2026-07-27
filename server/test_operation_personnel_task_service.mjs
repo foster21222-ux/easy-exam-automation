@@ -323,6 +323,7 @@ function serviceHarness(options = {}) {
       acquireTask(taskId) {
         assert.equal(taskId, task.taskId);
         taskLocks.push("acquire");
+        options.onTaskLockAcquire?.(task);
         return () => taskLocks.push("release");
       },
     },
@@ -1221,6 +1222,39 @@ test("queued send rechecks managed schedules after acquiring the profile lock", 
   assert.deepEqual(harness.profileLocks.slice(-2), ["acquire", "release"]);
 });
 
+test("queued schedule gate and running transition share one task lock", async () => {
+  let changedDuringQueuedLock = false;
+  const harness = serviceHarness({
+    onTaskLockAcquire: (task) => {
+      if (!changedDuringQueuedLock
+          && task.config.operationPersonnelTask?.activeAttempt?.status === "queued") {
+        changedDuringQueuedLock = true;
+        task.config.examRequirement.fields["考试日期时间"] =
+          "2026/08/22 10:00 - 2026/08/22 12:00";
+      }
+    },
+  });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+
+  await harness.runDeferred();
+
+  assert.equal(changedDuringQueuedLock, true);
+  assert.deepEqual(harness.runnerCalls, ["inspection"]);
+  assert.equal(
+    harness.task.config.operationPersonnelTask.activeAttempt.status,
+    "failed_resumable",
+  );
+  assert.equal(
+    harness.task.config.operationPersonnelTask.activeAttempt.error.code,
+    "PERSONNEL_BATCH_UPDATE_REQUIRED",
+  );
+});
+
 test("deferred send handles a transient failure while persisting runner failure", async () => {
   const launched = [];
   let rejectFailurePersistence = true;
@@ -1401,6 +1435,33 @@ test("failure classification preserves the irreversible submit boundary", async 
       harness.task.config.operationPersonnelTask.status,
       checkpoint.name === "submit_send" ? "result_unknown" : "failed_resumable",
     );
+  }
+});
+
+test("pre-click schedule and recipient drift remain resumable", async () => {
+  for (const code of [
+    "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+    "PERSONNEL_OPERATION_CONFLICT",
+  ]) {
+    const harness = serviceHarness({
+      runnerResult: async () => {
+        throw Object.assign(new Error("final readback drift"), { code });
+      },
+    });
+    const preview = await harness.service.preview("task-a", owner(), {});
+    await harness.service.send("task-a", owner(), {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+    });
+
+    await harness.runDeferred();
+
+    const state = harness.task.config.operationPersonnelTask;
+    assert.equal(state.checkpoints.submit_send, undefined, code);
+    assert.equal(state.status, "failed_resumable", code);
+    assert.equal(state.activeAttempt.status, "failed_resumable", code);
+    assert.equal(state.activeAttempt.error.code, code);
   }
 });
 
