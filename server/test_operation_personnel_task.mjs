@@ -168,6 +168,49 @@ test("fingerprints stable task material and summarizes a changed deadline", () =
   assert.equal(diffOperationPersonnelTaskDrafts(before, after).summary, "人员落实结束日期：2026-08-19 → 2026-08-20");
 });
 
+test("managed schedules participate in the personnel task fingerprint", () => {
+  const before = buildOperationPersonnelTaskDraft(baseTask, {
+    environment: "test",
+    now: "2026-07-23T02:00:00.000Z",
+  });
+  before.managedSchedules = [{
+    requirementIndex: 0,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }];
+  const after = structuredClone(before);
+  after.managedSchedules[0].start = "2026-08-22T10:00:00";
+  after.managedSchedules[0].end = "2026-08-22T12:00:00";
+
+  assert.notEqual(
+    operationPersonnelTaskFingerprint(before),
+    operationPersonnelTaskFingerprint(after),
+  );
+});
+
+test("managed schedule changes appear in the personnel draft change summary", () => {
+  const before = {
+    managedSchedules: [{
+      requirementIndex: 0,
+      name: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+    }],
+  };
+  const after = structuredClone(before);
+  after.managedSchedules[0].start = "2026-08-22T10:00:00";
+  after.managedSchedules[0].end = "2026-08-22T12:00:00";
+
+  const changes = diffOperationPersonnelTaskDrafts(before, after);
+  assert.deepEqual(changes.fields, [{
+    path: "managedSchedules",
+    before: before.managedSchedules,
+    after: after.managedSchedules,
+  }]);
+  assert.equal(changes.summary, "批次受管日程：已更新");
+});
+
 test("does not expose a resend action for the current successful fingerprint", () => {
   const draft = buildOperationPersonnelTaskDraft(baseTask, { environment: "test", now: "2026-07-23T02:00:00.000Z" });
   const task = structuredClone(baseTask);

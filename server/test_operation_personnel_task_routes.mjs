@@ -41,8 +41,23 @@ function baseTask(taskId = "task-a", ownerEmail = "") {
     config: {
       requirementRequestId: "",
       operationBatchCode: "EZT260003",
-      operationBatch: { code: "EZT260003", status: "created_unpublished" },
+      operationBatch: {
+        code: "EZT260003",
+        status: "success",
+        managedSnapshot: {
+          batchName: "湖北邮政招聘考试",
+          examStartDate: "2026-08-22",
+          examEndDate: "2026-08-22",
+          schedules: [{
+            requirementIndex: 0,
+            name: "湖北邮政招聘考试",
+            start: "2026-08-22T09:00:00",
+            end: "2026-08-22T11:00:00",
+          }],
+        },
+      },
       businessRequirement: {
+        batch_name: "湖北邮政招聘考试",
         operation_serial_number: "R0042483",
         project_code: "P260001",
         project_name: "示例考试",
@@ -51,7 +66,10 @@ function baseTask(taskId = "task-a", ownerEmail = "") {
       examRequirement: {
         id: "requirement-1",
         version: 3,
-        fields: { "考试名称": "示例考试", "考试日期时间": "2026/08/22 09:00-11:00" },
+        fields: {
+          "考试名称": "湖北邮政招聘考试",
+          "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+        },
         config: {
           startTimeDisplay: "2026/08/22 09:00",
           endTimeDisplay: "2026/08/22 11:00",
@@ -78,6 +96,9 @@ function previewState(task, {
     environment: "test",
     now: "2026-07-23T02:00:00.000Z",
   });
+  draft.managedSchedules = structuredClone(
+    task.config.operationBatch.managedSnapshot.schedules,
+  );
   const snapshot = normalizeOperationPersonnelSnapshot({
     batch: {
       ...draft.batch,
@@ -117,6 +138,7 @@ function previewState(task, {
     draftVersion: 1,
     fingerprint: operationPersonnelTaskFingerprint(draft),
     recipients: { to: draft.directoryMatch.to, cc: [] },
+    managedSchedules: structuredClone(draft.managedSchedules),
     changeSummary: "",
     createdAt: "2026-07-23T02:00:00.000Z",
     startedAt: "2026-07-23T02:00:01.000Z",
@@ -127,6 +149,7 @@ function previewState(task, {
       baselineSnapshotFingerprint: fingerprint(snapshot),
       operationSnapshotFingerprint: fingerprint(snapshot),
       directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
+      managedScheduleFingerprint: fingerprint(draft.managedSchedules),
     },
     verification: {
       phase: "reopened",
@@ -162,6 +185,7 @@ function previewState(task, {
       baselineSnapshotFingerprint: fingerprint(snapshot),
       operationSnapshotFingerprint: fingerprint(snapshot),
       directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
+      managedScheduleFingerprint: fingerprint(draft.managedSchedules),
     },
     activeAttempt,
     sendHistory: [],

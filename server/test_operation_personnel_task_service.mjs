@@ -7,6 +7,17 @@ import { normalizeOperationPersonnelSnapshot } from "./operation_personnel_task_
 import { createOperationPersonnelTaskService } from "./operation_personnel_task_service.mjs";
 
 const START = Date.parse("2026-07-23T02:00:00.000Z");
+const ADMIN = { role: "admin" };
+
+function managedSchedule(overrides = {}) {
+  return {
+    requirementIndex: 0,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+    ...overrides,
+  };
+}
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -34,8 +45,18 @@ function baseTask() {
     config: {
       requirementRequestId: "requirement-a",
       operationBatchCode: "EZT260003",
-      operationBatch: { code: "EZT260003", status: "created_unpublished" },
+      operationBatch: {
+        code: "EZT260003",
+        status: "success",
+        managedSnapshot: {
+          batchName: "湖北邮政招聘考试",
+          examStartDate: "2026-08-22",
+          examEndDate: "2026-08-22",
+          schedules: [managedSchedule()],
+        },
+      },
       businessRequirement: {
+        batch_name: "湖北邮政招聘考试",
         operation_serial_number: "R0042483",
         project_code: "P260001",
         project_name: "示例考试",
@@ -44,7 +65,10 @@ function baseTask() {
       examRequirement: {
         id: "requirement-1",
         version: 3,
-        fields: { "考试名称": "示例考试", "考试日期时间": "2026/08/22 09:00-11:00" },
+        fields: {
+          "考试名称": "湖北邮政招聘考试",
+          "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+        },
         config: {
           startTimeDisplay: "2026/08/22 09:00",
           endTimeDisplay: "2026/08/22 11:00",
@@ -134,15 +158,32 @@ function serviceHarness(options = {}) {
   const deferredJobs = [];
   const profileLocks = [];
   const taskLocks = [];
+  const persistedStates = [];
   let tokenCounter = 0;
   let attemptCounter = 0;
   let inspection = inspectionFor(task, options.environment || "test");
+  const setBatchScheduleStatus = (status) => {
+    task.config.operationBatch.status = status;
+    task.config.operationBatch.managedSnapshot = {
+      batchName: "湖北邮政招聘考试",
+      examStartDate: "2026-08-22",
+      examEndDate: "2026-08-22",
+      schedules: [managedSchedule(
+        status === "update_available" ? { start: "2026-08-22T08:00:00" } : {},
+      )],
+    };
+  };
+  setBatchScheduleStatus(options.batchScheduleStatus || "success");
+  let batchChangedAfterInspection = false;
 
   if (options.alreadySent || options.changedAfterSend) {
     const currentDraft = buildOperationPersonnelTaskDraft(task, {
       environment: options.environment || "test",
       now: new Date(START).toISOString(),
     });
+    currentDraft.managedSchedules = structuredClone(
+      task.config.operationBatch.managedSnapshot.schedules,
+    );
     task.config.operationPersonnelTask = {
       schemaVersion: 1,
       environment: options.environment || "test",
@@ -169,6 +210,9 @@ function serviceHarness(options = {}) {
       environment: options.environment || "test",
       now: new Date(START).toISOString(),
     });
+    draft.managedSchedules = structuredClone(
+      task.config.operationBatch.managedSnapshot.schedules,
+    );
     const operationSnapshot = normalizeOperationPersonnelSnapshot(inspection);
     draft.operationBatch = structuredClone(operationSnapshot.batch);
     draft.operationRequirements = structuredClone(operationSnapshot.requirements);
@@ -181,7 +225,7 @@ function serviceHarness(options = {}) {
         ...draft.batch,
         published: true,
       },
-      schedules: draft.schedules,
+      schedules: inspection.schedules,
       personnel: draft.personnel,
       dates: draft.dates,
       requirements: requirementsForPersonnel(draft.personnel),
@@ -198,6 +242,7 @@ function serviceHarness(options = {}) {
       draftVersion: 1,
       fingerprint: operationPersonnelTaskFingerprint(draft),
       recipients: { to: inspection.directoryMatch.to, cc: inspection.directoryMatch.cc },
+      managedSchedules: structuredClone(draft.managedSchedules),
       changeSummary: "",
       createdAt: "2026-07-23T02:00:00.000Z",
       startedAt: "2026-07-23T02:00:01.000Z",
@@ -207,6 +252,7 @@ function serviceHarness(options = {}) {
       previewBinding: {
         operationSnapshotFingerprint: valueFingerprint(operationSnapshot),
         directoryMatchFingerprint: valueFingerprint(operationSnapshot.directoryMatch),
+        managedScheduleFingerprint: valueFingerprint(draft.managedSchedules),
       },
     };
     task.config.operationPersonnelTask = {
@@ -245,6 +291,7 @@ function serviceHarness(options = {}) {
 
   const updateTaskConfig = async (taskId, config) => {
     assert.equal(taskId, task.taskId);
+    persistedStates.push(structuredClone(config.operationPersonnelTask));
     task.config = { ...task.config, ...structuredClone(config) };
     return task;
   };
@@ -274,6 +321,10 @@ function serviceHarness(options = {}) {
           ? options.inspectionResult(instruction, inspection)
           : inspection,
       );
+      if (options.changeBatchAfterInspection && !batchChangedAfterInspection) {
+        batchChangedAfterInspection = true;
+        setBatchScheduleStatus(options.changeBatchAfterInspection);
+      }
       if (options.externalBaseline) {
         result.sendRecords = structuredClone(options.externalSendRecords || [{
           type: "首次发送",
@@ -316,6 +367,10 @@ function serviceHarness(options = {}) {
     deferredJobs,
     profileLocks,
     taskLocks,
+    inspections: inspectionInstructions,
+    persistedStates,
+    attempts: attemptInstructions,
+    setBatchScheduleStatus,
     setInspection(value) {
       inspection = value;
     },
@@ -337,6 +392,7 @@ test("preview token binds requirement, draft, operation snapshot and directory",
   assert.equal(active.draftVersion, preview.draftVersion);
   assert.match(active.operationSnapshotFingerprint, /^[a-f0-9]{64}$/);
   assert.match(active.directoryMatchFingerprint, /^[a-f0-9]{64}$/);
+  assert.match(active.managedScheduleFingerprint, /^[a-f0-9]{64}$/);
   harness.task.config.examRequirement.version += 1;
 
   await assert.rejects(
@@ -348,6 +404,139 @@ test("preview token binds requirement, draft, operation snapshot and directory",
     { code: "PERSONNEL_PREVIEW_STALE", status: 409 },
   );
 });
+
+test("preview blocks before operation inspection when batch schedules are incomplete", async () => {
+  const harness = serviceHarness({ batchScheduleStatus: "waiting_schedule" });
+  await assert.rejects(
+    harness.service.preview("task-a", ADMIN),
+    (error) => error.code === "PERSONNEL_BATCH_SCHEDULE_INCOMPLETE"
+      && /请先在建批次环节完成批次信息修改/.test(error.message),
+  );
+  assert.equal(harness.inspections.length, 0);
+});
+
+test("preview blocks when batch update is available or failed", async () => {
+  for (const status of ["update_available", "updating", "update_failed"]) {
+    const harness = serviceHarness({ batchScheduleStatus: status });
+    await assert.rejects(
+      harness.service.preview("task-a", ADMIN),
+      (error) => error.code === "PERSONNEL_BATCH_UPDATE_REQUIRED",
+    );
+  }
+});
+
+test("preview exposes managed schedules without schedule write codes", async () => {
+  const harness = serviceHarness({ batchScheduleStatus: "success" });
+  const preview = await harness.service.preview("task-a", ADMIN);
+  assert.deepEqual(preview.state.draft.managedSchedules, [{
+    requirementIndex: 0,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }]);
+  assert.equal(Object.hasOwn(preview.state.draft.managedSchedules[0], "scheduleCode"), false);
+});
+
+test("preview rechecks the batch schedule gate before persisting", async () => {
+  const harness = serviceHarness({ changeBatchAfterInspection: "update_available" });
+  await assert.rejects(
+    harness.service.preview("task-a", ADMIN),
+    (error) => error.code === "PERSONNEL_BATCH_UPDATE_REQUIRED",
+  );
+  assert.equal(harness.persistedStates.length, 0);
+});
+
+test("send invalidates a confirmed preview when batch schedules changed", async () => {
+  const harness = serviceHarness({ batchScheduleStatus: "success" });
+  const preview = await harness.service.preview("task-a", ADMIN);
+  harness.setBatchScheduleStatus("update_available");
+  await assert.rejects(
+    harness.service.send("task-a", ADMIN, {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+    }),
+    (error) => error.code === "PERSONNEL_BATCH_UPDATE_REQUIRED",
+  );
+  assert.equal(harness.attempts.length, 0);
+});
+
+test("send keeps managed schedules outside the operation target and forwards them read-only", async () => {
+  const harness = serviceHarness();
+  const visible = inspectionFor(harness.task);
+  visible.schedules = [{
+    scheduleEntryId: "visible-1",
+    scheduleCode: 88,
+    subjectCode: "C001",
+    subjectName: "综合能力",
+    start: "2026-08-22 09:00:00",
+    end: "2026-08-22 11:00:00",
+    durationMinutes: 120,
+    earlyLoginMinutes: 30,
+  }];
+  harness.setInspection(visible);
+
+  const preview = await harness.service.preview("task-a", ADMIN);
+  await harness.service.send("task-a", ADMIN, {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+  });
+
+  const attempt = harness.task.config.operationPersonnelTask.activeAttempt;
+  assert.deepEqual(attempt.target.schedules, visible.schedules);
+  assert.deepEqual(attempt.managedSchedules, [managedSchedule()]);
+  await harness.runDeferred();
+  assert.deepEqual(harness.attempts[0].managedSchedules, [managedSchedule()]);
+});
+
+test("ordinary resend uses draft changes even when operation configuration is unchanged", async () => {
+  const harness = serviceHarness({ changedAfterSend: true });
+  harness.task.config.examRequirement.fields["考试日期时间"] =
+    "2026/08/22 10:00 - 2026/08/22 12:00";
+  harness.task.config.operationBatch.managedSnapshot = {
+    batchName: "湖北邮政招聘考试",
+    examStartDate: "2026-08-22",
+    examEndDate: "2026-08-22",
+    schedules: [managedSchedule({
+      start: "2026-08-22T10:00:00",
+      end: "2026-08-22T12:00:00",
+    })],
+  };
+  const draft = buildOperationPersonnelTaskDraft(harness.task, {
+    environment: "test",
+    now: new Date(START).toISOString(),
+  });
+  const current = inspectionFor(harness.task);
+  current.batch = { ...draft.batch, published: true };
+  current.schedules = [{
+    scheduleEntryId: "visible-1",
+    scheduleCode: 88,
+    subjectCode: "C001",
+    subjectName: "综合能力",
+    start: "2026-08-22 09:00:00",
+    end: "2026-08-22 11:00:00",
+    durationMinutes: 120,
+    earlyLoginMinutes: 30,
+  }];
+  current.personnel = structuredClone(draft.personnel);
+  current.dates = structuredClone(draft.dates);
+  current.requirements = requirementsForPersonnel(draft.personnel);
+  harness.task.config.operationPersonnelTask.lastOperationSnapshot = structuredClone(current);
+  harness.setInspection(current);
+
+  const preview = await harness.service.preview("task-a", ADMIN);
+  assert.deepEqual(preview.operationChanges, []);
+  assert.equal(
+    preview.changes.fields.some((item) => item.path === "managedSchedules"),
+    true,
+  );
+  const accepted = await harness.service.send("task-a", ADMIN, {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "批次受管日程已调整",
+  });
+  assert.equal(accepted.statusCode, 202);
+});
+
 
 test("changing requirement 2 invalidates a preview even when the singular legacy alias is unchanged", async () => {
   const harness = serviceHarness();
@@ -365,6 +554,24 @@ test("changing requirement 2 invalidates a preview even when the singular legacy
       },
     },
   ];
+  harness.task.config.examRequirements[1].fields = {
+    "考试名称": "湖北邮政招聘考试（二）",
+    "考试日期时间": "2026/08/23 09:00 - 2026/08/23 11:00",
+  };
+  harness.task.config.operationBatch.managedSnapshot = {
+    batchName: "湖北邮政招聘考试",
+    examStartDate: "2026-08-22",
+    examEndDate: "2026-08-23",
+    schedules: [
+      managedSchedule(),
+      {
+        requirementIndex: 1,
+        name: "湖北邮政招聘考试（二）",
+        start: "2026-08-23T09:00:00",
+        end: "2026-08-23T11:00:00",
+      },
+    ],
+  };
   const preview = await harness.service.preview("task-a", owner(), {});
   harness.task.config.examRequirements[1].version += 1;
 
@@ -665,6 +872,15 @@ test("identical successful fingerprint cannot be resent", async () => {
   );
 });
 
+test("get keeps a synchronized successful managed schedule in sent state", async () => {
+  const harness = serviceHarness({ alreadySent: true });
+
+  const current = await harness.service.get("task-a", owner());
+
+  assert.equal(current.state.status, "sent");
+  assert.deepEqual(current.state.draft.managedSchedules, [managedSchedule()]);
+});
+
 test("get exposes a fresh draft and changes_pending after a sent requirement changes", async () => {
   const harness = serviceHarness({ alreadySent: true });
   harness.task.config.examRequirement.version += 1;
@@ -886,7 +1102,7 @@ test("preview returns actual operation to target changes separately from draft e
     preview.operationChanges.find((item) => item.path === "batch.published"),
     { path: "batch.published", before: false, after: true },
   );
-  assert.ok(preview.operationChanges.some((item) => item.path === "schedules"));
+  assert.equal(preview.operationChanges.some((item) => item.path === "schedules"), false);
   assert.ok(preview.operationChanges.some((item) => item.path === "personnel.monitorCount"));
   assert.equal(preview.changes.fields.some((item) => item.path === "personnel.monitorCount"), true);
 });

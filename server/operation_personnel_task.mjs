@@ -221,10 +221,19 @@ export function buildOperationPersonnelTaskDraft(task = {}, options = {}) {
 }
 
 export function operationPersonnelTaskFingerprint(draft) {
+  const managedSchedules = (draft.managedSchedules || []).map(
+    ({ requirementIndex, name, start, end }) => ({
+      requirementIndex,
+      name,
+      start,
+      end,
+    }),
+  );
   const material = {
     environment: draft.environment,
     batch: draft.batch,
     schedules: draft.schedules,
+    managedSchedules,
     personnel: draft.personnel,
     dates: draft.dates,
     recipients: {
@@ -266,12 +275,25 @@ export function diffOperationPersonnelTaskDrafts(before = {}, after = {}) {
   const fields = [
     ...changedFields(before.dates, after.dates, "dates"),
     ...changedFields(before.personnel, after.personnel, "personnel"),
+    ...(stableJson(before.managedSchedules || []) === stableJson(after.managedSchedules || [])
+      ? []
+      : [{
+          path: "managedSchedules",
+          before: before.managedSchedules || [],
+          after: after.managedSchedules || [],
+        }]),
   ];
   const parts = [];
   if (added.length) parts.push(`考试日程：新增 ${added.length} 项`);
   if (changed.length) parts.push(`考试日程：修改 ${changed.length} 项`);
   if (deleted.length) parts.push(`考试日程：删除 ${deleted.length} 项`);
-  for (const field of fields) parts.push(`${FIELD_LABELS[field.path] || field.path}：${field.before} → ${field.after}`);
+  for (const field of fields) {
+    if (field.path === "managedSchedules") {
+      parts.push("批次受管日程：已更新");
+    } else {
+      parts.push(`${FIELD_LABELS[field.path] || field.path}：${field.before} → ${field.after}`);
+    }
+  }
   return { schedules: { added, changed, deleted }, fields, summary: parts.join("；") };
 }
 

@@ -10,6 +10,7 @@ import {
   normalizeOperationPersonnelSnapshot,
   operationPersonnelConflicts,
 } from "./operation_personnel_task_runner.mjs";
+import { operationPersonnelScheduleGate } from "./operation_personnel_schedule_gate.mjs";
 
 const VALID_ENVIRONMENTS = new Set(["test", "production"]);
 const PREVIEW_TTL_MS = 10 * 60 * 1000;
@@ -44,6 +45,21 @@ function fingerprint(value) {
 
 function draftSourceFingerprint(draft = {}) {
   return fingerprint(draft);
+}
+
+function managedScheduleProjection(items = []) {
+  return items.map(({ requirementIndex, name, start, end }) => ({
+    requirementIndex,
+    name,
+    start,
+    end,
+  }));
+}
+
+function requireManagedSchedules(task) {
+  const result = operationPersonnelScheduleGate(task);
+  if (!result.ok) throw serviceError(result.code, 409, result.message);
+  return result;
 }
 
 function nowIso(now) {
@@ -133,6 +149,7 @@ function normalizedState(task, environment, draft = null) {
     ...structuredClone(existing),
     environment,
     draft: structuredClone(existing.draft || generated),
+    // scheduleCodeMap is deserialized only for compatibility with historical drafts.
     scheduleCodeMap: structuredClone(existing.scheduleCodeMap || generated.scheduleCodeMap || {}),
     checkpoints: structuredClone(existing.checkpoints || {}),
     activePreview: existing.activePreview ? structuredClone(existing.activePreview) : null,
@@ -140,32 +157,6 @@ function normalizedState(task, environment, draft = null) {
     sendHistory: structuredClone(existing.sendHistory || []),
     events: structuredClone(existing.events || []),
   };
-}
-
-function visibleScheduleMoment(value) {
-  return text(value).replaceAll("/", "-").replace(/\s+/g, " ");
-}
-
-function visibleScheduleDuration(schedule = {}) {
-  const explicit = Number(schedule.durationMinutes);
-  if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  const start = Date.parse(visibleScheduleMoment(schedule.start).replace(" ", "T"));
-  const end = Date.parse(visibleScheduleMoment(schedule.end).replace(" ", "T"));
-  return Number.isFinite(start) && Number.isFinite(end) && end > start
-    ? (end - start) / 60_000
-    : "";
-}
-
-function equivalentVisibleSchedule(target = {}, actual = {}) {
-  return text(target.scheduleCode) === text(actual.scheduleCode)
-    && text(target.subjectName) === text(actual.subjectName)
-    && visibleScheduleMoment(target.start) === visibleScheduleMoment(actual.start)
-    && visibleScheduleMoment(target.end) === visibleScheduleMoment(actual.end)
-    && text(target.earlyLoginMinutes) === text(actual.earlyLoginMinutes)
-    && text(visibleScheduleDuration(target)) === text(visibleScheduleDuration(actual))
-    && (!text(actual.subjectCode) || text(actual.subjectCode) === text(target.subjectCode))
-    && (!text(actual.scheduleEntryId)
-      || text(actual.scheduleEntryId) === text(target.scheduleEntryId));
 }
 
 function requirementsFromPersonnel(personnel = {}) {
@@ -204,18 +195,9 @@ function targetFromDraft(draft = {}, snapshot = {}) {
     if (text(snapshot.batch?.projectCode)) batch.projectCode = snapshot.batch.projectCode;
     if (text(snapshot.batch?.projectName)) batch.projectName = snapshot.batch.projectName;
   }
-  const actualSchedules = new Map(
-    (snapshot.schedules || []).map((schedule) => [text(schedule.scheduleCode), schedule]),
-  );
-  const schedules = (draft.schedules || []).map((schedule) => {
-    const actual = actualSchedules.get(text(schedule.scheduleCode));
-    return actual && equivalentVisibleSchedule(schedule, actual)
-      ? structuredClone(actual)
-      : structuredClone(schedule);
-  });
   return normalizeOperationPersonnelSnapshot({
     batch,
-    schedules,
+    schedules: structuredClone(snapshot.schedules || []),
     personnel: draft.personnel || {},
     dates: draft.dates || {},
     requirements: requirementsFromPersonnel(draft.personnel),
@@ -507,6 +489,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       now: nowIso(now),
       scheduleCodeMap: task.config?.operationPersonnelTask?.scheduleCodeMap || {},
     });
+    const managed = operationPersonnelScheduleGate(task);
+    if (managed.ok) draft.managedSchedules = managedScheduleProjection(managed.schedules);
     let state = normalizedState(task, environment, draft);
     state = recoverOrphanedAttempt(state, activeAttemptIds);
     state.draft = structuredClone(draft);
@@ -522,6 +506,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
   async function preview(taskId, actor, input = {}) {
     assertEnvironment(environment);
     const initialTask = await readAuthorized(taskId, actor);
+    const initialManaged = requireManagedSchedules(initialTask);
+    const initialManagedSnapshotFingerprint = fingerprint(initialManaged.managedSnapshot);
     const existing = recoverOrphanedAttempt(
       normalizedState(initialTask, environment),
       activeAttemptIds,
@@ -549,6 +535,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     });
     const edited = editableDraft(generated, input);
     const draft = edited.draft;
+    draft.managedSchedules = managedScheduleProjection(initialManaged.schedules);
     if ((draft.warnings || []).some((item) => item.code === "UNSUPPORTED_PERSONNEL_TASK")) {
       throw serviceError(
         "PERSONNEL_TASK_UNSUPPORTED",
@@ -645,6 +632,14 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
 
     return withTaskLock(taskId, async () => {
       const freshTask = await readAuthorized(taskId, actor);
+      const freshManaged = requireManagedSchedules(freshTask);
+      if (fingerprint(freshManaged.managedSnapshot) !== initialManagedSnapshotFingerprint) {
+        throw serviceError(
+          "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+          409,
+          "批次受管日程在预览期间发生变化，请重新检查",
+        );
+      }
       const freshRequirement = await readRequirementFor(freshTask);
       if (hasPendingRequirementChange(freshRequirement)) {
         throw serviceError(
@@ -691,6 +686,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         baselineSnapshotFingerprint: fingerprint(previewBaseline),
         operationSnapshotFingerprint: fingerprint(snapshot),
         directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
+        managedScheduleFingerprint: fingerprint(draft.managedSchedules),
       };
       const events = [
         ...freshState.events,
@@ -852,6 +848,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         kind: attempt.kind,
         batch: attempt.target.batch,
         target: attempt.target,
+        managedSchedules: managedScheduleProjection(attempt.managedSchedules),
         baseline: attempt.baseline,
         changeSummary: attempt.changeSummary,
         checkpoints: running.checkpoints,
@@ -923,6 +920,22 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           "人员任务预览已失效，请重新检查",
         );
       }
+      let currentManaged;
+      try {
+        currentManaged = requireManagedSchedules(task);
+      } catch (error) {
+        await persistState(taskId, { ...state, activePreview: null });
+        throw error;
+      }
+      const currentManagedSchedules = managedScheduleProjection(currentManaged.schedules);
+      if (preview.managedScheduleFingerprint !== fingerprint(currentManagedSchedules)) {
+        await persistState(taskId, { ...state, activePreview: null });
+        throw serviceError(
+          "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+          409,
+          "批次受管日程在确认发送前发生变化，请重新检查",
+        );
+      }
       if ((state.draft.warnings || []).length) {
         throw serviceError(
           "PERSONNEL_DRAFT_INCOMPLETE",
@@ -960,7 +973,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         state.draft.previewOperationSnapshot || {},
       );
       const baseline = structuredClone(state.draft.previewBaselineSnapshot || {});
-      if (kind === "resend"
+      if (kind === "resend" && preview.externalBaseline
         && !operationSnapshotChanges(baseline, target).length) {
         throw serviceError(
           "PERSONNEL_CONTENT_UNCHANGED",
@@ -979,6 +992,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         baselineSnapshotFingerprint: preview.baselineSnapshotFingerprint,
         operationSnapshotFingerprint: preview.operationSnapshotFingerprint,
         directoryMatchFingerprint: preview.directoryMatchFingerprint,
+        managedScheduleFingerprint: preview.managedScheduleFingerprint,
       };
       const resumeSameAttempt = attemptMatchesPreview(previous, {
         environment,
@@ -1003,6 +1017,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         draftVersion: state.draftVersion,
         fingerprint: currentFingerprint,
         recipients,
+        managedSchedules: managedScheduleProjection(state.draft.managedSchedules),
         changeSummary,
         createdAt,
         status: "queued",
