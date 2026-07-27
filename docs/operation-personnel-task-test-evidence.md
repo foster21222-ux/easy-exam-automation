@@ -15,14 +15,14 @@
 - 原始汇总：
 
   ```text
-  ℹ tests 1123
+  ℹ tests 1126
   ℹ suites 0
-  ℹ pass 1123
+  ℹ pass 1126
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 7113.415292
+  ℹ duration_ms 6588.990542
   ```
 
 ### Python
@@ -39,7 +39,7 @@
 
   ```text
   ----------------------------------------------------------------------
-  Ran 54 tests in 1.455s
+  Ran 54 tests in 1.401s
 
   OK
   ```
