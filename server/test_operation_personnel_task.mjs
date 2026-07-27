@@ -168,6 +168,23 @@ test("fingerprints stable task material and summarizes a changed deadline", () =
   assert.equal(diffOperationPersonnelTaskDrafts(before, after).summary, "人员落实结束日期：2026-08-19 → 2026-08-20");
 });
 
+test("personnel change summaries use business labels for every personnel field", () => {
+  const before = buildOperationPersonnelTaskDraft(baseTask, {
+    environment: "test",
+    now: "2026-07-23T02:00:00.000Z",
+  });
+  const after = structuredClone(before);
+  after.personnel.monitorCount = 80;
+  after.personnel.monitorRatio = "1:60";
+  after.personnel.earliestLoginMinutes = 45;
+
+  const summary = diffOperationPersonnelTaskDrafts(before, after).summary;
+  assert.match(summary, /监考人数：/);
+  assert.match(summary, /监考比例：/);
+  assert.match(summary, /最早登录系统时间：/);
+  assert.doesNotMatch(summary, /personnel\.|dates\.|managedSchedules|\[\{/);
+});
+
 test("managed schedules participate in the personnel task fingerprint", () => {
   const before = buildOperationPersonnelTaskDraft(baseTask, {
     environment: "test",

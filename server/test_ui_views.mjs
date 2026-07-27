@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { diffOperationPersonnelTaskDrafts } from "./operation_personnel_task.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const html = fs.readFileSync(path.join(rootDir, "outputs/web_prototype/easy_exam_automation.html"), "utf8");
@@ -1358,6 +1359,17 @@ test("personnel confirmation renders a Chinese grouped comparison with exactly f
   assert.equal((html.match(/<h4>人员配置<\/h4>/g) || []).length, 0);
   assert.doesNotMatch(html, /DRAFT_OLD|DRAFT_NEW/);
   assert.equal(operationPersonnelConfirmSendBtn.disabled, false);
+
+  previewDto.changes = diffOperationPersonnelTaskDrafts(
+    { personnel: { monitorCount: 2, monitorRatio: "1:50" } },
+    { personnel: { monitorCount: 3, monitorRatio: "1:60" } },
+  );
+  previewDto.state.lastSuccessfulFingerprint = "already-sent";
+  renderOperationPersonnelConfirmation(previewDto);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /监考人数：2 → 3/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /监考比例：1:50 → 1:60/);
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /personnel\.|dates\.|managedSchedules|\[\{/);
+
   previewDto.state.draft.warnings = [{ code: "MONITOR_RATIO_REQUIRED" }];
   renderOperationPersonnelConfirmation(previewDto);
   assert.equal(operationPersonnelConfirmSendBtn.disabled, true);

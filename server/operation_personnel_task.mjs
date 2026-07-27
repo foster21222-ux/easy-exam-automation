@@ -263,7 +263,19 @@ function changedFields(before, after, prefix = "") {
   return fields;
 }
 
-const FIELD_LABELS = { "dates.start": "人员落实开始日期", "dates.end": "人员落实结束日期", "dates.nameListDue": "人员名单提交日期" };
+const FIELD_LABELS = {
+  "dates.start": "人员落实开始日期",
+  "dates.end": "人员落实结束日期",
+  "dates.nameListDue": "人员名单提交日期",
+  "personnel.serviceType": "人员服务类型",
+  "personnel.platform": "人员落实平台",
+  "personnel.loginMonitoring": "监考登录监控",
+  "personnel.monitorRatio": "监考比例",
+  "personnel.candidateBasis": "监考人数计算基数",
+  "personnel.monitorCount": "监考人数",
+  "personnel.earliestLoginMinutes": "最早登录系统时间",
+  "personnel.trialIncluded": "是否包含试考",
+};
 
 export function diffOperationPersonnelTaskDrafts(before = {}, after = {}) {
   const beforeById = new Map((before.schedules || []).map((item) => [item.scheduleEntryId, item]));
