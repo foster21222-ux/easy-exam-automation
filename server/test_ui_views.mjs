@@ -4209,6 +4209,70 @@ test("operation workflow and source cards open account-style editable dialogs", 
   assert.ok(html.includes("/source-snapshot"));
 });
 
+test("source save keeps the fresh operation batch draft instead of a persisted stale draft", async () => {
+  const staleBatchName = "中国邮政集团公司湖北省分公司招聘考试_2026年8月";
+  const freshBatchName = "湖北邮政_2026年8月";
+  const task = {
+    taskId: "project-a",
+    config: {
+      operationBatch: {
+        draft: {
+          fields: {
+            batchName: { value: staleBatchName },
+          },
+        },
+      },
+    },
+  };
+  const result = {
+    task,
+    workflow: {},
+    batchDraft: {
+      fields: {
+        batchName: { value: freshBatchName },
+      },
+    },
+  };
+  const batchPanel = { textContent: "" };
+  const sourceDetailSaveBtn = { disabled: false };
+  const saveProjectSourceDetail = compileInlineFunction(
+    "      async function saveProjectSourceDetail() {",
+    "\n      function renderOperationBatchDraft",
+    {
+      taskViewState: {
+        currentProjectId: "project-a",
+        wechatRequirementDetails: {},
+      },
+      validateVisibleTimeRangeEditors: () => true,
+      sourceDetailFields: {},
+      sourceDetailSaveBtn,
+      sourceDetailState: { textContent: "" },
+      fetchJson: async () => result,
+      collectSourceDetailPayload: () => ({ source: "fanwei" }),
+      isCurrentProject: (taskId) => taskId === "project-a",
+      renderProjectDetail: (renderedTask) => {
+        batchPanel.textContent = renderedTask.config.operationBatch.draft.fields.batchName.value;
+      },
+      renderProjectWorkflow: (_renderedTask, _workflow, draft) => {
+        batchPanel.textContent = draft.fields.batchName.value;
+      },
+      renderOperationBatchFromTask: (renderedTask) => {
+        batchPanel.textContent = renderedTask.config.operationBatch.draft.fields.batchName.value;
+      },
+      renderProjectRequirementInline: () => {},
+      projectRequirementRequestId: () => "",
+      projectOperationBatchState: { textContent: "" },
+      closeProjectDialog: () => {},
+      sourceDetailModal: {},
+    },
+  );
+
+  await saveProjectSourceDetail();
+
+  assert.equal(batchPanel.textContent, freshBatchName);
+  assert.equal(sourceDetailSaveBtn.disabled, false);
+});
+
 test("EasyExam source editing includes the established requirement dropdown options", () => {
   const sourceControl = sourceBetween(
     "      function sourceFieldControl(group, key, value, selectOptions = {}) {",

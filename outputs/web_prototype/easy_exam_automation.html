@@ -10487,7 +10487,6 @@
           if (!isCurrentProject(taskId)) return;
           renderProjectDetail(result.task);
           renderProjectWorkflow(result.task, result.workflow || {}, result.batchDraft || {});
-          renderOperationBatchFromTask(result.task);
           renderProjectRequirementInline(result.task, taskViewState.wechatRequirementDetails[projectRequirementRequestId(result.task)] || null);
           projectOperationBatchState.textContent = "来源字段已保存，运控任务参数已同步刷新。";
           closeProjectDialog(sourceDetailModal);
