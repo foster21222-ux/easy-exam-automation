@@ -9946,19 +9946,44 @@
           ? draft.managedSchedules
           : (Array.isArray(draft.schedules) ? draft.schedules : []);
         const scheduleRows = managedSchedules.map((item, index) => `<tr><td>${safeText(item.requirementIndex ?? item.scheduleCode ?? index + 1)}</td><td>${safeText(item.name || item.subjectName || item.subject || "--")}</td><td>${safeText(item.start || "--")}</td><td>${safeText(item.end || "--")}</td></tr>`).join("");
-        const scheduleChange = operationChanges.find((item) => String(item.path || "").includes("schedule"));
-        let scheduleSummary = "考试日程无变化";
-        if (scheduleChange) {
-          if (Array.isArray(scheduleChange.before) && Array.isArray(scheduleChange.after)
-            && scheduleChange.after.length > scheduleChange.before.length) {
-            scheduleSummary = `新增 ${scheduleChange.after.length - scheduleChange.before.length} 个考试日程`;
-          } else {
-            const changedCount = Array.isArray(scheduleChange.after)
-              ? Math.max(1, scheduleChange.after.length)
-              : 1;
-            scheduleSummary = `修改 ${changedCount} 个考试日程`;
+        const draftScheduleChanges = preview.changes?.schedules || {};
+        const managedScheduleChange = (preview.changes?.fields || [])
+          .find((item) => item.path === "managedSchedules");
+        let addedScheduleCount = Array.isArray(draftScheduleChanges.added)
+          ? draftScheduleChanges.added.length
+          : 0;
+        let modifiedScheduleCount = (Array.isArray(draftScheduleChanges.changed)
+          ? draftScheduleChanges.changed.length
+          : 0) + (Array.isArray(draftScheduleChanges.deleted)
+          ? draftScheduleChanges.deleted.length
+          : 0);
+        if (!addedScheduleCount && !modifiedScheduleCount && managedScheduleChange) {
+          const beforeSchedules = Array.isArray(managedScheduleChange.before)
+            ? managedScheduleChange.before
+            : [];
+          const afterSchedules = Array.isArray(managedScheduleChange.after)
+            ? managedScheduleChange.after
+            : [];
+          addedScheduleCount = Math.max(0, afterSchedules.length - beforeSchedules.length);
+          if (!addedScheduleCount) {
+            const scheduleValue = (item = {}) => [
+              item.requirementIndex,
+              item.name,
+              item.start,
+              item.end,
+            ].map((value) => String(value ?? "")).join("|");
+            modifiedScheduleCount = Math.max(
+              1,
+              Array.from(
+                { length: Math.max(beforeSchedules.length, afterSchedules.length) },
+                (_, index) => scheduleValue(beforeSchedules[index]) !== scheduleValue(afterSchedules[index]),
+              ).filter(Boolean).length,
+            );
           }
         }
+        let scheduleSummary = "考试日程无变化";
+        if (addedScheduleCount) scheduleSummary = `新增 ${addedScheduleCount} 个考试日程`;
+        else if (modifiedScheduleCount) scheduleSummary = `修改 ${modifiedScheduleCount} 个考试日程`;
         const recipients = draft.directoryMatch || {};
         const batchName = draft.operationBatch?.batchName
           || draft.previewOperationSnapshot?.batch?.batchName

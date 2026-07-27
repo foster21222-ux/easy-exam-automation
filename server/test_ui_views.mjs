@@ -1364,6 +1364,10 @@ test("personnel confirmation summarizes schedule object changes without exposing
   const operationPersonnelConfirmContent = { innerHTML: "" };
   const operationPersonnelConfirmSendBtn = { disabled: false };
   const operationPersonnelProgress = { textContent: "" };
+  const safeText = compileInlineFunction(
+    "      function safeText(value) {",
+    "\n      function formatTaskTime",
+  );
   const operationPersonnelPreviewKind = compileInlineFunction(
     "      function operationPersonnelPreviewKind(preview = {}) {",
     "\n      function renderOperationPersonnelConfirmation",
@@ -1377,23 +1381,28 @@ test("personnel confirmation summarizes schedule object changes without exposing
       operationPersonnelConfirmSendBtn,
       operationPersonnelProgress,
       operationPersonnelPreviewKind,
-      safeText: (value) => String(value ?? ""),
+      safeText,
     },
   );
   const schedule = {
     scheduleEntryId: "internal-7",
     requirementIndex: 7,
-    name: "综合能力",
+    name: "综合<&\"'>",
     start: "2026-08-22 09:00",
     end: "2026-08-22 11:00",
   };
   const previewDto = {
     previewToken: "preview-a",
-    operationChanges: [{
-      path: "schedules",
-      before: [],
-      after: [schedule],
-    }],
+    operationChanges: [],
+    changes: {
+      schedules: {
+        added: [schedule],
+        changed: [],
+        deleted: [],
+      },
+      fields: [],
+      summary: "考试日程：新增 1 项",
+    },
     state: {
       activePreview: {},
       draft: {
@@ -1410,12 +1419,21 @@ test("personnel confirmation summarizes schedule object changes without exposing
 
   renderOperationPersonnelConfirmation(previewDto);
   assert.match(operationPersonnelConfirmContent.innerHTML, /新增 1 个考试日程/);
-  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /schedules|scheduleEntryId|\[\{|&quot;/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /综合&lt;&amp;&quot;&#39;&gt;/);
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /综合<&|scheduleEntryId|\[\{/);
 
-  previewDto.operationChanges[0].before = [{ ...schedule, start: "2026-08-22 08:30" }];
+  previewDto.changes = {
+    schedules: { added: [], changed: [], deleted: [] },
+    fields: [{
+      path: "managedSchedules",
+      before: [{ ...schedule, start: "2026-08-22 08:30" }],
+      after: [schedule],
+    }],
+    summary: "批次受管日程：已更新",
+  };
   renderOperationPersonnelConfirmation(previewDto);
   assert.match(operationPersonnelConfirmContent.innerHTML, /修改 1 个考试日程/);
-  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /schedules|scheduleEntryId|\[\{|&quot;/);
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /managedSchedules|scheduleEntryId|\[\{/);
 });
 
 test("personnel confirmation renders an adopted operation send record as a resend", () => {
