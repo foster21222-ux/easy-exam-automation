@@ -9981,9 +9981,10 @@
             );
           }
         }
-        let scheduleSummary = "考试日程无变化";
-        if (addedScheduleCount) scheduleSummary = `新增 ${addedScheduleCount} 个考试日程`;
-        else if (modifiedScheduleCount) scheduleSummary = `修改 ${modifiedScheduleCount} 个考试日程`;
+        const scheduleSummaryParts = [];
+        if (addedScheduleCount) scheduleSummaryParts.push(`新增 ${addedScheduleCount} 个考试日程`);
+        if (modifiedScheduleCount) scheduleSummaryParts.push(`修改 ${modifiedScheduleCount} 个考试日程`);
+        const scheduleSummary = scheduleSummaryParts.join("；") || "考试日程无变化";
         const recipients = draft.directoryMatch || {};
         const batchName = draft.operationBatch?.batchName
           || draft.previewOperationSnapshot?.batch?.batchName

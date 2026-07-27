@@ -1423,6 +1423,25 @@ test("personnel confirmation summarizes schedule object changes without exposing
   assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /综合<&|scheduleEntryId|\[\{/);
 
   previewDto.changes = {
+    schedules: {
+      added: [{ ...schedule, requirementIndex: 8, name: "新增日程" }],
+      changed: [{
+        before: { ...schedule, start: "2026-08-22 08:30" },
+        after: schedule,
+      }],
+      deleted: [{ ...schedule, requirementIndex: 6, name: "删除日程" }],
+    },
+    fields: [],
+    summary: "考试日程：新增 1 项；修改 1 项；删除 1 项",
+  };
+  renderOperationPersonnelConfirmation(previewDto);
+  assert.match(
+    operationPersonnelConfirmContent.innerHTML,
+    /新增 1 个考试日程；修改 2 个考试日程/,
+  );
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /scheduleEntryId|\[\{/);
+
+  previewDto.changes = {
     schedules: { added: [], changed: [], deleted: [] },
     fields: [{
       path: "managedSchedules",
