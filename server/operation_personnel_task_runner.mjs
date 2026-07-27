@@ -1545,7 +1545,7 @@ async function exactVisibleRequirementRow(drawer, name) {
   );
 }
 
-async function editVisibleSchedule(page, schedule, existing) {
+export async function editVisibleSchedule(page, schedule, existing) {
   if (existing) {
     const rows = await exactScheduleRows(page, schedule);
     if (rows.length !== 1) throw scheduleNotUnique(schedule, rows.length);
@@ -2239,6 +2239,16 @@ function assertTaskSheetReady(expected, actual) {
     throw operationConflict("verify_task_sheet 任务单类型与已确认目标不一致");
   }
   return actual;
+}
+
+function scheduleNotUnique(schedule, count) {
+  const error = new Error(
+    `考试日程 ${schedule.scheduleEntryId || "缺少稳定 ID"}/${schedule.scheduleCode || "缺少代码"}`
+    + ` 必须精确匹配 1 行，实际 ${count} 行`,
+  );
+  error.code = "PERSONNEL_SCHEDULE_NOT_UNIQUE";
+  error.status = 409;
+  return error;
 }
 
 async function runOperationPersonnelAttemptOnPage(page, instruction, options) {

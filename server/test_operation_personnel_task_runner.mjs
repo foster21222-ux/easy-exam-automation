@@ -1496,6 +1496,39 @@ test("normal pages use the concrete visible adapter for publish and final confir
   ]);
 });
 
+test("visible schedule adapter reports a structured conflict for duplicate exact rows", async () => {
+  const schedule = {
+    scheduleEntryId: "schedule-1",
+    scheduleCode: 1,
+  };
+  const row = {
+    getAttribute: async () => "schedule-1",
+    locator: (selector) => {
+      assert.equal(selector, "td");
+      return { allInnerTexts: async () => ["1", "schedule-1"] };
+    },
+  };
+  const page = {
+    locator: (selector) => {
+      assert.equal(selector, "table:visible tbody tr");
+      return {
+        count: async () => 2,
+        nth: () => row,
+      };
+    },
+  };
+
+  await assert.rejects(
+    operationPersonnelRunner.editVisibleSchedule(page, schedule, schedule),
+    (error) => {
+      assert.notEqual(error.name, "ReferenceError");
+      assert.equal(error.code, "PERSONNEL_SCHEDULE_NOT_UNIQUE");
+      assert.equal(error.status, 409);
+      return true;
+    },
+  );
+});
+
 test("default visible adapter blocks missing or ambiguous publish controls before clicking", async () => {
   for (const publishCount of [0, 2]) {
     const page = simulatedVisibleOperationPage({ publishCount });
