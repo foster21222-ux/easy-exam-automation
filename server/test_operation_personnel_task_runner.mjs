@@ -442,11 +442,13 @@ test("checked inline mail recipients are split between to and cc", () => {
 
 function fakePersonnelTaskListPage(rows = [], {
   additionalPages = [],
+  firstPageRowsAfterReset = null,
   searchInitiallyMissing = false,
   taskSheetTextHasNoExactNode = false,
 } = {}) {
   const events = [];
   const pages = [rows, ...additionalPages];
+  let searchCount = 0;
   let pageIndex = 0;
   let searchReady = !searchInitiallyMissing;
   const mainTable = {
@@ -512,7 +514,13 @@ function fakePersonnelTaskListPage(rows = [], {
     },
     fill: async (value) => events.push(`fill:${value}`),
     press: async (key) => {
-      if (key === "Enter") pageIndex = 0;
+      if (key === "Enter") {
+        searchCount += 1;
+        pageIndex = 0;
+        if (searchCount > 1 && firstPageRowsAfterReset) {
+          pages[0] = firstPageRowsAfterReset;
+        }
+      }
       events.push(`press:${key}`);
     },
   };
@@ -704,6 +712,30 @@ test("current personnel task list returns to the exact row page after proving la
 
   assert.equal(page.events.filter((event) => event === "press:Enter").length, 2);
   assert.equal(page.events.includes("click:0"), true);
+});
+
+test("current personnel task list re-resolves the exact row after result order changes", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
+    ["EZT888888", "其它批次", "项目实施五部", "经理", "", ""],
+  ], {
+    additionalPages: [[
+      ["EZT999999", "目标批次", "项目实施五部", "经理", "", ""],
+    ]],
+    firstPageRowsAfterReset: [
+      ["EZT888888", "其它批次", "项目实施五部", "经理", "", ""],
+      ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
+    ],
+  });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
+    { baseUrl: "http://operation.test" },
+  );
+
+  assert.equal(page.events.includes("click:0"), false);
+  assert.equal(page.events.includes("click:1"), true);
 });
 
 test("current personnel task list blocks duplicate exact code and name rows", async () => {
@@ -1537,7 +1569,9 @@ test("blocks before recipient selection when task-sheet schedules are unreadable
 
 test("blocks before final send when task-sheet schedules drift during recipient selection", async () => {
   const page = fakeOperationPage();
+  const checkpoints = [];
   const options = attemptOptions(page, {
+    onCheckpoint: async ({ name, status }) => checkpoints.push(`${name}:${status}`),
     selectRecipients: async (_actualPage, recipients) => {
       page.events.push("recipients:select");
       page.state.selectedRecipients = structuredClone(recipients);
@@ -1554,6 +1588,7 @@ test("blocks before final send when task-sheet schedules drift during recipient 
   );
   assert.equal(page.events.includes("recipients:select"), true);
   assert.equal(page.events.includes("send:confirm"), false);
+  assert.equal(checkpoints.some((item) => item.startsWith("submit_send:")), false);
 });
 
 test("blocks before final send when selected recipients drift after checkpoint verification", async () => {

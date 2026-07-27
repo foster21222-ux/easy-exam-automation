@@ -763,8 +763,14 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
       throw new Error(`未能返回运控批次 ${batchCode}/${batchName} 所在第 ${selected.pageNumber} 页`);
     }
   }
+  const finalRows = await readPage();
+  if (finalRows.length !== 1) {
+    throw new Error(
+      `打开任务单前，运控批次 ${batchCode}/${batchName} 精确匹配到 ${finalRows.length} 行`,
+    );
+  }
   const action = page.locator(".ant-table-fixed-right table:visible tbody tr")
-    .nth(selected.rowIndex)
+    .nth(finalRows[0].rowIndex)
     .getByText("发送任务单", { exact: true });
   await clickUniqueVisible(action, "分散在线监考发送任务单入口");
   const taskSheet = page.locator(".ant-modal:visible").filter({
@@ -2237,6 +2243,7 @@ async function personnelCheckpoint(
 async function runPersonnelCheckpoint({
   name,
   target,
+  beforeAction,
   action,
   verify,
   verifyCompleted,
@@ -2258,6 +2265,7 @@ async function runPersonnelCheckpoint({
     }
     return verifyCompleted(saved);
   }
+  await beforeAction?.();
   return personnelCheckpoint(
     name,
     targetDigest,
@@ -2589,12 +2597,14 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   const attempt = await runPersonnelCheckpoint({
     name: OPERATION_PERSONNEL_CHECKPOINTS[8],
     target: submitTarget,
-    action: async () => {
+    beforeAction: async () => {
       assertManagedSchedules(
         managedSchedules,
         await operationMethod(page, options, "readTaskSheetSchedules")(page, instruction),
       );
       await readAndVerifyRecipients();
+    },
+    action: async () => {
       await operationMethod(page, options, "confirmSend")(page, pendingAttempt, instruction);
       return pendingAttempt;
     },
