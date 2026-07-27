@@ -9340,6 +9340,42 @@
         return rows ? `<div class="operation-param-list">${rows}</div>` : `<div class="empty-state">暂无参数</div>`;
       }
 
+      function renderOperationPersonnelDraft(draft = {}) {
+        const batch = draft.batch || {};
+        const personnel = draft.personnel || {};
+        const dates = draft.dates || {};
+        const recipients = draft.recipients || {};
+        const scheduleCount = Array.isArray(draft.schedules) ? draft.schedules.length : 0;
+        const recipientNames = Array.isArray(recipients.toNames) ? recipients.toNames.filter(Boolean) : [];
+        const ccText = recipients.ccGroup
+          ? `${recipients.ccGroup}（${Number(recipients.ccCount || 0)}人）`
+          : "无";
+        const values = [
+          ["批次代码", batch.code, "operation_result"],
+          ["批次名称", batch.batchName, "fanwei"],
+          ["人员服务", personnel.serviceType, "fanwei"],
+          ["人员落实平台", personnel.platform, "default_rule"],
+          ["监考比例", personnel.monitorRatio, "default_rule"],
+          ["监考人数", personnel.monitorCount, "default_rule"],
+          ["人员落实开始日期", dates.start, "default_rule"],
+          ["人员落实结束日期", dates.end, "default_rule"],
+          ["人员名单提交日期", dates.nameListDue, "default_rule"],
+          ["考试日程", scheduleCount ? `${scheduleCount} 个` : "", "easy_exam_requirement"],
+          ["固定收件人", recipientNames.length
+            ? `${recipients.toGroup ? `${recipients.toGroup} / ` : ""}${recipientNames.join("、")}`
+            : "", "default_rule"],
+          ["固定抄送人", ccText, "default_rule"],
+        ].filter(([, value]) => value !== "" && value !== null && value !== undefined);
+        const hasWarnings = Array.isArray(draft.warnings) && draft.warnings.length > 0;
+        const rows = values.map(([label, value, source]) => `
+          <div class="operation-param-item">
+            <div class="operation-param-label"><span>${safeText(label)}</span><span class="workflow-source-badge ${safeText(source)}">${safeText(operationBatchSourceLabel(source))}</span></div>
+            <div class="operation-param-value">${safeText(value)}${hasWarnings ? ' <span class="tag amber">待确认</span>' : ""}</div>
+          </div>
+        `).join("");
+        return rows ? `<div class="operation-param-list">${rows}</div>` : `<div class="empty-state">暂无参数</div>`;
+      }
+
       function operationBatchUpdateStatus(state = {}) {
         const pageStatus = String(state.pageStatus || "");
         if (["updating", "update_conflict", "update_failed"].includes(pageStatus)) return pageStatus;
@@ -9895,6 +9931,17 @@
         const dates = draft.dates || {};
         const project = taskViewState.currentProject || {};
         const requirementVersion = state.activePreview?.requirementVersion ?? "--";
+        let requirementVersionText = requirementVersion;
+        if (typeof requirementVersion === "string" && requirementVersion.trim().startsWith("[")) {
+          try {
+            const versions = JSON.parse(requirementVersion);
+            if (Array.isArray(versions)) {
+              requirementVersionText = versions
+                .map((item, index) => `需求单 ${index + 1}：版本 ${Number(item?.version || 0)}`)
+                .join("；") || "--";
+            }
+          } catch {}
+        }
         const warnings = draft.warnings || [];
         const conditions = draft.operationTaskSheet?.conditions || [];
         const previewKind = operationPersonnelPreviewKind(preview);
@@ -9985,7 +10032,22 @@
         if (addedScheduleCount) scheduleSummaryParts.push(`新增 ${addedScheduleCount} 个考试日程`);
         if (modifiedScheduleCount) scheduleSummaryParts.push(`修改 ${modifiedScheduleCount} 个考试日程`);
         const scheduleSummary = scheduleSummaryParts.join("；") || "考试日程无变化";
-        const recipients = draft.directoryMatch || {};
+        const matchedRecipients = draft.directoryMatch || {};
+        const configuredRecipients = draft.recipients || {};
+        const recipients = (matchedRecipients.to || []).length || (matchedRecipients.cc || []).length
+          ? matchedRecipients
+          : {
+            to: (configuredRecipients.toNames || []).map((name) => ({
+              group: configuredRecipients.toGroup,
+              name,
+            })),
+            cc: configuredRecipients.ccGroup && configuredRecipients.ccCount
+              ? [{
+                group: configuredRecipients.ccGroup,
+                name: `全部${configuredRecipients.ccCount}人`,
+              }]
+              : [],
+          };
         const batchName = draft.operationBatch?.batchName
           || draft.previewOperationSnapshot?.batch?.batchName
           || "--";
@@ -10000,7 +10062,7 @@
             <div class="operation-param-item"><div class="operation-param-label">运控环境</div><div class="operation-param-value">${safeText(state.environment || "--")}</div></div>
             <div class="operation-param-item"><div class="operation-param-label">项目</div><div class="operation-param-value">${safeText(project.projectName || project.taskId || "--")}</div></div>
             <div class="operation-param-item"><div class="operation-param-label">批次</div><div class="operation-param-value">${safeText(draft.batch?.code || "--")} · ${safeText(batchName)}</div></div>
-            <div class="operation-param-item"><div class="operation-param-label">需求版本</div><div class="operation-param-value">${safeText(requirementVersion)}</div></div>
+            <div class="operation-param-item"><div class="operation-param-label">需求版本</div><div class="operation-param-value">${safeText(requirementVersionText)}</div></div>
           </div>
           <div class="operation-detail-subsection"><h4>阻断条件与发送条件</h4><div class="task-meta">阻断条件：${warnings.length ? warnings.map((item) => safeText(item.message || item.code)).join("；") : "无"}</div><ul>${conditions.length ? conditions.map((item) => `<li>${safeText(item.name || item.label || "--")}：${item.satisfied ? "已满足" : "未满足"}</li>`).join("") : "<li>运控任务单条件将在发送前再次核验</li>"}</ul></div>
           <div class="operation-detail-subsection"><h4>批次发布</h4><div class="task-meta">${willPublishBatch ? "本次将发布运控批次" : "运控批次无需重复发布"}</div></div>
@@ -10253,7 +10315,7 @@
           return `<button class="operation-workflow-step ${safeText(status)}" type="button" data-workflow-step="${safeText(key)}" aria-selected="false"><span class="operation-workflow-index">${index + 1}</span><div class="operation-workflow-step-head"><span class="operation-workflow-step-title">${safeText(title)}</span><span class="operation-workflow-step-tags">${changeNotice ? `<span class="tag amber">${safeText(changeNotice)}</span>` : ""}<span class="tag ${status === "needs_review" || status === "reconciliation_required" ? "amber" : status === "ready" || status === "success" || status === "sent" ? "green" : ""}">${safeText(projectWorkflowStatusLabels[status] || status)}</span></span></div><p>${safeText(description)}<br>来源：${safeText(source)} · 点击查看</p>${connector}</button>`;
         }).join("");
         projectOperationBatchDraft.innerHTML = renderOperationBatchDraft(batchDraft);
-        projectPersonnelTaskDraft.innerHTML = renderWorkflowDraft(workflow.personnelDraft);
+        projectPersonnelTaskDraft.innerHTML = renderOperationPersonnelDraft(workflow.personnelDraft);
         projectOperationArchiveDraft.innerHTML = renderWorkflowDraft(workflow.archiveDraft);
 
         const requirements = projectExamRequirements(task);

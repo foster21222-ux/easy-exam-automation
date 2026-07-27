@@ -589,6 +589,26 @@ test("ordinary resend uses draft changes even when operation configuration is un
   assert.equal(accepted.statusCode, 202);
 });
 
+test("unpublished initial preview defers task sheet and directory inspection until send", async () => {
+  const harness = serviceHarness({
+    inspectionResult(instruction, inspection) {
+      assert.equal(instruction.allowUnpublishedPreview, true);
+      return {
+        ...inspection,
+        batch: { ...inspection.batch, published: false },
+        taskSheet: {},
+        sendRecords: [],
+        directoryMatch: { to: [], cc: [] },
+      };
+    },
+  });
+
+  const preview = await harness.service.preview("task-a", owner(), {});
+
+  assert.equal(preview.state.activePreview.kind, "initial");
+  assert.deepEqual(preview.state.draft.directoryMatch, { to: [], cc: [] });
+  assert.equal(preview.state.draft.previewOperationSnapshot.batch.published, false);
+});
 
 test("changing requirement 2 invalidates a preview even when the singular legacy alias is unchanged", async () => {
   const harness = serviceHarness();

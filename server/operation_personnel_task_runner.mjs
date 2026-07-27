@@ -657,6 +657,7 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
     throw operationControlError("分散在线监考任务筛选框", await search.count());
   }
   await search.fill(batchName);
+  await search.press("Enter");
   await page.getByText(batchName, { exact: true }).first().waitFor({
     state: "visible",
     timeout: 10_000,
@@ -1071,6 +1072,18 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     batch,
     text(instruction.environment),
   );
+  if (instruction.allowUnpublishedPreview === true && batch.published !== true) {
+    return normalizeOperationPersonnelSnapshot({
+      batch,
+      schedules: [],
+      personnel: {},
+      dates: {},
+      requirements: [],
+      taskSheet: {},
+      sendRecords: [],
+      directoryMatch: { to: [], cc: [] },
+    });
+  }
   const legacySectionReaders = [
     "readSchedules",
     "readPersonnel",
@@ -2278,7 +2291,10 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     .map(normalizeManagedSchedule)
     .sort((left, right) => left.requirementIndex - right.requirementIndex);
   const inspect = async () => {
-    const actual = await inspectOperationPersonnelTask(page, instruction, options);
+    const actual = await inspectOperationPersonnelTask(page, {
+      ...instruction,
+      allowUnpublishedPreview: kind === "initial",
+    }, options);
     const expected = structuredClone(baseline);
     if (kind === "initial") {
       expected.batch.published = actual.batch.published;
@@ -2320,6 +2336,34 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     instruction,
     options,
   });
+
+  if (kind === "initial" && baseline.batch.published !== true) {
+    const refreshed = await inspectOperationPersonnelTask(page, {
+      ...instruction,
+      allowUnpublishedPreview: false,
+    }, options);
+    const expected = structuredClone(baseline);
+    expected.batch.published = refreshed.batch.published;
+    const conflicts = operationPersonnelConflicts(expected, refreshed, kind);
+    if (conflicts.length) {
+      throw operationConflict(conflicts.map((item) => item.path).join("、"));
+    }
+    snapshot = refreshed;
+    const legacyInspection = [
+      "readSchedules",
+      "readPersonnel",
+      "readDates",
+      "readRequirements",
+      "readTaskSheet",
+      "readSendRecords",
+      "readDirectoryGroups",
+    ].some((name) => typeof options[name] === "function")
+      || typeof options.readVisibleSnapshot === "function";
+    if (!legacyInspection) {
+      await operationMethod(page, options, "closeTaskSheet")(page, instruction);
+      await locateOperationPersonnelBatch(page, instruction, options);
+    }
+  }
 
   const readSection = async (readName, key) => {
     const raw = await operationMethod(page, options, readName)(page, instruction);
@@ -2418,6 +2462,21 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     options,
   });
 
+  if (!target.directoryMatch.to.length && !target.directoryMatch.cc.length) {
+    const customDirectoryReader = options.readDirectoryGroups
+      || options.adapter?.readDirectoryGroups;
+    const groups = customDirectoryReader
+      ? await customDirectoryReader(page, instruction)
+      : await inspectVisiblePersonnelDirectory(page, instruction);
+    target.directoryMatch = directoryMatch(
+      text(instruction.environment),
+      matchOperationPersonnelRecipients({
+        environment: text(instruction.environment),
+        groups,
+      }),
+    );
+    instruction.target = structuredClone(target);
+  }
   const recipients = targetRecipients(target);
   const readAndVerifyRecipients = async () => {
     const actual = targetRecipients({

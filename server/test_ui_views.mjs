@@ -1302,7 +1302,9 @@ test("personnel confirmation renders a Chinese grouped comparison with exactly f
     },
     state: {
       environment: "test",
-      activePreview: { requirementVersion: 3 },
+      activePreview: {
+        requirementVersion: '[{"id":"requirement-1","version":1},{"id":"requirement-2","version":4}]',
+      },
       draft: {
         batch: { code: "EZT260003" },
         operationBatch: { batchName: "真实运控批次" },
@@ -1331,6 +1333,7 @@ test("personnel confirmation renders a Chinese grouped comparison with exactly f
   renderOperationPersonnelConfirmation(previewDto);
   const html = operationPersonnelConfirmContent.innerHTML;
   assert.match(operationPersonnelConfirmContent.innerHTML, /真实运控批次/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /需求单 1：版本 1；需求单 2：版本 4/);
   for (const label of [
     "人员落实开始日期",
     "人员落实结束日期",
@@ -1351,7 +1354,7 @@ test("personnel confirmation renders a Chinese grouped comparison with exactly f
   assert.equal((html.match(/data-operation-personnel-edit=/g) || []).length, 5);
   assert.equal((html.match(/type="date"/g) || []).length, 3);
   assert.doesNotMatch(html, /dates\.start|dates\.end|personnel\.monitorCount|batch\.published/);
-  assert.doesNotMatch(html, /\[\{"scheduleEntryId"|&quot;scheduleEntryId&quot;/);
+  assert.doesNotMatch(html, /\[\{|&quot;(?:id|scheduleEntryId)&quot;/);
   assert.equal((html.match(/<h4>人员配置<\/h4>/g) || []).length, 0);
   assert.doesNotMatch(html, /DRAFT_OLD|DRAFT_NEW/);
   assert.equal(operationPersonnelConfirmSendBtn.disabled, false);
@@ -1521,6 +1524,56 @@ test("personnel confirmation renders an adopted operation send record as a resen
     /data-operation-personnel-change-summary[^>]*hidden/,
   );
   assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /本次将发布运控批次/);
+});
+
+test("unpublished personnel confirmation falls back to the fixed recipient rule", () => {
+  const operationPersonnelConfirmContent = { innerHTML: "" };
+  const operationPersonnelConfirmSendBtn = { disabled: false };
+  const operationPersonnelProgress = { textContent: "" };
+  const operationPersonnelPreviewKind = compileInlineFunction(
+    "      function operationPersonnelPreviewKind(preview = {}) {",
+    "\n      function renderOperationPersonnelConfirmation",
+  );
+  const renderOperationPersonnelConfirmation = compileInlineFunction(
+    "      function renderOperationPersonnelConfirmation(preview = {}) {",
+    "\n      function collectOperationPersonnelPreviewEdits",
+    {
+      taskViewState: { currentProject: { taskId: "task-a", projectName: "示例考试" } },
+      operationPersonnelConfirmContent,
+      operationPersonnelConfirmSendBtn,
+      operationPersonnelProgress,
+      operationPersonnelPreviewKind,
+      safeText: (value) => String(value ?? ""),
+    },
+  );
+
+  renderOperationPersonnelConfirmation({
+    previewToken: "preview-a",
+    state: {
+      environment: "test",
+      activePreview: { kind: "initial", requirementVersion: 3 },
+      draft: {
+        batch: { code: "EZT260003" },
+        operationBatch: { batchName: "湖北邮政_2026年8月" },
+        previewOperationSnapshot: { batch: { published: false } },
+        schedules: [],
+        personnel: {},
+        dates: {},
+        operationTaskSheet: {},
+        directoryMatch: { to: [], cc: [] },
+        recipients: {
+          toGroup: "演练组",
+          toNames: ["张乐翔"],
+          ccGroup: "",
+          ccCount: 0,
+        },
+        warnings: [],
+      },
+    },
+  });
+
+  assert.match(operationPersonnelConfirmContent.innerHTML, /演练组 \/ 张乐翔/);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /本次将发布运控批次/);
 });
 
 test("personnel send payload contains only the server preview binding and resend summary", () => {
@@ -4303,6 +4356,54 @@ test("project detail renders sourced operation workflow and keeps local archive 
   assert.equal(contentExamRenderer.includes("考试 ${index + 1}"), false);
   assert.ok(html.includes("项目列表中的“归档”仅隐藏本地项目卡，两者互不替代"));
   assert.ok(html.includes("/operation-workflow?_=${Date.now()}"));
+});
+
+test("project personnel detail renders its structured draft instead of an empty fields fallback", () => {
+  const renderOperationPersonnelDraft = compileInlineFunction(
+    "      function renderOperationPersonnelDraft(draft = {}) {",
+    "\n      function operationBatchUpdateStatus",
+    {
+      safeText: (value) => String(value ?? ""),
+      operationBatchSourceLabel: (source) => source,
+    },
+  );
+  const rendered = renderOperationPersonnelDraft({
+    batch: {
+      code: "EZT260006",
+      batchName: "湖北邮政_2026年8月",
+    },
+    personnel: {
+      serviceType: "ATA 监考－分散在线监考",
+      platform: "悦站",
+      monitorRatio: "1:50",
+      monitorCount: 80,
+    },
+    dates: {
+      start: "2026-07-27",
+      end: "2026-08-19",
+      nameListDue: "2026-08-19",
+    },
+    recipients: {
+      toGroup: "演练组",
+      toNames: ["张乐翔"],
+      ccGroup: "",
+      ccCount: 0,
+    },
+    schedules: [{
+      scheduleCode: 1,
+      subjectName: "中国邮政集团公司湖北省分公司招聘考试V2",
+      start: "2026-08-22T15:30:00",
+      end: "2026-08-22T17:30:00",
+    }],
+    warnings: [],
+  });
+
+  assert.match(rendered, /EZT260006/);
+  assert.match(rendered, /湖北邮政_2026年8月/);
+  assert.match(rendered, /悦站/);
+  assert.match(rendered, /演练组/);
+  assert.match(rendered, /张乐翔/);
+  assert.doesNotMatch(rendered, /暂无参数/);
 });
 
 test("operation workflow and source cards open account-style editable dialogs", () => {

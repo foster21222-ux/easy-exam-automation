@@ -507,6 +507,7 @@ function fakePersonnelTaskListPage(rows = [], {
       searchReady = true;
     },
     fill: async (value) => events.push(`fill:${value}`),
+    press: async (key) => events.push(`press:${key}`),
   };
   return {
     events,
@@ -568,6 +569,7 @@ test("current personnel task list opens the exact fixed action row", async () =>
   assert.deepEqual(page.events, [
     "goto:http://operation.test/job/decentralizedInvigilate",
     "fill:目标批次",
+    "press:Enter",
     "wait:目标批次",
     "click:1",
     "wait:任务单发送需满足以下条件",
@@ -1433,6 +1435,32 @@ test("blocks before recipient selection when task-sheet schedules are unreadable
   assert.equal(page.events.includes("send:confirm"), false);
 });
 
+test("unpublished initial attempt publishes before opening the task sheet and resolving recipients", async () => {
+  const page = fakeOperationPage();
+  const instruction = validInstruction();
+  instruction.target.directoryMatch = { to: [], cc: [] };
+  instruction.baseline = structuredClone(instruction.target);
+  const options = attemptOptions(page, {
+    readDirectoryGroups: async () => {
+      page.events.push("directory:read");
+      return [{ name: "演练组", people: [{ id: "u1", name: "张乐翔" }] }];
+    },
+  });
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    instruction,
+    options,
+  );
+
+  assert.equal(result.status, "sent");
+  assert.ok(page.events.indexOf("publish:click") < page.events.indexOf("task-sheet:open"));
+  assert.ok(page.events.indexOf("publish:click") < page.events.indexOf("directory:read"));
+  assert.deepEqual(result.operationSnapshot.directoryMatch, {
+    to: [{ group: "演练组", id: "u1", name: "张乐翔" }],
+    cc: [],
+  });
+});
+
 test("published batches skip the publish click but still complete the checkpoint", async () => {
   const page = fakeOperationPage({ published: true });
   await operationPersonnelRunner.runOperationPersonnelAttempt(
@@ -2051,6 +2079,56 @@ test("inspection reads current task sheet sections after verifying the batch det
   assert.equal(snapshot.schedules.length, 1);
   assert.equal(snapshot.personnel.platform, "悦站");
   assert.equal(snapshot.sendRecords[0].type, "首次发送");
+  assert.deepEqual(snapshot.directoryMatch, { to: [], cc: [] });
+});
+
+test("unpublished initial preview reads only batch identity without opening a task sheet", async () => {
+  const opened = [];
+  const snapshot = await inspectOperationPersonnelTask(
+    {},
+    {
+      environment: "test",
+      allowUnpublishedPreview: true,
+      batch: { code: "EZT260003", batchName: "目标批次" },
+    },
+    {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => opened.push("batch"),
+      readBatch: async () => ({
+        code: "EZT260003",
+        batchName: "目标批次",
+        published: false,
+      }),
+      readSchedules: async () => {
+        throw new Error("未发布预览不应读取考试日程");
+      },
+      readPersonnel: async () => {
+        throw new Error("未发布预览不应读取人员配置");
+      },
+      readDates: async () => {
+        throw new Error("未发布预览不应读取人员日期");
+      },
+      readRequirements: async () => {
+        throw new Error("未发布预览不应读取考务需求");
+      },
+      openPersonnelTaskSheet: async () => opened.push("task-sheet"),
+      readTaskSheet: async () => {
+        throw new Error("未发布预览不应读取任务单");
+      },
+      readSendRecords: async () => {
+        throw new Error("未发布预览不应读取发送记录");
+      },
+      readDirectoryGroups: async () => {
+        throw new Error("未发布预览不应读取人员目录");
+      },
+    },
+  );
+
+  assert.deepEqual(opened, ["batch"]);
+  assert.equal(snapshot.batch.published, false);
+  assert.equal(snapshot.personnel.platform, "");
+  assert.deepEqual(snapshot.taskSheet, { type: "", conditions: [], content: "" });
+  assert.deepEqual(snapshot.sendRecords, []);
   assert.deepEqual(snapshot.directoryMatch, { to: [], cc: [] });
 });
 

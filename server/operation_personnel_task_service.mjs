@@ -556,6 +556,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         environment,
         batch: draft.batch,
         batchCode: draft.batch.code,
+        allowUnpublishedPreview: true,
       }));
       externalBaseline = !existing.lastSuccessfulFingerprint
         && snapshot.sendRecords.length > 0;
