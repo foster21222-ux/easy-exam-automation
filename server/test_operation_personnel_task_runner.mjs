@@ -1074,10 +1074,10 @@ function validInstruction(overrides = {}) {
       scheduleEntryId: "schedule-1",
       scheduleCode: 1,
       subjectCode: "SUB-1",
-      subjectName: "科目一",
-      start: "2026-08-22 10:00",
-      end: "2026-08-22 11:00",
-      durationMinutes: 60,
+      subjectName: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+      durationMinutes: 120,
       earlyLoginMinutes: 30,
     }],
     personnel: {
@@ -1110,6 +1110,12 @@ function validInstruction(overrides = {}) {
     environment: "test",
     kind: "initial",
     batch: target.batch,
+    managedSchedules: [{
+      requirementIndex: 0,
+      name: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+    }],
     target,
     checkpoints: {},
     ...overrides,
@@ -1122,7 +1128,7 @@ function fakeOperationPage(overrides = {}) {
     events: [],
     state: {
       batch: { ...target.batch, published: overrides.published === true },
-      schedules: overrides.schedules ?? [],
+      schedules: overrides.schedules ?? structuredClone(target.schedules),
       personnel: {
         ...target.personnel,
         platform: overrides.personnelPlatform ?? "",
@@ -1232,9 +1238,14 @@ function attemptOptions(page = fakeOperationPage(), overrides = {}) {
       page.events.push("publish:click");
       page.state.batch.published = true;
     },
-    syncExamSchedules: async (_actualPage, schedules) => {
-      page.events.push("schedules:fill");
-      page.state.schedules = structuredClone(schedules);
+    syncExamSchedules: async () => {
+      throw new Error("人员任务不得写考试日程");
+    },
+    findScheduleRows: async () => {
+      throw new Error("人员任务不得定位待删除日程");
+    },
+    deleteSchedule: async () => {
+      throw new Error("人员任务不得删除考试日程");
     },
     syncPersonnelConfig: async (_actualPage, personnel) => {
       page.events.push("personnel:fill");
@@ -1336,7 +1347,7 @@ test("attempt applies checkpoints in the approved order", async () => {
   assert.deepEqual(observed.filter((item) => item.endsWith(":completed")), [
     "inspect_batch:completed",
     "publish_batch:completed",
-    "sync_exam_schedules:completed",
+    "verify_exam_schedules:completed",
     "sync_personnel_config:completed",
     "sync_personnel_dates:completed",
     "sync_exam_service_requirements:completed",
@@ -1345,6 +1356,36 @@ test("attempt applies checkpoints in the approved order", async () => {
     "submit_send:completed",
     "verify_send_record:completed",
   ]);
+});
+
+test("attempt verifies schedules read only and never invokes schedule mutation", async () => {
+  const page = fakeOperationPage();
+  const observed = [];
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      onCheckpoint: async ({ name, status }) => observed.push(`${name}:${status}`),
+    }),
+  );
+  assert.ok(observed.includes("verify_exam_schedules:completed"));
+  assert.equal(observed.some((item) => item.startsWith("sync_exam_schedules:")), false);
+  assert.equal(page.events.includes("schedules:fill"), false);
+});
+
+test("legacy completed schedule sync is reverified read only", async () => {
+  const instruction = validInstruction();
+  instruction.checkpoints.sync_exam_schedules = {
+    status: "completed",
+    targetDigest: "legacy",
+  };
+  const observed = [];
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    instruction,
+    attemptOptions(fakeOperationPage(), {
+      onCheckpoint: async ({ name, status }) => observed.push(`${name}:${status}`),
+    }),
+  );
+  assert.ok(observed.includes("verify_exam_schedules:completed"));
 });
 
 test("published batches skip the publish click but still complete the checkpoint", async () => {
@@ -1372,7 +1413,7 @@ test("published inspection evidence survives navigation to the task sheet", asyn
   assert.equal(batchReads, 1);
 });
 
-test("unchanged inspected sections do not require a second page read", async () => {
+test("schedule verification rereads while other unchanged sections reuse inspection", async () => {
   const page = fakeOperationPage({
     published: true,
     schedules: validInstruction().target.schedules,
@@ -1385,7 +1426,7 @@ test("unchanged inspected sections do not require a second page read", async () 
     attemptOptions(page, {
       readSchedules: async () => {
         scheduleReads += 1;
-        if (scheduleReads > 1) throw new Error("schedule editor is no longer visible");
+        if (scheduleReads > 2) throw new Error("schedule editor is no longer visible");
         return page.state.schedules;
       },
       readPersonnel: async () => {
@@ -1395,7 +1436,7 @@ test("unchanged inspected sections do not require a second page read", async () 
       },
     }),
   );
-  assert.equal(scheduleReads, 1);
+  assert.equal(scheduleReads, 2);
   assert.equal(personnelReads, 1);
 });
 
@@ -1707,24 +1748,21 @@ test("resume after submit never clicks final confirmation again", async () => {
   assert.equal(result.status, "sent");
 });
 
-test("schedule deletion requires one exact schedule entry id and code row", async () => {
-  const baseline = validInstruction().target;
-  const target = { ...structuredClone(baseline), schedules: [] };
+test("managed schedule mismatch blocks before personnel mutation", async () => {
+  const instruction = validInstruction();
   const page = fakeOperationPage({
     published: true,
-    schedules: baseline.schedules,
+    schedules: [],
     personnelPlatform: "悦站",
-    dates: baseline.dates,
-    requirements: baseline.requirements,
+    dates: instruction.target.dates,
+    requirements: instruction.target.requirements,
   });
   await assert.rejects(() => operationPersonnelRunner.runOperationPersonnelAttempt(
-    validInstruction({ kind: "resend", baseline, target }),
-    attemptOptions(page, {
-      findScheduleRows: async () => [{ id: "row-a" }, { id: "row-b" }],
-      deleteSchedule: async () => page.events.push("schedule:delete"),
-    }),
-  ), { code: "PERSONNEL_SCHEDULE_NOT_UNIQUE" });
-  assert.equal(page.events.includes("schedule:delete"), false);
+    instruction,
+    attemptOptions(page),
+  ), { code: "PERSONNEL_BATCH_SCHEDULE_CONFLICT" });
+  assert.equal(page.events.includes("personnel:fill"), false);
+  assert.equal(page.events.includes("send:confirm"), false);
 });
 
 test("task sheet conditions must all be satisfied before recipients are selected", async () => {

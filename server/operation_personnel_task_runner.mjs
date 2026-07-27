@@ -39,6 +39,15 @@ function normalizeSchedule(raw = {}) {
   };
 }
 
+function normalizeManagedSchedule(raw = {}) {
+  return {
+    requirementIndex: Number(raw.requirementIndex),
+    name: text(raw.name),
+    start: text(raw.start),
+    end: text(raw.end),
+  };
+}
+
 function byScheduleCode(left, right) {
   return Number(left.scheduleCode || 0) - Number(right.scheduleCode || 0)
     || text(left.scheduleCode).localeCompare(text(right.scheduleCode));
@@ -2063,7 +2072,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
 const OPERATION_PERSONNEL_CHECKPOINTS = Object.freeze([
   "inspect_batch",
   "publish_batch",
-  "sync_exam_schedules",
+  "verify_exam_schedules",
   "sync_personnel_config",
   "sync_personnel_dates",
   "sync_exam_service_requirements",
@@ -2091,6 +2100,13 @@ function sameData(left, right) {
 function operationConflict(detail) {
   const error = new Error(`运控人员任务状态冲突：${detail}`);
   error.code = "PERSONNEL_OPERATION_CONFLICT";
+  error.status = 409;
+  return error;
+}
+
+function batchScheduleConflict(detail) {
+  const error = new Error(`批次受管日程冲突：${detail}`);
+  error.code = "PERSONNEL_BATCH_SCHEDULE_CONFLICT";
   error.status = 409;
   return error;
 }
@@ -2225,20 +2241,13 @@ function assertTaskSheetReady(expected, actual) {
   return actual;
 }
 
-function scheduleNotUnique(schedule, count) {
-  const error = new Error(
-    `考试日程 ${schedule.scheduleEntryId || "缺少稳定 ID"}/${schedule.scheduleCode || "缺少代码"}`
-    + ` 必须精确匹配 1 行，实际 ${count} 行`,
-  );
-  error.code = "PERSONNEL_SCHEDULE_NOT_UNIQUE";
-  error.status = 409;
-  return error;
-}
-
 async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   const target = normalizeOperationPersonnelSnapshot(instruction.target || {});
   const baseline = normalizeOperationPersonnelSnapshot(instruction.baseline || instruction.target || {});
   const kind = instruction.kind === "resend" ? "resend" : "initial";
+  const managedSchedules = [...(instruction.managedSchedules || [])]
+    .map(normalizeManagedSchedule)
+    .sort((left, right) => left.requirementIndex - right.requirementIndex);
   const inspect = async () => {
     const actual = await inspectOperationPersonnelTask(page, instruction, options);
     const expected = structuredClone(baseline);
@@ -2324,47 +2333,30 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     });
   };
 
-  await sync(
-    OPERATION_PERSONNEL_CHECKPOINTS[2],
-    "syncExamSchedules",
-    "readSchedules",
-    "schedules",
-    async () => {
-      const targetCodes = new Set(target.schedules.map((item) => text(item.scheduleCode)));
-      const deletions = snapshot.schedules.filter(
-        (item) => !targetCodes.has(text(item.scheduleCode)),
-      );
-      for (const schedule of deletions) {
-        if (!schedule.scheduleEntryId || !text(schedule.scheduleCode)) {
-          throw scheduleNotUnique(schedule, 0);
-        }
-        const rows = await operationMethod(page, options, "findScheduleRows")(
-          page,
-          {
-            scheduleEntryId: schedule.scheduleEntryId,
-            scheduleCode: schedule.scheduleCode,
-          },
-          instruction,
-        );
-        const count = Array.isArray(rows) ? rows.length : Number(rows);
-        if (count !== 1) throw scheduleNotUnique(schedule, Number.isFinite(count) ? count : 0);
-        await operationMethod(page, options, "deleteSchedule")(
-          page,
-          schedule,
-          Array.isArray(rows) ? rows[0] : undefined,
-          instruction,
-        );
-      }
-      if (!sameData(snapshot.schedules, target.schedules)) {
-        await operationMethod(page, options, "syncExamSchedules")(
-          page,
-          target.schedules,
-          snapshot.schedules,
-          instruction,
-        );
-      }
-    },
-  );
+  const readManagedSchedules = async () => {
+    const visible = [...(await operationMethod(page, options, "readSchedules")(page, instruction) || [])]
+      .map(normalizeSchedule)
+      .sort(byScheduleCode)
+      .map((schedule, requirementIndex) => ({
+        requirementIndex,
+        name: schedule.subjectName,
+        start: schedule.start,
+        end: schedule.end,
+      }));
+    if (!sameData(visible, managedSchedules)) {
+      throw batchScheduleConflict("运控可见日程与已确认受管日程不一致");
+    }
+    return visible;
+  };
+  await runPersonnelCheckpoint({
+    name: OPERATION_PERSONNEL_CHECKPOINTS[2],
+    target: managedSchedules,
+    action: async () => {},
+    verify: readManagedSchedules,
+    verifyCompleted: readManagedSchedules,
+    instruction,
+    options,
+  });
   await sync(
     OPERATION_PERSONNEL_CHECKPOINTS[3],
     "syncPersonnelConfig",

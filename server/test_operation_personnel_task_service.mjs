@@ -173,6 +173,20 @@ function serviceHarness(options = {}) {
       )],
     };
   };
+  const setSynchronizedManagedSchedule = (overrides = {}) => {
+    const schedule = managedSchedule(overrides);
+    task.config.examRequirement.fields["考试日期时间"] = [
+      schedule.start.replace("T", " "),
+      schedule.end.replace("T", " "),
+    ].join(" - ");
+    task.config.operationBatch.status = "success";
+    task.config.operationBatch.managedSnapshot = {
+      batchName: "湖北邮政招聘考试",
+      examStartDate: schedule.start.slice(0, 10),
+      examEndDate: schedule.end.slice(0, 10),
+      schedules: [schedule],
+    };
+  };
   setBatchScheduleStatus(options.batchScheduleStatus || "success");
   let batchChangedAfterInspection = false;
 
@@ -325,6 +339,10 @@ function serviceHarness(options = {}) {
         batchChangedAfterInspection = true;
         setBatchScheduleStatus(options.changeBatchAfterInspection);
       }
+      if (options.changeManagedScheduleAfterInspection && !batchChangedAfterInspection) {
+        batchChangedAfterInspection = true;
+        setSynchronizedManagedSchedule(options.changeManagedScheduleAfterInspection);
+      }
       if (options.externalBaseline) {
         result.sendRecords = structuredClone(options.externalSendRecords || [{
           type: "首次发送",
@@ -371,6 +389,7 @@ function serviceHarness(options = {}) {
     persistedStates,
     attempts: attemptInstructions,
     setBatchScheduleStatus,
+    setSynchronizedManagedSchedule,
     setInspection(value) {
       inspection = value;
     },
@@ -446,6 +465,20 @@ test("preview rechecks the batch schedule gate before persisting", async () => {
   assert.equal(harness.persistedStates.length, 0);
 });
 
+test("preview rejects a successful managed snapshot changed before persistence", async () => {
+  const harness = serviceHarness({
+    changeManagedScheduleAfterInspection: {
+      start: "2026-08-22T10:00:00",
+      end: "2026-08-22T12:00:00",
+    },
+  });
+  await assert.rejects(
+    harness.service.preview("task-a", ADMIN),
+    (error) => error.code === "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+  );
+  assert.equal(harness.persistedStates.length, 0);
+});
+
 test("send invalidates a confirmed preview when batch schedules changed", async () => {
   const harness = serviceHarness({ batchScheduleStatus: "success" });
   const preview = await harness.service.preview("task-a", ADMIN);
@@ -458,6 +491,25 @@ test("send invalidates a confirmed preview when batch schedules changed", async 
     (error) => error.code === "PERSONNEL_BATCH_UPDATE_REQUIRED",
   );
   assert.equal(harness.attempts.length, 0);
+});
+
+test("send rejects a successful managed schedule changed after preview", async () => {
+  const harness = serviceHarness({ batchScheduleStatus: "success" });
+  const preview = await harness.service.preview("task-a", ADMIN);
+  harness.setSynchronizedManagedSchedule({
+    start: "2026-08-22T10:00:00",
+    end: "2026-08-22T12:00:00",
+  });
+
+  await assert.rejects(
+    harness.service.send("task-a", ADMIN, {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+    }),
+    (error) => error.code === "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+  );
+  assert.equal(harness.attempts.length, 0);
+  assert.equal(harness.task.config.operationPersonnelTask.activePreview, null);
 });
 
 test("send keeps managed schedules outside the operation target and forwards them read-only", async () => {
