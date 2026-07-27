@@ -637,7 +637,9 @@ export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
 }
 
 export async function openVisiblePersonnelTaskSheet(page, instruction = {}, options = {}) {
+  const batchCode = text(instruction.batch?.code || instruction.batchCode);
   const batchName = text(instruction.batch?.batchName || instruction.batchName);
+  if (!batchCode) throw new Error("缺少运控批次代码");
   if (!batchName) throw new Error("缺少运控批次名称");
   const baseUrl = text(
     options.baseUrl
@@ -656,38 +658,113 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   if (await search.count() !== 1) {
     throw operationControlError("分散在线监考任务筛选框", await search.count());
   }
-  await search.fill(batchName);
+  await search.fill(batchCode);
   await search.press("Enter");
-  await page.getByText(batchName, { exact: true }).first().waitFor({
+  await page.getByText(batchCode, { exact: true }).first().waitFor({
     state: "visible",
     timeout: 10_000,
   });
 
-  const tables = page.locator("table:visible");
-  const matches = [];
-  for (let index = 0; index < await tables.count(); index += 1) {
-    const table = tables.nth(index);
-    const headers = (await table.locator("thead th").allInnerTexts()).map(text);
-    if (headers.includes("批次名称")) {
-      matches.push({ table, headers });
+  const currentPage = async () => {
+    const pagination = page.locator(".ant-pagination:visible");
+    if (await pagination.count() === 0) return 1;
+    if (await pagination.count() !== 1) {
+      throw operationControlError("分散在线监考任务分页", await pagination.count());
+    }
+    const active = page.locator(".ant-pagination-item-active:visible");
+    if (await active.count() !== 1) {
+      throw operationControlError("分散在线监考任务当前页", await active.count());
+    }
+    const value = text(await active.first().getAttribute("title"))
+      || text(await active.first().innerText());
+    if (!/^\d+$/.test(value)) throw new Error(`分散在线监考任务当前页无效：${value || "空"}`);
+    return Number(value);
+  };
+  const nextPage = async () => {
+    const pagination = page.locator(".ant-pagination:visible");
+    if (await pagination.count() === 0) return false;
+    const next = page.locator(".ant-pagination .ant-pagination-next:visible");
+    if (await next.count() !== 1) {
+      throw operationControlError("分散在线监考任务下一页", await next.count());
+    }
+    const control = next.first();
+    const classes = text(await control.getAttribute("class")).split(/\s+/);
+    if (classes.includes("ant-pagination-disabled")
+      || text(await control.getAttribute("aria-disabled")) === "true") {
+      return false;
+    }
+    const before = await currentPage();
+    const clickable = control.locator("button, a").first();
+    if (await clickable.count() !== 1) {
+      throw operationControlError("分散在线监考任务下一页按钮", await clickable.count());
+    }
+    await clickable.click();
+    if (typeof page.waitForFunction === "function") {
+      await page.waitForFunction(
+        (expected) => Number(
+          document.querySelector(".ant-pagination-item-active")?.getAttribute("title")
+          || document.querySelector(".ant-pagination-item-active")?.textContent,
+        ) === expected,
+        before + 1,
+      );
+    }
+    return true;
+  };
+  const readPage = async () => {
+    const tables = page.locator("table:visible");
+    const matches = [];
+    for (let index = 0; index < await tables.count(); index += 1) {
+      const table = tables.nth(index);
+      const headers = (await table.locator("thead th").allInnerTexts()).map(text);
+      if (headers.includes("批次代码") && headers.includes("批次名称")) {
+        matches.push({ table, headers });
+      }
+    }
+    if (matches.length !== 1) {
+      throw operationControlError("分散在线监考任务主表", matches.length);
+    }
+    const { table, headers } = matches[0];
+    const batchCodeIndex = headers.indexOf("批次代码");
+    const batchNameIndex = headers.indexOf("批次名称");
+    const rows = table.locator("tbody tr");
+    const exact = [];
+    for (let index = 0; index < await rows.count(); index += 1) {
+      const cells = (await rows.nth(index).locator("td").allInnerTexts()).map(text);
+      if (cells[batchCodeIndex] === batchCode && cells[batchNameIndex] === batchName) {
+        exact.push({ pageNumber: await currentPage(), rowIndex: index });
+      }
+    }
+    return exact;
+  };
+
+  const exactRows = [];
+  do {
+    exactRows.push(...await readPage());
+  } while (await nextPage());
+  if (exactRows.length !== 1) {
+    throw new Error(`运控批次 ${batchCode}/${batchName} 精确匹配到 ${exactRows.length} 行`);
+  }
+  const selected = exactRows[0];
+  if (await currentPage() > selected.pageNumber) {
+    await search.fill(batchCode);
+    await search.press("Enter");
+    if (typeof page.waitForFunction === "function") {
+      await page.waitForFunction(() => Number(
+        document.querySelector(".ant-pagination-item-active")?.getAttribute("title")
+        || document.querySelector(".ant-pagination-item-active")?.textContent,
+      ) === 1);
+    }
+    if (await currentPage() !== 1) {
+      throw new Error(`运控任务查询后未返回第 1 页，无法重新定位 ${batchCode}/${batchName}`);
     }
   }
-  if (matches.length !== 1) {
-    throw operationControlError("分散在线监考任务主表", matches.length);
-  }
-  const { table, headers } = matches[0];
-  const batchNameIndex = headers.indexOf("批次名称");
-  const rows = table.locator("tbody tr");
-  const exactRows = [];
-  for (let index = 0; index < await rows.count(); index += 1) {
-    const cells = (await rows.nth(index).locator("td").allInnerTexts()).map(text);
-    if (cells[batchNameIndex] === batchName) exactRows.push(index);
-  }
-  if (exactRows.length !== 1) {
-    throw new Error(`运控批次名称 ${batchName} 精确匹配到 ${exactRows.length} 行`);
+  while (await currentPage() < selected.pageNumber) {
+    if (!await nextPage()) {
+      throw new Error(`未能返回运控批次 ${batchCode}/${batchName} 所在第 ${selected.pageNumber} 页`);
+    }
   }
   const action = page.locator(".ant-table-fixed-right table:visible tbody tr")
-    .nth(exactRows[0])
+    .nth(selected.rowIndex)
     .getByText("发送任务单", { exact: true });
   await clickUniqueVisible(action, "分散在线监考发送任务单入口");
   const taskSheet = page.locator(".ant-modal:visible").filter({
@@ -2513,6 +2590,11 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     name: OPERATION_PERSONNEL_CHECKPOINTS[8],
     target: submitTarget,
     action: async () => {
+      assertManagedSchedules(
+        managedSchedules,
+        await operationMethod(page, options, "readTaskSheetSchedules")(page, instruction),
+      );
+      await readAndVerifyRecipients();
       await operationMethod(page, options, "confirmSend")(page, pendingAttempt, instruction);
       return pendingAttempt;
     },

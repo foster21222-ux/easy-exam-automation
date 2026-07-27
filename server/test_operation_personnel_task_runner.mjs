@@ -441,23 +441,20 @@ test("checked inline mail recipients are split between to and cc", () => {
 });
 
 function fakePersonnelTaskListPage(rows = [], {
+  additionalPages = [],
   searchInitiallyMissing = false,
   taskSheetTextHasNoExactNode = false,
 } = {}) {
   const events = [];
+  const pages = [rows, ...additionalPages];
+  let pageIndex = 0;
   let searchReady = !searchInitiallyMissing;
-  const rowLocators = rows.map((cells, rowIndex) => ({
-    locator: (selector) => {
-      assert.equal(selector, "td");
-      return { allInnerTexts: async () => cells };
-    },
-    rowIndex,
-  }));
   const mainTable = {
     locator(selector) {
       if (selector === "thead th") {
         return {
           allInnerTexts: async () => [
+            "批次代码",
             "批次名称",
             "项目部归属",
             "项目经理",
@@ -467,6 +464,13 @@ function fakePersonnelTaskListPage(rows = [], {
         };
       }
       if (selector === "tbody tr") {
+        const rowLocators = pages[pageIndex].map((cells, rowIndex) => ({
+          locator: (rowSelector) => {
+            assert.equal(rowSelector, "td");
+            return { allInnerTexts: async () => cells };
+          },
+          rowIndex,
+        }));
         return {
           count: async () => rowLocators.length,
           nth: (index) => rowLocators[index],
@@ -507,7 +511,46 @@ function fakePersonnelTaskListPage(rows = [], {
       searchReady = true;
     },
     fill: async (value) => events.push(`fill:${value}`),
-    press: async (key) => events.push(`press:${key}`),
+    press: async (key) => {
+      if (key === "Enter") pageIndex = 0;
+      events.push(`press:${key}`);
+    },
+  };
+  const pagination = {
+    count: async () => pages.length > 1 ? 1 : 0,
+  };
+  const activePage = {
+    count: async () => 1,
+    first() {
+      return this;
+    },
+    getAttribute: async (name) => name === "title" ? String(pageIndex + 1) : "",
+    innerText: async () => String(pageIndex + 1),
+  };
+  const nextPage = {
+    count: async () => pages.length > 1 ? 1 : 0,
+    first() {
+      return this;
+    },
+    getAttribute: async (name) => {
+      if (name === "class") {
+        return pageIndex >= pages.length - 1
+          ? "ant-pagination-next ant-pagination-disabled"
+          : "ant-pagination-next";
+      }
+      if (name === "aria-disabled") return pageIndex >= pages.length - 1 ? "true" : "false";
+      return "";
+    },
+    locator: () => ({
+      first() {
+        return this;
+      },
+      count: async () => 1,
+      click: async () => {
+        pageIndex += 1;
+        events.push(`next:${pageIndex + 1}`);
+      },
+    }),
   };
   return {
     events,
@@ -518,6 +561,9 @@ function fakePersonnelTaskListPage(rows = [], {
       }
       if (selector === "table:visible") return tables;
       if (selector === ".ant-table-fixed-right table:visible tbody tr") return fixedRows;
+      if (selector === ".ant-pagination:visible") return pagination;
+      if (selector === ".ant-pagination-item-active:visible") return activePage;
+      if (selector === ".ant-pagination .ant-pagination-next:visible") return nextPage;
       if (selector === ".ant-modal:visible") {
         return {
           filter: ({ hasText }) => {
@@ -556,21 +602,21 @@ test("current personnel task list opens the exact fixed action row", async () =>
     "function",
   );
   const page = fakePersonnelTaskListPage([
-    ["其它批次", "项目实施五部", "经理", "", ""],
-    ["目标批次", "项目实施五部", "经理", "2026-07-23 10:09:34", "2026-07-23 10:09:34"],
+    ["EZT260002", "其它批次", "项目实施五部", "经理", "", ""],
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "2026-07-23 10:09:34", "2026-07-23 10:09:34"],
   ]);
 
   await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
     page,
-    { batch: { batchName: "目标批次" } },
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
     { baseUrl: "http://operation.test/" },
   );
 
   assert.deepEqual(page.events, [
     "goto:http://operation.test/job/decentralizedInvigilate",
-    "fill:目标批次",
+    "fill:EZT260003",
     "press:Enter",
-    "wait:目标批次",
+    "wait:EZT260003",
     "click:1",
     "wait:任务单发送需满足以下条件",
   ]);
@@ -578,12 +624,12 @@ test("current personnel task list opens the exact fixed action row", async () =>
 
 test("current personnel task list waits for its React filter", async () => {
   const page = fakePersonnelTaskListPage([
-    ["目标批次", "项目实施五部", "经理", "", ""],
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
   ], { searchInitiallyMissing: true });
 
   await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
     page,
-    { batch: { batchName: "目标批次" } },
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
     { baseUrl: "http://operation.test/" },
   );
 
@@ -593,12 +639,12 @@ test("current personnel task list waits for its React filter", async () => {
 
 test("current personnel task list waits for the visible modal instead of an exact text node", async () => {
   const page = fakePersonnelTaskListPage([
-    ["目标批次", "项目实施五部", "经理", "", ""],
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
   ], { taskSheetTextHasNoExactNode: true });
 
   await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
     page,
-    { batch: { batchName: "目标批次" } },
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
     { baseUrl: "http://operation.test/" },
   );
 
@@ -606,23 +652,77 @@ test("current personnel task list waits for the visible modal instead of an exac
   assert.equal(page.events.includes("wait:任务单发送需满足以下条件"), true);
 });
 
-test("current personnel task list blocks duplicate exact batch names", async () => {
+test("current personnel task list binds the action to the exact code and name row", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["EZT999999", "目标批次", "项目实施五部", "经理", "", ""],
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
+  ]);
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
+    { baseUrl: "http://operation.test" },
+  );
+
+  assert.equal(page.events.includes("click:0"), false);
+  assert.equal(page.events.includes("click:1"), true);
+});
+
+test("current personnel task list finds the exact code and name across result pages", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["EZT999999", "目标批次", "项目实施五部", "经理", "", ""],
+  ], {
+    additionalPages: [[
+      ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
+    ]],
+  });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
+    { baseUrl: "http://operation.test" },
+  );
+
+  assert.equal(page.events.includes("next:2"), true);
+  assert.equal(page.events.includes("click:0"), true);
+});
+
+test("current personnel task list returns to the exact row page after proving later pages do not match", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
+  ], {
+    additionalPages: [[
+      ["EZT999999", "目标批次", "项目实施五部", "经理", "", ""],
+    ]],
+  });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
+    { baseUrl: "http://operation.test" },
+  );
+
+  assert.equal(page.events.filter((event) => event === "press:Enter").length, 2);
+  assert.equal(page.events.includes("click:0"), true);
+});
+
+test("current personnel task list blocks duplicate exact code and name rows", async () => {
   assert.equal(
     typeof operationPersonnelRunner.openVisiblePersonnelTaskSheet,
     "function",
   );
   const page = fakePersonnelTaskListPage([
-    ["目标批次", "项目实施五部", "经理", "", ""],
-    ["目标批次", "项目实施五部", "经理", "", ""],
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
   ]);
 
   await assert.rejects(
     () => operationPersonnelRunner.openVisiblePersonnelTaskSheet(
       page,
-      { batch: { batchName: "目标批次" } },
+      { batch: { code: "EZT260003", batchName: "目标批次" } },
       { baseUrl: "http://operation.test" },
     ),
-    /目标批次.*精确匹配到 2 行/,
+    /EZT260003.*目标批次.*精确匹配到 2 行/,
   );
   assert.equal(page.events.some((event) => event.startsWith("click:")), false);
 });
@@ -1435,6 +1535,50 @@ test("blocks before recipient selection when task-sheet schedules are unreadable
   assert.equal(page.events.includes("send:confirm"), false);
 });
 
+test("blocks before final send when task-sheet schedules drift during recipient selection", async () => {
+  const page = fakeOperationPage();
+  const options = attemptOptions(page, {
+    selectRecipients: async (_actualPage, recipients) => {
+      page.events.push("recipients:select");
+      page.state.selectedRecipients = structuredClone(recipients);
+      page.state.schedules = [{
+        ...page.state.schedules[0],
+        subjectName: "收件人选择期间发生变化",
+      }];
+    },
+  });
+
+  await assert.rejects(
+    operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
+    (error) => error.code === "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+  );
+  assert.equal(page.events.includes("recipients:select"), true);
+  assert.equal(page.events.includes("send:confirm"), false);
+});
+
+test("blocks before final send when selected recipients drift after checkpoint verification", async () => {
+  const page = fakeOperationPage();
+  let recipientReads = 0;
+  const options = attemptOptions(page, {
+    readSelectedRecipients: async () => {
+      recipientReads += 1;
+      if (recipientReads === 1) return page.state.selectedRecipients;
+      return {
+        to: [{ id: "unexpected", name: "其他人员" }],
+        cc: [],
+      };
+    },
+  });
+
+  await assert.rejects(
+    operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
+    (error) => error.code === "PERSONNEL_OPERATION_CONFLICT"
+      && /select_recipients/.test(error.message),
+  );
+  assert.equal(recipientReads, 2);
+  assert.equal(page.events.includes("send:confirm"), false);
+});
+
 test("unpublished initial attempt publishes before opening the task sheet and resolving recipients", async () => {
   const page = fakeOperationPage();
   const instruction = validInstruction();
@@ -1486,7 +1630,7 @@ test("published inspection evidence survives navigation to the task sheet", asyn
   assert.equal(batchReads, 1);
 });
 
-test("schedule verification rereads task-sheet schedules while other unchanged sections reuse inspection", async () => {
+test("schedule verification rereads task-sheet schedules before final send while other sections reuse inspection", async () => {
   const page = fakeOperationPage({
     published: true,
     schedules: validInstruction().target.schedules,
@@ -1505,7 +1649,7 @@ test("schedule verification rereads task-sheet schedules while other unchanged s
       },
       readTaskSheetSchedules: async () => {
         taskSheetScheduleReads += 1;
-        if (taskSheetScheduleReads > 1) throw new Error("task-sheet schedule reader should not run again");
+        if (taskSheetScheduleReads > 2) throw new Error("task-sheet schedule reader should not run again");
         return page.state.schedules;
       },
       readPersonnel: async () => {
@@ -1516,7 +1660,7 @@ test("schedule verification rereads task-sheet schedules while other unchanged s
     }),
   );
   assert.equal(scheduleReads, 2);
-  assert.equal(taskSheetScheduleReads, 1);
+  assert.equal(taskSheetScheduleReads, 2);
   assert.equal(personnelReads, 1);
 });
 

@@ -5636,7 +5636,7 @@ async function handleOperationPersonnelTaskSend(taskId, req, res) {
 const operationPersonnelCheckpointOrder = [
   "inspect_batch",
   "publish_batch",
-  "sync_exam_schedules",
+  "verify_exam_schedules",
   "sync_personnel_config",
   "sync_personnel_dates",
   "sync_exam_service_requirements",

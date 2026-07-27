@@ -60,6 +60,12 @@ test("server wires exact personnel task routes to one environment-bound service"
   );
   assert.ok(recheckHandler.includes("operationPersonnelTaskRecheckResponse(result)"));
   assert.equal(recheckHandler.includes("json(res, 200, result)"), false);
+  const checkpointOrder = serverSource.slice(
+    serverSource.indexOf("const operationPersonnelCheckpointOrder"),
+    serverSource.indexOf("function operationPersonnelAttemptResponse"),
+  );
+  assert.ok(checkpointOrder.includes('"verify_exam_schedules"'));
+  assert.equal(checkpointOrder.includes('"sync_exam_schedules"'), false);
 });
 
 test("server wires operation batch update state preview start and attempt routes", () => {
