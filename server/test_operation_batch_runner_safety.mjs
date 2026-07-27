@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   OPERATION_BATCH_RECONCILIATION_REQUIRED,
+  ensureBatchListReady,
   findCreatedBatchFromList,
   openExactOperationBatchCard,
   operationBatchListSnapshot,
@@ -14,7 +15,64 @@ import {
   runOperationBatchReconciliation,
   runWithOperationBatchContext,
   startOperationBatchListSearch,
+  waitForOperationBatchConfirmation,
 } from "./operation_batch_runner.mjs";
+
+test("batch list readiness redirects once from same-origin dashboard after login", async () => {
+  const batchListUrl = "http://operation/batch/batchList";
+  const events = [];
+  let currentUrl = "http://operation/dashboard";
+  let waitCount = 0;
+  const page = {
+    url: () => currentUrl,
+    getByRole(role, options) {
+      assert.equal(role, "button");
+      assert.match(String(options?.name), /创建批次/);
+      return {
+        async waitFor() {
+          waitCount += 1;
+          events.push(`wait:${waitCount}`);
+          if (waitCount === 1) throw new Error("not visible on dashboard");
+        },
+      };
+    },
+    async goto(url, options) {
+      events.push(["goto", url, options]);
+      currentUrl = url;
+    },
+  };
+
+  await ensureBatchListReady(page, batchListUrl);
+
+  assert.deepEqual(events, [
+    "wait:1",
+    ["goto", batchListUrl, { waitUntil: "domcontentloaded" }],
+    "wait:2",
+  ]);
+});
+
+test("batch list readiness does not redirect an unrelated origin", async () => {
+  const events = [];
+  const page = {
+    url: () => "http://unrelated.example/dashboard",
+    getByRole() {
+      return {
+        async waitFor() {
+          throw new Error("not visible");
+        },
+      };
+    },
+    async goto() {
+      events.push("goto");
+    },
+  };
+
+  await assert.rejects(
+    () => ensureBatchListReady(page, "http://operation/batch/batchList"),
+    /未找到“创建批次”按钮/,
+  );
+  assert.deepEqual(events, []);
+});
 
 function fakeBatchCardsPage(cards, {
   listCount = 1,
@@ -84,6 +142,71 @@ function fakeBatchCardsPage(cards, {
     },
   };
 }
+
+test("final confirmation gate requires the exact serial, batch name, and complete button", async () => {
+  const events = [];
+  const completeButton = {
+    waitFor: async (options) => events.push(["button.waitFor", options]),
+    count: async () => 1,
+  };
+  const modal = {
+    waitFor: async (options) => events.push(["modal.waitFor", options]),
+    getByText(value, options) {
+      events.push(["modal.getByText", value, options]);
+      return {
+        waitFor: async (waitOptions) => events.push(["text.waitFor", value, waitOptions]),
+      };
+    },
+    getByRole(role, options) {
+      events.push(["modal.getByRole", role, String(options?.name)]);
+      return completeButton;
+    },
+  };
+  const page = {
+    locator(selector) {
+      assert.equal(selector, ".ant-modal:visible");
+      return {
+        count: async () => 1,
+        last: () => modal,
+      };
+    },
+  };
+
+  const result = await waitForOperationBatchConfirmation(page, {
+    fields: {
+      operationTaskSerial: { value: "R0031682" },
+      batchName: { value: "湖北邮政_2026年8月" },
+    },
+  }, { confirmationWaitMs: 1234 });
+
+  assert.strictEqual(result, completeButton);
+  assert.deepEqual(events, [
+    ["modal.waitFor", { state: "visible", timeout: 1234 }],
+    ["modal.getByText", "R0031682", { exact: true }],
+    ["text.waitFor", "R0031682", { state: "visible", timeout: 1234 }],
+    ["modal.getByText", "湖北邮政_2026年8月", { exact: true }],
+    ["text.waitFor", "湖北邮政_2026年8月", { state: "visible", timeout: 1234 }],
+    ["modal.getByRole", "button", "/^完\\s*成$/"],
+    ["button.waitFor", { state: "visible", timeout: 1234 }],
+  ]);
+});
+
+test("final confirmation gate rejects a non-unique visible modal", async () => {
+  await assert.rejects(
+    () => waitForOperationBatchConfirmation({
+      locator: () => ({
+        count: async () => 2,
+        last: () => ({ waitFor: async () => {} }),
+      }),
+    }, {
+      fields: {
+        operationTaskSerial: { value: "R0031682" },
+        batchName: { value: "湖北邮政_2026年8月" },
+      },
+    }),
+    /最终确认页必须唯一/,
+  );
+});
 
 test("batch list snapshot reads the current card layout from dedicated code and name nodes", async () => {
   assert.deepEqual(await operationBatchListSnapshot(fakeBatchCardsPage([
@@ -470,6 +593,38 @@ test("submitted batch only trusts a detail page with a batch guid", async () => 
     assert.deepEqual(result, expected);
     assert.deepEqual(lookups, [[expected.detailUrl, "目标项目_2026年8月"]]);
   }
+});
+
+test("submitted batch retries a transient list lookup before requiring reconciliation", async () => {
+  const expected = {
+    operationBatchCode: "EZT260006",
+    batchGuid: "",
+    detailUrl: "http://operation/batch/batchList",
+    status: "created_unpublished",
+  };
+  let lookups = 0;
+
+  const result = await resolveSubmittedOperationBatch(
+    fakePageWithCode("http://operation/batch/batchList"),
+    {
+      batchListUrl: expected.detailUrl,
+      batchName: "湖北邮政_2026年8月",
+      submittedListLookupMaxAttempts: 2,
+      submittedListLookupRetryMs: 0,
+      findFromList: async () => {
+        lookups += 1;
+        if (lookups === 1) {
+          const error = new Error("批次列表在安全等待时间内未稳定，无法确认完整查询结果");
+          error.code = OPERATION_BATCH_RECONCILIATION_REQUIRED;
+          throw error;
+        }
+        return expected;
+      },
+    },
+  );
+
+  assert.deepEqual(result, expected);
+  assert.equal(lookups, 2);
 });
 
 test("submitted detail requires the exact batch name and one whole-page batch code", async () => {

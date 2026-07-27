@@ -2,11 +2,199 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  fillRangeInputs,
   inspectOperationBatchManagedSnapshot,
+  openVisibleEztestSchedulePage,
   openOperationBatchByCode,
+  operationBatchVisibleOverviewFromRaw,
+  operationBatchVisibleSchedulesFromRaw,
   runOperationBatchManagedUpdate,
   runOperationBatchScheduleInitialization,
+  visibleButtonByExactText,
 } from "./operation_batch_update_runner.mjs";
+
+test("schedule page accepts duplicate title text only when one visible collapse section owns it", async () => {
+  const title = { count: async () => 2 };
+  const section = { count: async () => 1, first() { return this; } };
+  const page = {
+    getByRole(role, options) {
+      assert.equal(role, "tab");
+      assert.ok(["考试", "易考"].includes(options.name));
+      return {
+        count: async () => 1,
+        first() { return this; },
+        getAttribute: async () => "true",
+      };
+    },
+    getByText(value, options) {
+      assert.equal(value, "考试日程");
+      assert.deepEqual(options, { exact: true });
+      return title;
+    },
+    locator(selector) {
+      assert.equal(selector, ".ant-collapse-item:visible");
+      return {
+        filter(options) {
+          assert.strictEqual(options.has, title);
+          return section;
+        },
+      };
+    },
+  };
+
+  await openVisibleEztestSchedulePage(page);
+});
+
+test("schedule page waits for the exact EasyExam schedule response before reading the table", async () => {
+  const events = [];
+  const response = {
+    url: () => "http://operation/api/batch/get_schedule_list",
+    request: () => ({
+      method: () => "POST",
+      postData: () => JSON.stringify({ data_key: "eztest" }),
+    }),
+    ok: () => true,
+    json: async () => ({ code: 10 }),
+    finished: async () => events.push("response:finished"),
+  };
+  const title = { count: async () => 1 };
+  const section = { count: async () => 1, first() { return this; } };
+  const page = {
+    async waitForResponse(predicate, options) {
+      events.push(["response:registered", options]);
+      assert.equal(predicate(response), true);
+      return response;
+    },
+    getByRole(role, options) {
+      assert.equal(role, "tab");
+      return {
+        count: async () => 1,
+        first() { return this; },
+        getAttribute: async () => "false",
+        click: async () => events.push(`tab:${options.name}`),
+      };
+    },
+    getByText() {
+      return title;
+    },
+    locator(selector) {
+      assert.equal(selector, ".ant-collapse-item:visible");
+      return { filter: () => section };
+    },
+  };
+
+  await openVisibleEztestSchedulePage(page);
+
+  assert.deepEqual(events, [
+    ["response:registered", { timeout: 30000 }],
+    "tab:考试",
+    "tab:易考",
+    "response:finished",
+  ]);
+});
+
+test("schedule add control uses exact visible button text instead of accessible icon name", async () => {
+  const button = { count: async () => 1, first() { return this; } };
+  const root = {
+    locator(selector) {
+      assert.equal(selector, "button:visible");
+      return {
+        filter(options) {
+          assert.match(String(options.hasText), /新增/);
+          return button;
+        },
+      };
+    },
+  };
+
+  assert.strictEqual(
+    await visibleButtonByExactText(root, "新增", "新增日程"),
+    button,
+  );
+});
+
+test("readonly Ant range display inputs are filled through the editable calendar popup", async () => {
+  const events = [];
+  let startValue = "";
+  let endValue = "";
+  const startInput = {
+    getAttribute: async (name) => (name === "readonly" ? "" : null),
+    click: async () => events.push("display:start:click"),
+    inputValue: async () => startValue,
+  };
+  const endInput = {
+    getAttribute: async (name) => (name === "readonly" ? "" : null),
+    inputValue: async () => endValue,
+  };
+  const editor = (side) => ({
+    async fill(value) {
+      events.push(`editor:${side}:fill:${value}`);
+      if (side === "start") startValue = value;
+      else endValue = value;
+    },
+    async press(key) {
+      events.push(`editor:${side}:press:${key}`);
+    },
+  });
+  const editors = {
+    count: async () => 2,
+    nth: (index) => editor(index === 0 ? "start" : "end"),
+  };
+  const picker = {
+    count: async () => 1,
+    first() { return this; },
+    locator(selector) {
+      if (selector === ".ant-calendar-input:visible") return editors;
+      if (selector === ".ant-calendar-ok-btn:visible") {
+        return {
+          count: async () => 1,
+          first() {
+            return { click: async () => events.push("picker:ok") };
+          },
+        };
+      }
+      throw new Error(`unexpected picker selector: ${selector}`);
+    },
+  };
+  const inputsByPlaceholder = new Map([
+    ["考试开始时间", startInput],
+    ["考试结束时间", endInput],
+  ]);
+  const container = {
+    locator(selector) {
+      const placeholder = selector.match(/placeholder="([^"]+)"/)?.[1];
+      const input = inputsByPlaceholder.get(placeholder);
+      return {
+        count: async () => (input ? 1 : 0),
+        first: () => input,
+      };
+    },
+  };
+  const page = {
+    locator(selector) {
+      assert.equal(selector, ".ant-calendar-picker-container:visible");
+      return picker;
+    },
+  };
+
+  await fillRangeInputs(
+    page,
+    container,
+    "考试开始时间",
+    "考试结束时间",
+    "2026-08-22 15:30",
+    "2026-08-22 17:30",
+  );
+
+  assert.deepEqual(events, [
+    "display:start:click",
+    "editor:start:fill:2026-08-22 15:30",
+    "editor:start:press:Tab",
+    "editor:end:fill:2026-08-22 17:30",
+    "editor:end:press:Tab",
+    "picker:ok",
+  ]);
+});
 
 const existingSchedule = {
   name: "日程一",
@@ -197,6 +385,82 @@ test("inspection navigates by the exact persisted code and reads overview plus v
   });
 });
 
+test("visible overview parser reads the static batch header and one-or-two-day exam range", () => {
+  assert.deepEqual(operationBatchVisibleOverviewFromRaw({
+    titleCount: 1,
+    headerInfoCount: 1,
+    batchName: " 湖北邮政_2026年8月 ",
+    headerInfo: "F0012393 | 宁德时代 | 项目经理：经理 | 考试日期：2026-08-22",
+  }), {
+    batchName: "湖北邮政_2026年8月",
+    examStartDate: "2026-08-22",
+    examEndDate: "2026-08-22",
+  });
+
+  assert.deepEqual(operationBatchVisibleOverviewFromRaw({
+    titleCount: 1,
+    headerInfoCount: 1,
+    batchName: "多日批次",
+    headerInfo: "项目经理：经理 | 考试日期：2026/08/22 ~ 2026/08/24",
+  }), {
+    batchName: "多日批次",
+    examStartDate: "2026-08-22",
+    examEndDate: "2026-08-24",
+  });
+});
+
+test("visible schedule parser reads the operation console combined schedule column", () => {
+  assert.deepEqual(operationBatchVisibleSchedulesFromRaw({
+    tables: [{
+      headers: [
+        "场次",
+        "日程代码",
+        "日程",
+        "时区",
+        "时长(分钟)",
+        "考试名称",
+        "考生提前登录(分钟)",
+      ],
+      rows: [[
+        "1",
+        "1",
+        "2026-08-22 09:00 ~ 2026-08-22 11:00",
+        "GMT+08:00",
+        "120",
+        "中国邮政集团公司湖北省分公司招聘考试V2",
+        "30",
+      ]],
+    }],
+  }), [{
+    name: "中国邮政集团公司湖北省分公司招聘考试V2",
+    start: "2026-08-22 09:00",
+    end: "2026-08-22 11:00",
+  }]);
+
+  assert.deepEqual(operationBatchVisibleSchedulesFromRaw({
+    tables: [{
+      headers: ["场次", "日程代码", "日程", "考试名称"],
+      rows: [[
+        "1",
+        "1",
+        "2026-08-22 15:30~17:30",
+        "中国邮政集团公司湖北省分公司招聘考试V2",
+      ]],
+    }],
+  }), [{
+    name: "中国邮政集团公司湖北省分公司招聘考试V2",
+    start: "2026-08-22 15:30",
+    end: "2026-08-22 17:30",
+  }]);
+
+  assert.deepEqual(operationBatchVisibleSchedulesFromRaw({
+    tables: [{
+      headers: ["场次", "日程代码", "日程", "考试名称"],
+      rows: [["暂无数据"]],
+    }],
+  }), []);
+});
+
 test("exact-code navigation advances to the persisted batch page before opening its card", async () => {
   const events = [];
   const detailUrl = `http://operation/batch/batchDetail?batch_guid=${"b".repeat(32)}`;
@@ -332,6 +596,41 @@ test("updates only changed managed fields, appends schedules, and verifies after
       "exact_readback_verified",
     ],
   });
+});
+
+test("overview and schedule changes are saved through their separate operation-console dialogs", async () => {
+  const { page, adapter } = fakeOperationBatchPage();
+  adapter.beginOverviewEdit = async (actualPage) => {
+    actualPage.actions.push("打开基本信息弹窗");
+  };
+  adapter.saveOverview = async (actualPage) => {
+    actualPage.actions.push("确定基本信息");
+  };
+  adapter.beginScheduleEdit = async (actualPage) => {
+    actualPage.actions.push("打开易考日程弹窗");
+  };
+  adapter.saveSchedules = async (actualPage) => {
+    actualPage.actions.push("确定易考日程");
+    actualPage.saved = true;
+  };
+  adapter.save = async () => {
+    assert.fail("real operation-console flow must not use one generic save");
+  };
+
+  const result = await runOperationBatchManagedUpdate(
+    instructionWithOneEditAndOneAppend,
+    { page, adapter, baseUrl: "http://operation" },
+  );
+
+  assert.equal(result.verified, true);
+  assert.deepEqual(page.actions.filter((action) => (
+    action.includes("弹窗") || action.startsWith("确定")
+  )), [
+    "打开基本信息弹窗",
+    "确定基本信息",
+    "打开易考日程弹窗",
+    "确定易考日程",
+  ]);
 });
 
 test("does not write unchanged existing schedule fields", async () => {

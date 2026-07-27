@@ -91,6 +91,14 @@ export function operationConsoleNeedsLogin(urlValue = "") {
   return value.includes("/oauth2/authorize") || value.includes("/loginwaiting") || value.includes("/login");
 }
 
+function operationConsoleOriginMatches(urlValue, batchListUrl) {
+  try {
+    return new URL(text(urlValue)).origin === new URL(text(batchListUrl)).origin;
+  } catch {
+    return false;
+  }
+}
+
 export function operationConsoleLoginMessage(minutes) {
   return `运营控制台需要登录。请在自动化浏览器中完成登录，系统会等待最多 ${minutes} 分钟；登录完成后会继续当前批次操作。`;
 }
@@ -298,6 +306,28 @@ async function selectOperationTask(page, serial) {
   await modal.getByRole("button", { name: /确\s*定/ }).click();
 }
 
+export async function waitForOperationBatchConfirmation(page, draft, options = {}) {
+  const timeout = Number(options.confirmationWaitMs || 30000);
+  const serial = draftValue(draft, "operationTaskSerial");
+  const batchName = draftValue(draft, "batchName");
+  const modals = page.locator(".ant-modal:visible");
+  const modal = modals.last();
+  await modal.waitFor({ state: "visible", timeout });
+  const modalCount = await modals.count();
+  if (modalCount !== 1) {
+    throw new Error(`运营批次最终确认页必须唯一，实际 ${modalCount} 个`);
+  }
+  await modal.getByText(serial, { exact: true }).waitFor({ state: "visible", timeout });
+  await modal.getByText(batchName, { exact: true }).waitFor({ state: "visible", timeout });
+  const completeButton = modal.getByRole("button", { name: /^完\s*成$/ });
+  await completeButton.waitFor({ state: "visible", timeout });
+  const completeButtonCount = await completeButton.count();
+  if (completeButtonCount !== 1) {
+    throw new Error(`运营批次最终确认页“完成”按钮必须唯一，实际 ${completeButtonCount} 个`);
+  }
+  return completeButton;
+}
+
 export async function ensureBatchListReady(page, batchListUrl, options = {}) {
   const loginWaitMinutes = Number(options.loginWaitMinutes || process.env.OPERATION_CONSOLE_LOGIN_WAIT_MINUTES || 10);
   const waitMs = Math.max(1, loginWaitMinutes) * 60 * 1000;
@@ -309,14 +339,16 @@ export async function ensureBatchListReady(page, batchListUrl, options = {}) {
   } catch {}
 
   if (!ready) {
-    if (!operationConsoleNeedsLogin(page.url())) {
+    const currentUrl = page.url();
+    if (operationConsoleNeedsLogin(currentUrl)) {
+      // Keep the headed browser open so the user can finish SSO login manually.
+      await page.waitForURL((url) => !operationConsoleNeedsLogin(String(url)), { timeout: waitMs }).catch(() => {
+        throw new Error(operationConsoleLoginMessage(loginWaitMinutes));
+      });
+    } else if (!operationConsoleOriginMatches(currentUrl, batchListUrl)) {
       throw new Error(`未找到“创建批次”按钮，当前页面：${page.url()}`);
     }
 
-    // Keep the headed browser open so the user can finish SSO login manually.
-    await page.waitForURL((url) => !operationConsoleNeedsLogin(String(url)), { timeout: waitMs }).catch(() => {
-      throw new Error(operationConsoleLoginMessage(loginWaitMinutes));
-    });
     await page.goto(batchListUrl, { waitUntil: "domcontentloaded" });
     await createButton.waitFor({ state: "visible", timeout: 30000 });
   }
@@ -774,11 +806,25 @@ export async function resolveSubmittedOperationBatch(page, options = {}) {
     } catch {}
   }
   const findFromList = options.findFromList || ((batchListUrl, batchName) => findCreatedBatchFromList(page, batchListUrl, batchName, options));
-  const result = await findFromList(options.batchListUrl, options.batchName);
-  if (!result) {
-    throw reconciliationRequiredError(new Error("创建已提交，但详情页和批次列表均未找到批次代码"));
+  const maxAttempts = Math.max(1, Number(options.submittedListLookupMaxAttempts || 3));
+  const retryMs = Math.max(0, Number(options.submittedListLookupRetryMs ?? 1000));
+  let lastError;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const result = await findFromList(options.batchListUrl, options.batchName);
+      if (result) return result;
+      lastError = reconciliationRequiredError(
+        new Error("创建已提交，但详情页和批次列表均未找到批次代码"),
+      );
+    } catch (error) {
+      if (error?.code !== OPERATION_BATCH_RECONCILIATION_REQUIRED) throw error;
+      lastError = error;
+    }
+    if (attempt + 1 < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
+    }
   }
-  return result;
+  throw lastError;
 }
 
 function reconciliationRequiredError(error) {
@@ -866,8 +912,9 @@ export async function runOperationBatchCreation(draft, options = {}) {
       await chooseDropdownValue(page, "结算依据", draftValue(draft, "billingBasis"));
       await fillInputNearLabel(page, "备注", draftValue(draft, "remark"));
       await page.getByRole("button", { name: /下一步/ }).click();
+      const completeButton = await waitForOperationBatchConfirmation(page, draft, options);
       submissionStarted = true;
-      await page.getByRole("button", { name: /完\s*成/ }).click();
+      await completeButton.click();
       return await resolveSubmittedOperationBatch(page, {
         ...options,
         batchListUrl,
