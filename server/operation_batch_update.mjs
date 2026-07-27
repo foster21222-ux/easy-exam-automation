@@ -253,7 +253,7 @@ export function operationBatchUpdateState(task = {}) {
   };
 }
 
-function normalizedManagedSnapshot(snapshot) {
+export function normalizedOperationBatchManagedSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
     throw new Error("缺少运营批次受管快照");
   }
@@ -317,7 +317,7 @@ export function applyOperationBatchManagedResult(task = {}, result = {}) {
   if (result.verified !== true) {
     throw new Error("运营批次受管结果未通过回读验证");
   }
-  const managedSnapshot = normalizedManagedSnapshot(result.snapshot);
+  const managedSnapshot = normalizedOperationBatchManagedSnapshot(result.snapshot);
   const current = task.config?.operationBatch || {};
   const managedSnapshotVersion = Number(current.managedSnapshotVersion || 0) + 1;
   const lastManagedSyncAt = text(result.syncedAt) || new Date().toISOString();
