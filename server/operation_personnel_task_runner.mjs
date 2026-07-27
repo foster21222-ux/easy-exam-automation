@@ -66,15 +66,18 @@ function assertScheduleCodes(schedules = []) {
 export function operationPersonnelDisplaySchedules(managedSchedules = [], operationSchedules = []) {
   const actual = operationSchedules.map(normalizeSchedule);
   assertScheduleCodes(actual);
-  return managedSchedules.map((managed) => {
+  const matchedCodes = new Set();
+  const displaySchedules = managedSchedules.map((managed) => {
     const matches = actual.filter((schedule) => (
       text(schedule.subjectName) === text(managed.name)
       && text(schedule.start) === text(managed.start)
       && text(schedule.end) === text(managed.end)
     ));
-    if (matches.length !== 1) {
+    const code = text(matches[0]?.scheduleCode);
+    if (matches.length !== 1 || matchedCodes.has(code)) {
       throw batchScheduleConflict("运控日程代码缺失、重复或不能与易考需求一一对应");
     }
+    matchedCodes.add(code);
     return {
       scheduleCode: matches[0].scheduleCode,
       name: managed.name,
@@ -82,6 +85,10 @@ export function operationPersonnelDisplaySchedules(managedSchedules = [], operat
       end: managed.end,
     };
   });
+  if (matchedCodes.size !== actual.length) {
+    throw batchScheduleConflict("运控日程代码缺失、重复或不能与易考需求一一对应");
+  }
+  return displaySchedules;
 }
 
 function normalizePersonnel(raw = {}) {

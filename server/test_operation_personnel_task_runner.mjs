@@ -33,6 +33,19 @@ test("display schedules reject missing duplicate or unmatched operation codes", 
   ]), /重复/);
 });
 
+test("display schedules reject extra operation schedules and duplicate managed schedules", () => {
+  const managed = [{ requirementIndex: 0, name: "综合能力", start: "2026-08-22 09:00", end: "2026-08-22 11:00" }];
+  const operation = [{ scheduleCode: 17, subjectName: "综合能力", start: "2026-08-22 09:00", end: "2026-08-22 11:00" }];
+  assert.throws(() => operationPersonnelDisplaySchedules(managed, [
+    ...operation,
+    { scheduleCode: 18, subjectName: "专业知识", start: "2026-08-22 14:00", end: "2026-08-22 16:00" },
+  ]), /一一对应/);
+  assert.throws(() => operationPersonnelDisplaySchedules([
+    ...managed,
+    { ...managed[0], requirementIndex: 1 },
+  ], operation), /一一对应/);
+});
+
 test("current operation detail header maps exact visible batch identity", () => {
   assert.deepEqual(operationPersonnelBatchIdentityFromVisibleRaw({
     titleCount: 1,
