@@ -1388,6 +1388,28 @@ test("legacy completed schedule sync is reverified read only", async () => {
   assert.ok(observed.includes("verify_exam_schedules:completed"));
 });
 
+test("blocks before recipient selection when task sheet schedules drift", async () => {
+  const page = fakeOperationPage();
+  const options = attemptOptions(page, {
+    readSchedules: async () => (
+      page.events.includes("task-sheet:open")
+        ? page.state.schedules.map((item) => ({
+          ...item,
+          subjectName: "错误考试名称",
+        }))
+        : page.state.schedules
+    ),
+  });
+
+  await assert.rejects(
+    operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
+    (error) => error.code === "PERSONNEL_BATCH_SCHEDULE_CONFLICT"
+      && /请先在建批次环节完成批次信息修改/.test(error.message),
+  );
+  assert.equal(page.events.includes("recipients:select"), false);
+  assert.equal(page.events.includes("send:confirm"), false);
+});
+
 test("published batches skip the publish click but still complete the checkpoint", async () => {
   const page = fakeOperationPage({ published: true });
   await operationPersonnelRunner.runOperationPersonnelAttempt(
@@ -1413,7 +1435,7 @@ test("published inspection evidence survives navigation to the task sheet", asyn
   assert.equal(batchReads, 1);
 });
 
-test("schedule verification rereads while other unchanged sections reuse inspection", async () => {
+test("schedule verification rereads after opening the task sheet while other unchanged sections reuse inspection", async () => {
   const page = fakeOperationPage({
     published: true,
     schedules: validInstruction().target.schedules,
@@ -1426,7 +1448,7 @@ test("schedule verification rereads while other unchanged sections reuse inspect
     attemptOptions(page, {
       readSchedules: async () => {
         scheduleReads += 1;
-        if (scheduleReads > 2) throw new Error("schedule editor is no longer visible");
+        if (scheduleReads > 3) throw new Error("schedule reader should not run again");
         return page.state.schedules;
       },
       readPersonnel: async () => {
@@ -1436,7 +1458,7 @@ test("schedule verification rereads while other unchanged sections reuse inspect
       },
     }),
   );
-  assert.equal(scheduleReads, 2);
+  assert.equal(scheduleReads, 3);
   assert.equal(personnelReads, 1);
 });
 

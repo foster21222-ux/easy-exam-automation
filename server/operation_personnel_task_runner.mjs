@@ -2241,6 +2241,24 @@ function assertTaskSheetReady(expected, actual) {
   return actual;
 }
 
+function assertManagedSchedules(managedSchedules, schedules) {
+  const visible = [...(schedules || [])]
+    .map(normalizeSchedule)
+    .sort(byScheduleCode)
+    .map((schedule, requirementIndex) => ({
+      requirementIndex,
+      name: schedule.subjectName,
+      start: schedule.start,
+      end: schedule.end,
+    }));
+  if (!sameData(visible, managedSchedules)) {
+    throw batchScheduleConflict(
+      "运控可见日程与已确认受管日程不一致，请先在建批次环节完成批次信息修改",
+    );
+  }
+  return visible;
+}
+
 function scheduleNotUnique(schedule, count) {
   const error = new Error(
     `考试日程 ${schedule.scheduleEntryId || "缺少稳定 ID"}/${schedule.scheduleCode || "缺少代码"}`
@@ -2344,19 +2362,10 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   };
 
   const readManagedSchedules = async () => {
-    const visible = [...(await operationMethod(page, options, "readSchedules")(page, instruction) || [])]
-      .map(normalizeSchedule)
-      .sort(byScheduleCode)
-      .map((schedule, requirementIndex) => ({
-        requirementIndex,
-        name: schedule.subjectName,
-        start: schedule.start,
-        end: schedule.end,
-      }));
-    if (!sameData(visible, managedSchedules)) {
-      throw batchScheduleConflict("运控可见日程与已确认受管日程不一致");
-    }
-    return visible;
+    return assertManagedSchedules(
+      managedSchedules,
+      await operationMethod(page, options, "readSchedules")(page, instruction),
+    );
   };
   await runPersonnelCheckpoint({
     name: OPERATION_PERSONNEL_CHECKPOINTS[2],
@@ -2383,10 +2392,14 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     "requirements",
   );
 
-  const readAndVerifyTaskSheet = async () => assertTaskSheetReady(
-    target.taskSheet,
-    normalizeTaskSheet(await operationMethod(page, options, "readTaskSheet")(page, instruction)),
-  );
+  const readAndVerifyTaskSheet = async () => {
+    const taskSheet = normalizeTaskSheet(
+      await operationMethod(page, options, "readTaskSheet")(page, instruction),
+    );
+    const taskSheetSchedules = await readSection("readSchedules", "schedules");
+    assertManagedSchedules(managedSchedules, taskSheetSchedules);
+    return assertTaskSheetReady(target.taskSheet, taskSheet);
+  };
   await runPersonnelCheckpoint({
     name: OPERATION_PERSONNEL_CHECKPOINTS[6],
     target: target.taskSheet,
