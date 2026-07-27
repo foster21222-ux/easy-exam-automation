@@ -1678,7 +1678,6 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
       examSceneRows: editableExamSceneRows(payload.examSceneRows),
     };
     const requirementFields = taskExamRequirements(task)[0]?.fields || task.config?.examRequirement?.fields || {};
-    const normalizedRequirement = normalizeFanweiBusinessRequirement(raw, { requirementFields });
     const batchName = resolveOperationBatchName({
       previousValue: currentSource.raw?.fields?.["批次名称"],
       previousMode: currentSource.batchNameMode,

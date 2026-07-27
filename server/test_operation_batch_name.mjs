@@ -13,6 +13,13 @@ test("builds the confirmed exam-name-only batch name", () => {
   }), "社招_2026年8月");
 });
 
+test("keeps an exam name that only partially matches an abbreviation rule", () => {
+  assert.equal(defaultOperationBatchName({
+    examName: "全国社会招聘考试补考",
+    examStart: "2026-08-22T09:00:00",
+  }), "全国社会招聘考试补考_2026年8月");
+});
+
 test("keeps an unknown exam name without customer or project concatenation", () => {
   assert.equal(defaultOperationBatchName({
     examName: "专项能力测试",

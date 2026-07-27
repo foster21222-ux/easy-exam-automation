@@ -85,7 +85,7 @@ function text(value) {
 
 function matchedExamType(value, rules) {
   const source = text(value);
-  return rules.find(([needle]) => source.includes(needle))?.[1] || "";
+  return rules.find(([needle]) => source === needle)?.[1] || "";
 }
 
 function parseLocalDate(value) {
