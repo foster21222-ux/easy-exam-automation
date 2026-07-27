@@ -1230,7 +1230,7 @@ test("personnel confirmation keeps environment and recipients read only with one
   );
   assert.ok(dialog.includes('id="operationPersonnelConfirmContent"'));
   assert.ok(dialog.includes('id="operationPersonnelConfirmSendBtn"'));
-  assert.equal((dialog.match(/确认配置并发送任务单/g) || []).length, 1);
+  assert.equal((dialog.match(/确认以上内容并校验发送/g) || []).length, 1);
   assert.equal(dialog.includes('data-operation-personnel-environment-input'), false);
   assert.equal(dialog.includes('data-operation-personnel-recipient-input'), false);
 
@@ -1261,6 +1261,18 @@ test("personnel confirmation keeps environment and recipients read only with one
   assert.equal(renderer.includes('data-operation-personnel-edit="recipients"'), false);
   assert.match(html, /\.operation-change-table\s*\{[^}]*border-collapse:\s*collapse/s);
   assert.match(html, /:root\[data-theme="dark"\]\s+\.operation-change-table\s*\{[^}]*border-color:\s*var\(--line\)/s);
+});
+
+test("personnel confirmation edits stay local until final send", () => {
+  const changeHandler = sourceBetween(
+    '      operationPersonnelConfirmContent.addEventListener("change", (event) => {',
+    '\n      operationPersonnelConfirmSendBtn.addEventListener("click", () => {',
+  );
+
+  assert.match(changeHandler, /collectOperationPersonnelPreviewEdits/);
+  assert.doesNotMatch(changeHandler, /refreshOperationPersonnelPreviewFromDialog|previewOperationPersonnelTask|fetchJson/);
+  assert.match(changeHandler, /内容已修改，发送时将统一重新校验/);
+  assert.doesNotMatch(html, /function refreshOperationPersonnelPreviewFromDialog/);
 });
 
 test("personnel confirmation renders a Chinese grouped comparison with exactly five editable fields", () => {
@@ -1310,8 +1322,8 @@ test("personnel confirmation renders a Chinese grouped comparison with exactly f
         batch: { code: "EZT260003" },
         operationBatch: { batchName: "真实运控批次" },
         previewOperationSnapshot: { batch: { published: false, batchName: "真实运控批次" } },
-        managedSchedules: [{
-          requirementIndex: 7,
+        displaySchedules: [{
+          scheduleCode: 17,
           name: "综合能力",
           start: "2026-08-22 09:00",
           end: "2026-08-22 11:00",
@@ -1348,13 +1360,15 @@ test("personnel confirmation renders a Chinese grouped comparison with exactly f
     assert.match(html, new RegExp(label));
   }
   assert.match(html, /来源：易考需求单/);
-  assert.match(html, />7</);
+  assert.match(html, /<th>日程代码<\/th>/);
+  assert.match(html, />17<\/td>/);
   assert.match(html, /综合能力/);
   assert.match(html, /ACTUAL_DATE/);
   assert.match(html, /TARGET_DATE/);
   assert.equal((html.match(/data-operation-personnel-edit=/g) || []).length, 5);
   assert.equal((html.match(/type="date"/g) || []).length, 3);
   assert.doesNotMatch(html, /dates\.start|dates\.end|personnel\.monitorCount|batch\.published/);
+  assert.doesNotMatch(html, /日程序号|requirementIndex|scheduleCodeMap/);
   assert.doesNotMatch(html, /\[\{|&quot;(?:id|scheduleEntryId)&quot;/);
   assert.equal((html.match(/<h4>人员配置<\/h4>/g) || []).length, 0);
   assert.doesNotMatch(html, /DRAFT_OLD|DRAFT_NEW/);
@@ -1422,7 +1436,12 @@ test("personnel confirmation summarizes schedule object changes without exposing
       activePreview: {},
       draft: {
         previewOperationSnapshot: { batch: { published: true } },
-        managedSchedules: [schedule],
+        displaySchedules: [{
+          scheduleCode: 17,
+          name: schedule.name,
+          start: schedule.start,
+          end: schedule.end,
+        }],
         personnel: {},
         dates: {},
         operationTaskSheet: { conditions: [] },
@@ -1588,22 +1607,28 @@ test("unpublished personnel confirmation falls back to the fixed recipient rule"
   assert.match(operationPersonnelConfirmContent.innerHTML, /本次将发布运控批次/);
 });
 
-test("personnel send payload contains only the server preview binding and resend summary", () => {
+test("personnel send payload contains the server preview binding, resend summary, and local edits", () => {
   const operationPersonnelSendPayload = compileInlineFunction(
-    "      function operationPersonnelSendPayload(preview = {}, changeSummary = \"\") {",
+    "      function operationPersonnelSendPayload(preview = {}, changeSummary = \"\", edits = {}) {",
     "\n      function operationPersonnelRequestIsCurrent",
   );
+  const preview = {
+    previewToken: "token-a",
+    draftVersion: 7,
+    environment: "production",
+    state: { draft: { personnel: { monitorCount: 2 } } },
+  };
+  const edits = {
+    dates: { start: "2026-08-22", end: "2026-08-23", nameListDue: "2026-08-20" },
+    personnel: { monitorCount: "2", monitorRatio: "1:50" },
+  };
   assert.deepEqual(
-    operationPersonnelSendPayload({
-      previewToken: "token-a",
-      draftVersion: 7,
-      environment: "production",
-      state: { draft: { personnel: { monitorCount: 2 } } },
-    }, "新增下午场"),
+    operationPersonnelSendPayload(preview, "日期变化", edits),
     {
       previewToken: "token-a",
       draftVersion: 7,
-      changeSummary: "新增下午场",
+      changeSummary: "日期变化",
+      edits,
     },
   );
 });
@@ -1845,7 +1870,7 @@ test("personnel UI connects the five service APIs without an environment overrid
   }
   const preview = sourceBetween(
     "      async function previewOperationPersonnelTask(edits = {}) {",
-    "\n      async function refreshOperationPersonnelPreviewFromDialog",
+    "\n      async function sendOperationPersonnelTask",
   );
   const send = sourceBetween(
     "      async function sendOperationPersonnelTask() {",
@@ -1853,7 +1878,7 @@ test("personnel UI connects the five service APIs without an environment overrid
   );
   assert.ok(preview.includes("invalidateOperationPersonnelRequests()"));
   assert.ok(preview.includes("operationPersonnelRequestIsCurrent(taskId, requestToken)"));
-  assert.ok(send.includes("operationPersonnelSendPayload(preview, changeSummary)"));
+  assert.ok(send.includes("collectOperationPersonnelPreviewEdits()"));
   assert.ok(send.includes("operationPersonnelSubmitError(preview, changeSummary)"));
   assert.equal(send.includes("environment:"), false);
 });

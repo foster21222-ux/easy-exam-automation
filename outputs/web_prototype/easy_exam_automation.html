@@ -6287,7 +6287,7 @@
           <dialog class="account-editor-modal operation-detail-modal" id="operationPersonnelConfirmDialog" aria-labelledby="operationPersonnelConfirmTitle">
             <div class="account-editor-head"><div><h2 class="account-editor-title" id="operationPersonnelConfirmTitle">确认人员任务单</h2><div class="settings-note">核对运控修改、任务单内容和固定收件人后统一发送。</div></div><button class="account-editor-close" id="operationPersonnelConfirmCloseBtn" type="button" aria-label="关闭人员任务确认"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
             <div class="account-editor-body"><div id="operationPersonnelConfirmContent"></div><div class="task-meta" id="operationPersonnelProgress"></div></div>
-            <div class="account-editor-actions"><button class="btn" id="operationPersonnelConfirmCancelBtn" type="button">取消</button><button class="btn primary" id="operationPersonnelConfirmSendBtn" type="button">确认配置并发送任务单</button></div>
+            <div class="account-editor-actions"><button class="btn" id="operationPersonnelConfirmCancelBtn" type="button">取消</button><button class="btn primary" id="operationPersonnelConfirmSendBtn" type="button">确认以上内容并校验发送</button></div>
           </dialog>
           <dialog class="account-editor-modal operation-detail-modal" id="sourceDetailModal" aria-labelledby="sourceDetailTitle" aria-describedby="sourceDetailNote">
             <div class="account-editor-head"><div><h2 class="account-editor-title" id="sourceDetailTitle">数据来源详情</h2><div class="settings-note" id="sourceDetailNote">查看并修改项目卡保存的来源快照。</div></div><button class="account-editor-close" id="sourceDetailCloseBtn" type="button" aria-label="关闭数据来源详情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
@@ -9989,10 +9989,11 @@
             : `${safeText(displayValue(afterValue, meta.path))}<span class="operation-readonly-badge">只读</span>`;
           return `${groupRow}<tr><td>${safeText(meta.label)}</td><td class="operation-change-before">${safeText(displayValue(beforeValue, meta.path))}</td><td class="operation-change-after">${afterContent}</td><td class="operation-change-source">来源：${safeText(meta.source)}</td></tr>`;
         }).join("");
-        const managedSchedules = Array.isArray(draft.managedSchedules)
-          ? draft.managedSchedules
-          : (Array.isArray(draft.schedules) ? draft.schedules : []);
-        const scheduleRows = managedSchedules.map((item, index) => `<tr><td>${safeText(item.requirementIndex ?? item.scheduleCode ?? index + 1)}</td><td>${safeText(item.name || item.subjectName || item.subject || "--")}</td><td>${safeText(item.start || "--")}</td><td>${safeText(item.end || "--")}</td></tr>`).join("");
+        const hasDisplaySchedules = Array.isArray(draft.displaySchedules);
+        const scheduleRows = (draft.displaySchedules || []).map((item) => (
+          `<tr><td>${safeText(item.scheduleCode)}</td><td>${safeText(item.name)}</td>`
+          + `<td>${safeText(item.start)}</td><td>${safeText(item.end)}</td></tr>`
+        )).join("");
         const draftScheduleChanges = preview.changes?.schedules || {};
         const managedScheduleChange = (preview.changes?.fields || [])
           .find((item) => item.path === "managedSchedules");
@@ -10067,14 +10068,15 @@
           <div class="operation-detail-subsection"><h4>阻断条件与发送条件</h4><div class="task-meta">阻断条件：${warnings.length ? warnings.map((item) => safeText(item.message || item.code)).join("；") : "无"}</div><ul>${conditions.length ? conditions.map((item) => `<li>${safeText(item.name || item.label || "--")}：${item.satisfied ? "已满足" : "未满足"}</li>`).join("") : "<li>运控任务单条件将在发送前再次核验</li>"}</ul></div>
           <div class="operation-detail-subsection"><h4>批次发布</h4><div class="task-meta">${willPublishBatch ? "本次将发布运控批次" : "运控批次无需重复发布"}</div></div>
           <div class="operation-detail-subsection"><h4>运控修改前后</h4><div class="exam-table-wrap"><table class="operation-change-table"><thead><tr><th>业务项目</th><th>修改前</th><th>修改后</th><th>来源</th></tr></thead><tbody>${changeRows}</tbody></table></div></div>
-          <div class="operation-detail-subsection"><h4>考试日程 <span class="operation-readonly-badge">只读</span></h4><div class="task-meta">${safeText(scheduleSummary)}</div><div class="exam-table-wrap" style="margin-top:10px;"><table class="exam-table"><thead><tr><th>日程序号</th><th>考试名称</th><th>开始时间</th><th>结束时间</th></tr></thead><tbody>${scheduleRows || '<tr><td colspan="4">暂无有效日程</td></tr>'}</tbody></table></div></div>
+          <div class="operation-detail-subsection"><h4>考试日程 <span class="operation-readonly-badge">只读</span></h4><div class="task-meta">${safeText(scheduleSummary)}</div><div class="exam-table-wrap" style="margin-top:10px;"><table class="exam-table"><thead><tr><th>日程代码</th><th>考试名称</th><th>开始时间</th><th>结束时间</th></tr></thead><tbody>${hasDisplaySchedules ? (scheduleRows || '<tr><td colspan="4">暂无有效日程</td></tr>') : '<tr><td colspan="4">缺少真实日程代码，无法发送人员任务单</td></tr>'}</tbody></table></div></div>
           <div class="operation-detail-subsection"><h4>固定收件人</h4><div class="task-meta">To：${safeText(recipientNames(recipients.to))}</div><h4>固定抄送人</h4><div class="task-meta">CC：${safeText(recipientNames(recipients.cc))}</div></div>
           ${externalBaseline}
           <label class="field" ${isResend ? "" : "hidden"}><span class="field-label">重发变化摘要</span><textarea class="field-input" data-operation-personnel-change-summary>${safeText(state.changeSummary || preview.changes?.summary || "")}</textarea></label>
         `;
         operationPersonnelConfirmSendBtn.disabled = warnings.length > 0
           || conditions.some((item) => item.satisfied === false)
-          || !preview.previewToken;
+          || !preview.previewToken
+          || !hasDisplaySchedules;
         operationPersonnelProgress.textContent = "";
       }
 
@@ -10117,11 +10119,12 @@
         return requestToken;
       }
 
-      function operationPersonnelSendPayload(preview = {}, changeSummary = "") {
+      function operationPersonnelSendPayload(preview = {}, changeSummary = "", edits = {}) {
         return {
           previewToken: preview.previewToken,
           draftVersion: preview.draftVersion,
           changeSummary,
+          edits,
         };
       }
 
@@ -10173,11 +10176,6 @@
         if (!operationPersonnelConfirmDialog.open) operationPersonnelConfirmDialog.showModal();
       }
 
-      async function refreshOperationPersonnelPreviewFromDialog() {
-        operationPersonnelProgress.textContent = "字段已变化，正在重新检查运控并生成新预览...";
-        await previewOperationPersonnelTask(collectOperationPersonnelPreviewEdits());
-      }
-
       async function sendOperationPersonnelTask() {
         const taskId = taskViewState.currentProject?.taskId;
         const requestToken = taskViewState.operationPersonnelRequestToken;
@@ -10187,11 +10185,15 @@
         const submitError = operationPersonnelSubmitError(preview, changeSummary);
         if (submitError) throw new Error(submitError);
         operationPersonnelConfirmSendBtn.disabled = true;
-        operationPersonnelProgress.textContent = "人员任务已提交，正在等待运控执行...";
+        operationPersonnelProgress.textContent = "正在统一校验运控并发送人员任务单...";
         const result = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/operation-personnel-task/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(operationPersonnelSendPayload(preview, changeSummary)),
+          body: JSON.stringify(operationPersonnelSendPayload(
+            preview,
+            changeSummary,
+            collectOperationPersonnelPreviewEdits(),
+          )),
         });
         if (!operationPersonnelRequestIsCurrent(taskId, requestToken)) return;
         taskViewState.operationPersonnelAttemptId = result.attemptId;
@@ -15930,21 +15932,13 @@
       });
       operationPersonnelConfirmContent.addEventListener("change", (event) => {
         if (!event.target.closest("[data-operation-personnel-edit]")) return;
-        const taskId = taskViewState.currentProject?.taskId;
-        const requestToken = taskViewState.operationPersonnelRequestToken + 1;
-        refreshOperationPersonnelPreviewFromDialog().catch((error) => {
-          renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelProgress, error, () => {
-            operationPersonnelConfirmSendBtn.disabled = true;
-          });
-        });
+        collectOperationPersonnelPreviewEdits();
+        operationPersonnelProgress.textContent = "内容已修改，发送时将统一重新校验";
       });
       operationPersonnelConfirmSendBtn.addEventListener("click", () => {
-        const taskId = taskViewState.currentProject?.taskId;
-        const requestToken = taskViewState.operationPersonnelRequestToken;
         sendOperationPersonnelTask().catch((error) => {
-          renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelProgress, error, () => {
-            operationPersonnelConfirmSendBtn.disabled = false;
-          });
+          operationPersonnelConfirmSendBtn.disabled = false;
+          operationPersonnelProgress.textContent = error.message;
         });
       });
       contentRequirementEmailSendBtn.addEventListener("click", () => sendContentRequirementEmailFromProject().catch((error) => { contentRequirementEmailState.textContent = error.message || String(error); }));
