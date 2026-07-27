@@ -287,4 +287,3 @@ Before opening the editor, query the persisted row and record `updated_at`,
 
 Re-query SQLite and verify `updated_at`, persisted batch-name property, and mode are
 unchanged. Finish with a host-environment health check returning `{"ok":true}`.
-
