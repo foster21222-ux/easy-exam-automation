@@ -1,17 +1,13 @@
-const customerRules = [
-  ["中国邮政集团公司湖北省分公司", "湖北邮政"],
-];
 const examTypeRules = [
   ["社会招聘考试", "社招"],
 ];
 
-export function defaultOperationBatchName({ customerName, projectName, examStart } = {}) {
+export function defaultOperationBatchName({ examName, examStart } = {}) {
   const date = parseLocalDate(examStart);
-  if (!date) return "";
-  const customer = mappedOrOriginal(customerName, customerRules);
-  const examType = matchedExamType(projectName, examTypeRules);
-  const base = `${customer}${examType || removeCustomerPrefix(projectName, customerName)}`.trim();
-  return base ? `${base}_${date.year}年${date.month}月` : "";
+  const sourceName = text(examName);
+  if (!date || !sourceName) return "";
+  const abbreviatedName = matchedExamType(sourceName, examTypeRules) || sourceName;
+  return `${abbreviatedName}_${date.year}年${date.month}月`;
 }
 
 export function resolveOperationBatchName(input = {}) {
@@ -54,8 +50,7 @@ export function withOperationBatchNameEditorDefaults(task) {
     previousValue: savedBatchName,
     previousMode: fanweiSource.batchNameMode || businessRequirement.batch_name_mode || (savedBatchName ? "manual" : ""),
     generatedValue: defaultOperationBatchName({
-      customerName: businessRequirement.customer_name || fields["客户名称"],
-      projectName: businessRequirement.project_name || fields["项目名称"],
+      examName: requirements[0]?.fields?.["考试名称"],
       examStart: requirements[0]?.fields?.["考试日期时间"],
     }),
     submittedValue: savedBatchName,
@@ -88,20 +83,9 @@ function text(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function mappedOrOriginal(value, rules) {
-  const original = text(value);
-  return rules.find(([source]) => source === original)?.[1] || original;
-}
-
 function matchedExamType(value, rules) {
   const source = text(value);
   return rules.find(([needle]) => source.includes(needle))?.[1] || "";
-}
-
-function removeCustomerPrefix(projectName, customerName) {
-  const project = text(projectName);
-  const customer = text(customerName);
-  return customer && project.startsWith(customer) ? project.slice(customer.length).trim() : project;
 }
 
 function parseLocalDate(value) {

@@ -6,27 +6,26 @@ import {
   withOperationBatchNameEditorDefaults,
 } from "./operation_batch_name.mjs";
 
-test("builds the confirmed no-first-underscore batch name", () => {
+test("builds the confirmed exam-name-only batch name", () => {
   assert.equal(defaultOperationBatchName({
-    customerName: "中国邮政集团公司湖北省分公司",
-    projectName: "中国邮政集团公司湖北省分公司社会招聘考试",
+    examName: "社会招聘考试",
     examStart: "2026-08-22T09:00:00",
-  }), "湖北邮政社招_2026年8月");
+  }), "社招_2026年8月");
 });
 
-test("keeps unknown text instead of guessing abbreviations", () => {
+test("keeps an unknown exam name without customer or project concatenation", () => {
   assert.equal(defaultOperationBatchName({
-    customerName: "某某测试中心",
-    projectName: "某某测试中心专项能力测试",
+    examName: "专项能力测试",
     examStart: "2026-09-01 09:00",
-  }), "某某测试中心专项能力测试_2026年9月");
+    customerName: "不得进入批次名称的客户",
+    projectName: "不得进入批次名称的项目",
+  }), "专项能力测试_2026年9月");
 });
 
-test("does not emit an incomplete name without a valid date", () => {
+test("does not emit an incomplete name without an exam name", () => {
   assert.equal(defaultOperationBatchName({
-    customerName: "中国邮政集团公司湖北省分公司",
-    projectName: "社会招聘考试",
-    examStart: "",
+    examName: "",
+    examStart: "2026-09-01 09:00",
   }), "");
 });
 
@@ -128,16 +127,16 @@ test("adds response-only automatic batch-name editor defaults for legacy Fanwei 
         customer_name: "中国邮政集团公司湖北省分公司",
         project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
       },
-      examRequirements: [{ fields: { "考试日期时间": "2026-08-22 09:00" } }],
+      examRequirements: [{ fields: { "考试名称": "社会招聘考试", "考试日期时间": "2026-08-22 09:00" } }],
     },
   };
   const original = structuredClone(task);
 
   const enriched = withOperationBatchNameEditorDefaults(task);
 
-  assert.equal(enriched.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
+  assert.equal(enriched.config.fanweiSource.raw.fields["批次名称"], "社招_2026年8月");
   assert.equal(enriched.config.fanweiSource.batchNameMode, "auto");
-  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "湖北邮政社招_2026年8月");
+  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "社招_2026年8月");
   assert.deepEqual(task, original);
 });
 
@@ -154,7 +153,7 @@ test("preserves an existing manual batch name and mode for legacy Fanwei tasks",
         batch_name: "客户指定批次",
         batch_name_mode: "manual",
       },
-      examRequirement: { fields: { "考试日期时间": "2026-08-22 09:00" } },
+      examRequirement: { fields: { "考试名称": "社会招聘考试", "考试日期时间": "2026-08-22 09:00" } },
     },
   };
 
@@ -180,7 +179,7 @@ test("preserves a saved raw legacy batch name when mode metadata is absent", () 
         customer_name: "中国邮政集团公司湖北省分公司",
         project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
       },
-      examRequirement: { fields: { "考试日期时间": "2026-08-22 09:00" } },
+      examRequirement: { fields: { "考试名称": "社会招聘考试", "考试日期时间": "2026-08-22 09:00" } },
     },
   };
 
@@ -188,7 +187,7 @@ test("preserves a saved raw legacy batch name when mode metadata is absent", () 
 
   assert.equal(enriched.config.fanweiSource.raw.fields["批次名称"], "历史人工名称");
   assert.equal(enriched.config.fanweiSource.batchNameMode, "manual");
-  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "湖北邮政社招_2026年8月");
+  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "社招_2026年8月");
 });
 
 test("preserves a saved business legacy batch name when raw fields lack it", () => {
@@ -207,7 +206,7 @@ test("preserves a saved business legacy batch name when raw fields lack it", () 
         project_name: "中国邮政集团公司湖北省分公司社会招聘考试",
         batch_name: "历史业务名称",
       },
-      examRequirement: { fields: { "考试日期时间": "2026-08-22 09:00" } },
+      examRequirement: { fields: { "考试名称": "社会招聘考试", "考试日期时间": "2026-08-22 09:00" } },
     },
   };
 
@@ -215,7 +214,7 @@ test("preserves a saved business legacy batch name when raw fields lack it", () 
 
   assert.equal(enriched.config.fanweiSource.raw.fields["批次名称"], "历史业务名称");
   assert.equal(enriched.config.fanweiSource.batchNameMode, "manual");
-  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "湖北邮政社招_2026年8月");
+  assert.equal(enriched.config.fanweiSource.batchNameAutoValue, "社招_2026年8月");
 });
 
 test("keeps non-Fanwei tasks unchanged", () => {
@@ -229,7 +228,7 @@ test("adds an empty batch-name editor field when a legacy Fanwei task has no usa
     config: {
       fanweiSource: { raw: { fields: {} } },
       businessRequirement: { customer_name: "客户", project_name: "项目" },
-      examRequirement: { fields: { "考试日期时间": "" } },
+      examRequirement: { fields: { "考试名称": "社会招聘考试", "考试日期时间": "" } },
     },
   };
 

@@ -1683,8 +1683,7 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
       previousValue: currentSource.raw?.fields?.["批次名称"],
       previousMode: currentSource.batchNameMode,
       generatedValue: defaultOperationBatchName({
-        customerName: normalizedRequirement.customer_name,
-        projectName: normalizedRequirement.project_name,
+        examName: requirementFields["考试名称"],
         examStart: requirementFields["考试日期时间"],
       }),
       submittedValue: payload.restoreBatchNameAuto === true ? "" : raw.fields["批次名称"],
@@ -1773,8 +1772,7 @@ async function handleProjectSourceSnapshotUpdate(taskId, req, res) {
       previousValue: currentRaw.fields?.["批次名称"] || currentBusinessRequirement.batch_name,
       previousMode: currentSource.batchNameMode || currentBusinessRequirement.batch_name_mode,
       generatedValue: defaultOperationBatchName({
-        customerName: currentBusinessRequirement.customer_name || currentRaw.fields?.["客户名称"],
-        projectName: currentBusinessRequirement.project_name || currentRaw.fields?.["项目名称"],
+        examName: examRequirements[0]?.fields?.["考试名称"],
         examStart: examRequirements[0]?.fields?.["考试日期时间"],
       }),
       submittedValue: currentRaw.fields?.["批次名称"] || currentBusinessRequirement.batch_name,

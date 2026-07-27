@@ -448,13 +448,13 @@ test("legacy automatic batch name survives workflow reload and unchanged source 
     const detailResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}`);
     const detail = await detailResponse.json();
     assert.equal(detailResponse.status, 200);
-    assert.equal(detail.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
+    assert.equal(detail.config.fanweiSource.raw.fields["批次名称"], "社招_2026年8月");
     assert.equal(detail.config.fanweiSource.batchNameMode, "auto");
 
     const workflowResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}/operation-workflow`);
     const workflowBody = await workflowResponse.json();
     assert.equal(workflowResponse.status, 200);
-    assert.equal(workflowBody.task.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年8月");
+    assert.equal(workflowBody.task.config.fanweiSource.raw.fields["批次名称"], "社招_2026年8月");
     assert.equal(workflowBody.task.config.fanweiSource.batchNameMode, "auto");
 
     const saveResponse = await fetch(`${server.baseUrl}/api/tasks/${taskId}/source-snapshot`, {
@@ -467,6 +467,7 @@ test("legacy automatic batch name survives workflow reload and unchanged source 
     });
     const saved = await saveResponse.json();
     assert.equal(saveResponse.status, 200);
+    assert.equal(saved.task.config.fanweiSource.raw.fields["批次名称"], "社招_2026年8月");
     assert.equal(saved.task.config.fanweiSource.batchNameMode, "auto");
     assert.equal(saved.task.config.businessRequirement.batch_name_mode, "auto");
 
@@ -484,7 +485,7 @@ test("legacy automatic batch name survives workflow reload and unchanged source 
     });
     const dated = await dateResponse.json();
     assert.equal(dateResponse.status, 200);
-    assert.equal(dated.task.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年9月");
+    assert.equal(dated.task.config.fanweiSource.raw.fields["批次名称"], "社招_2026年9月");
     assert.equal(dated.task.config.fanweiSource.batchNameMode, "auto");
   } finally {
     await stopServer(child);
@@ -583,9 +584,9 @@ test("project source updates recalculate automatic batch names and preserve manu
     });
     const autoBody = await autoResponse.json();
     assert.equal(autoResponse.status, 200);
-    assert.equal(autoBody.task.config.fanweiSource.raw.fields["批次名称"], "湖北邮政社招_2026年9月");
-    assert.equal(autoBody.task.config.businessRequirement.batch_name, "湖北邮政社招_2026年9月");
-    assert.equal(autoBody.task.config.businessRequirement.batch_name_auto_value, "湖北邮政社招_2026年9月");
+    assert.equal(autoBody.task.config.fanweiSource.raw.fields["批次名称"], "社招_2026年9月");
+    assert.equal(autoBody.task.config.businessRequirement.batch_name, "社招_2026年9月");
+    assert.equal(autoBody.task.config.businessRequirement.batch_name_auto_value, "社招_2026年9月");
 
     const manualResponse = await fetch(`${server.baseUrl}/api/tasks/${manualTaskId}/source-snapshot`, {
       method: "PATCH",
@@ -596,7 +597,7 @@ test("project source updates recalculate automatic batch names and preserve manu
     assert.equal(manualResponse.status, 200);
     assert.equal(manualBody.task.config.fanweiSource.raw.fields["批次名称"], "客户指定批次");
     assert.equal(manualBody.task.config.businessRequirement.batch_name, "客户指定批次");
-    assert.equal(manualBody.task.config.businessRequirement.batch_name_auto_value, "湖北邮政社招_2026年9月");
+    assert.equal(manualBody.task.config.businessRequirement.batch_name_auto_value, "社招_2026年9月");
 
     const restoreResponse = await fetch(`${server.baseUrl}/api/tasks/${manualTaskId}/source-snapshot`, {
       method: "PATCH",
@@ -609,7 +610,7 @@ test("project source updates recalculate automatic batch names and preserve manu
     });
     const restoreBody = await restoreResponse.json();
     assert.equal(restoreResponse.status, 200);
-    assert.equal(restoreBody.task.config.businessRequirement.batch_name, "湖北邮政社招_2026年9月");
+    assert.equal(restoreBody.task.config.businessRequirement.batch_name, "社招_2026年9月");
     assert.equal(restoreBody.task.config.businessRequirement.batch_name_mode, "auto");
   } finally {
     await stopServer(child);
