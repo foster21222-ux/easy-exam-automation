@@ -1230,6 +1230,7 @@ function attemptOptions(page = fakeOperationPage(), overrides = {}) {
     readDates: async () => page.state.dates,
     readRequirements: async () => page.state.requirements,
     readTaskSheet: async () => page.state.taskSheet,
+    readTaskSheetSchedules: async () => page.state.schedules,
     readSendRecords: async () => page.state.sendRecords,
     readDirectoryGroups: async () => [
       { name: "演练组", people: [{ id: "u1", name: "张乐翔" }] },
@@ -1388,23 +1389,45 @@ test("legacy completed schedule sync is reverified read only", async () => {
   assert.ok(observed.includes("verify_exam_schedules:completed"));
 });
 
-test("blocks before recipient selection when task sheet schedules drift", async () => {
+test("blocks before recipient selection when task-sheet schedules drift behind matching background schedules", async () => {
   const page = fakeOperationPage();
-  const options = attemptOptions(page, {
-    readSchedules: async () => (
-      page.events.includes("task-sheet:open")
-        ? page.state.schedules.map((item) => ({
-          ...item,
-          subjectName: "错误考试名称",
-        }))
-        : page.state.schedules
-    ),
+  page.locator = (selector) => {
+    assert.equal(selector, ".ant-modal:visible");
+    return {
+      filter: ({ hasText }) => {
+        assert.equal(hasText, "任务单发送需满足以下条件");
+        return { count: async () => 1 };
+      },
+    };
+  };
+  page.evaluate = async () => visiblePersonnelTaskSheetRaw({
+    scheduleRows: [
+      ["1", "1", "2026-08-22 09:00~11:00", "120", "错误考试名称", "30"],
+    ],
   });
 
+  const options = attemptOptions(page);
+  delete options.readTaskSheetSchedules;
   await assert.rejects(
     operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
     (error) => error.code === "PERSONNEL_BATCH_SCHEDULE_CONFLICT"
       && /请先在建批次环节完成批次信息修改/.test(error.message),
+  );
+  assert.equal(page.events.includes("recipients:select"), false);
+  assert.equal(page.events.includes("send:confirm"), false);
+});
+
+test("blocks before recipient selection when task-sheet schedules are unreadable", async () => {
+  const page = fakeOperationPage();
+  page.locator = () => ({
+    filter: () => ({ count: async () => 0 }),
+  });
+
+  const options = attemptOptions(page);
+  delete options.readTaskSheetSchedules;
+  await assert.rejects(
+    operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
+    /分散在线监考任务单弹窗/,
   );
   assert.equal(page.events.includes("recipients:select"), false);
   assert.equal(page.events.includes("send:confirm"), false);
@@ -1435,13 +1458,14 @@ test("published inspection evidence survives navigation to the task sheet", asyn
   assert.equal(batchReads, 1);
 });
 
-test("schedule verification rereads after opening the task sheet while other unchanged sections reuse inspection", async () => {
+test("schedule verification rereads task-sheet schedules while other unchanged sections reuse inspection", async () => {
   const page = fakeOperationPage({
     published: true,
     schedules: validInstruction().target.schedules,
     personnelPlatform: "悦站",
   });
   let scheduleReads = 0;
+  let taskSheetScheduleReads = 0;
   let personnelReads = 0;
   await operationPersonnelRunner.runOperationPersonnelAttempt(
     validInstruction(),
@@ -1451,6 +1475,11 @@ test("schedule verification rereads after opening the task sheet while other unc
         if (scheduleReads > 3) throw new Error("schedule reader should not run again");
         return page.state.schedules;
       },
+      readTaskSheetSchedules: async () => {
+        taskSheetScheduleReads += 1;
+        if (taskSheetScheduleReads > 1) throw new Error("task-sheet schedule reader should not run again");
+        return page.state.schedules;
+      },
       readPersonnel: async () => {
         personnelReads += 1;
         if (personnelReads > 1) throw new Error("personnel editor is no longer visible");
@@ -1458,7 +1487,8 @@ test("schedule verification rereads after opening the task sheet while other unc
       },
     }),
   );
-  assert.equal(scheduleReads, 3);
+  assert.equal(scheduleReads, 2);
+  assert.equal(taskSheetScheduleReads, 1);
   assert.equal(personnelReads, 1);
 });
 

@@ -1947,6 +1947,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
   readDates: (page) => readVisiblePersonnelPageSection(page, "dates"),
   readRequirements: (page) => readVisiblePersonnelPageSection(page, "requirements"),
   readTaskSheet: async (page) => (await readVisiblePersonnelTaskSheet(page)).taskSheet,
+  readTaskSheetSchedules: async (page) => (await readVisiblePersonnelTaskSheet(page)).schedules,
   readSendRecords: (page) => readVisibleTopRightSendRecords(page),
   readDirectoryGroups: (page) => readVisibleSection(page, "directoryGroups"),
 
@@ -2396,7 +2397,11 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     const taskSheet = normalizeTaskSheet(
       await operationMethod(page, options, "readTaskSheet")(page, instruction),
     );
-    const taskSheetSchedules = await readSection("readSchedules", "schedules");
+    const taskSheetSchedules = await operationMethod(
+      page,
+      options,
+      "readTaskSheetSchedules",
+    )(page, instruction);
     assertManagedSchedules(managedSchedules, taskSheetSchedules);
     return assertTaskSheetReady(target.taskSheet, taskSheet);
   };
