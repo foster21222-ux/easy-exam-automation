@@ -1245,24 +1245,24 @@ test("personnel confirmation keeps environment and recipients read only with one
     "阻断条件",
     "本次将发布运控批次",
     "运控修改前后",
-    "完整考试日程",
-    "人员配置",
-    "计算依据",
+    "业务项目",
+    "修改前",
+    "修改后",
+    "来源",
+    "考试日程",
     "固定收件人",
     "固定抄送人",
   ]) {
     assert.ok(renderer.includes(content), `confirmation missing ${content}`);
   }
-  for (const field of ["start", "end", "nameListDue", "monitorCount", "monitorRatio"]) {
-    assert.ok(renderer.includes(`data-operation-personnel-edit="${field}"`));
-  }
   assert.ok(renderer.includes('data-operation-personnel-change-summary'));
-  assert.ok(renderer.includes('type="date"'));
   assert.equal(renderer.includes('data-operation-personnel-edit="environment"'), false);
   assert.equal(renderer.includes('data-operation-personnel-edit="recipients"'), false);
+  assert.match(html, /\.operation-change-table\s*\{[^}]*border-collapse:\s*collapse/s);
+  assert.match(html, /:root\[data-theme="dark"\]\s+\.operation-change-table\s*\{[^}]*border-color:\s*var\(--line\)/s);
 });
 
-test("personnel confirmation renders the real preview DTO and operation diff", () => {
+test("personnel confirmation renders a Chinese grouped comparison with exactly five editable fields", () => {
   const operationPersonnelConfirmContent = { innerHTML: "" };
   const operationPersonnelConfirmSendBtn = { disabled: false };
   const operationPersonnelProgress = { textContent: "" };
@@ -1284,11 +1284,18 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
   );
   const previewDto = {
     previewToken: "preview-a",
-    operationChanges: [{
-      path: "dates.start",
-      before: "ACTUAL_DATE",
-      after: "TARGET_DATE",
-    }],
+    operationChanges: [
+      {
+        path: "dates.start",
+        before: "ACTUAL_DATE",
+        after: "TARGET_DATE",
+      },
+      {
+        path: "batch.published",
+        before: false,
+        after: true,
+      },
+    ],
     changes: {
       fields: [{ path: "draft-only", before: "DRAFT_OLD", after: "DRAFT_NEW" }],
       summary: "日期变化",
@@ -1300,12 +1307,11 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
         batch: { code: "EZT260003" },
         operationBatch: { batchName: "真实运控批次" },
         previewOperationSnapshot: { batch: { published: false, batchName: "真实运控批次" } },
-        schedules: [{
-          scheduleCode: "7",
-          subjectName: "综合能力",
+        managedSchedules: [{
+          requirementIndex: 7,
+          name: "综合能力",
           start: "2026-08-22 09:00",
           end: "2026-08-22 11:00",
-          earlyLoginMinutes: 30,
         }],
         personnel: {
           serviceType: "ATA 监考－分散在线监考",
@@ -1323,16 +1329,93 @@ test("personnel confirmation renders the real preview DTO and operation diff", (
     },
   };
   renderOperationPersonnelConfirmation(previewDto);
+  const html = operationPersonnelConfirmContent.innerHTML;
   assert.match(operationPersonnelConfirmContent.innerHTML, /真实运控批次/);
-  assert.match(operationPersonnelConfirmContent.innerHTML, />7</);
-  assert.match(operationPersonnelConfirmContent.innerHTML, /计算依据：81/);
-  assert.match(operationPersonnelConfirmContent.innerHTML, /ACTUAL_DATE/);
-  assert.match(operationPersonnelConfirmContent.innerHTML, /TARGET_DATE/);
-  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /DRAFT_OLD|DRAFT_NEW/);
+  for (const label of [
+    "人员落实开始日期",
+    "人员落实结束日期",
+    "人员名单提交日期",
+    "监考人数",
+    "监考比例",
+    "批次发布状态",
+    "考试日程",
+    "只读",
+  ]) {
+    assert.match(html, new RegExp(label));
+  }
+  assert.match(html, /来源：易考需求单/);
+  assert.match(html, />7</);
+  assert.match(html, /综合能力/);
+  assert.match(html, /ACTUAL_DATE/);
+  assert.match(html, /TARGET_DATE/);
+  assert.equal((html.match(/data-operation-personnel-edit=/g) || []).length, 5);
+  assert.equal((html.match(/type="date"/g) || []).length, 3);
+  assert.doesNotMatch(html, /dates\.start|dates\.end|personnel\.monitorCount|batch\.published/);
+  assert.doesNotMatch(html, /\[\{"scheduleEntryId"|&quot;scheduleEntryId&quot;/);
+  assert.equal((html.match(/<h4>人员配置<\/h4>/g) || []).length, 0);
+  assert.doesNotMatch(html, /DRAFT_OLD|DRAFT_NEW/);
   assert.equal(operationPersonnelConfirmSendBtn.disabled, false);
   previewDto.state.draft.warnings = [{ code: "MONITOR_RATIO_REQUIRED" }];
   renderOperationPersonnelConfirmation(previewDto);
   assert.equal(operationPersonnelConfirmSendBtn.disabled, true);
+});
+
+test("personnel confirmation summarizes schedule object changes without exposing paths or JSON", () => {
+  const operationPersonnelConfirmContent = { innerHTML: "" };
+  const operationPersonnelConfirmSendBtn = { disabled: false };
+  const operationPersonnelProgress = { textContent: "" };
+  const operationPersonnelPreviewKind = compileInlineFunction(
+    "      function operationPersonnelPreviewKind(preview = {}) {",
+    "\n      function renderOperationPersonnelConfirmation",
+  );
+  const renderOperationPersonnelConfirmation = compileInlineFunction(
+    "      function renderOperationPersonnelConfirmation(preview = {}) {",
+    "\n      function collectOperationPersonnelPreviewEdits",
+    {
+      taskViewState: { currentProject: { taskId: "task-a", projectName: "示例考试" } },
+      operationPersonnelConfirmContent,
+      operationPersonnelConfirmSendBtn,
+      operationPersonnelProgress,
+      operationPersonnelPreviewKind,
+      safeText: (value) => String(value ?? ""),
+    },
+  );
+  const schedule = {
+    scheduleEntryId: "internal-7",
+    requirementIndex: 7,
+    name: "综合能力",
+    start: "2026-08-22 09:00",
+    end: "2026-08-22 11:00",
+  };
+  const previewDto = {
+    previewToken: "preview-a",
+    operationChanges: [{
+      path: "schedules",
+      before: [],
+      after: [schedule],
+    }],
+    state: {
+      activePreview: {},
+      draft: {
+        previewOperationSnapshot: { batch: { published: true } },
+        managedSchedules: [schedule],
+        personnel: {},
+        dates: {},
+        operationTaskSheet: { conditions: [] },
+        directoryMatch: { to: [], cc: [] },
+        warnings: [],
+      },
+    },
+  };
+
+  renderOperationPersonnelConfirmation(previewDto);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /新增 1 个考试日程/);
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /schedules|scheduleEntryId|\[\{|&quot;/);
+
+  previewDto.operationChanges[0].before = [{ ...schedule, start: "2026-08-22 08:30" }];
+  renderOperationPersonnelConfirmation(previewDto);
+  assert.match(operationPersonnelConfirmContent.innerHTML, /修改 1 个考试日程/);
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /schedules|scheduleEntryId|\[\{|&quot;/);
 });
 
 test("personnel confirmation renders an adopted operation send record as a resend", () => {

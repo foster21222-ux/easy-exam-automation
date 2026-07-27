@@ -2432,6 +2432,71 @@
       .operation-detail-panel .operation-task-section-head { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
       .operation-detail-subsection { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
       .operation-detail-subsection h4 { margin: 0; color: var(--ink); font-size: 13px; }
+      .operation-change-table {
+        width: 100%;
+        margin-top: 10px;
+        border: 1px solid var(--line);
+        border-collapse: collapse;
+        background: var(--panel);
+        color: var(--text-normal);
+      }
+      .operation-change-table th,
+      .operation-change-table td {
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: middle;
+      }
+      .operation-change-table th {
+        background: var(--panel-soft);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .operation-change-group td {
+        background: color-mix(in srgb, var(--blue) 8%, var(--panel));
+        color: var(--text);
+        font-weight: 700;
+      }
+      .operation-change-before { color: var(--muted); }
+      .operation-change-after { color: var(--text-normal); }
+      .operation-change-source { color: var(--muted); font-size: 12px; }
+      .operation-readonly-badge {
+        display: inline-flex;
+        align-items: center;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .operation-change-table .field-input {
+        width: 100%;
+        min-width: 130px;
+        border-color: var(--line);
+        background: var(--input);
+        color: var(--text-normal);
+      }
+      :root[data-theme="dark"] .operation-change-table {
+        border-color: var(--line);
+        background: var(--panel);
+        color: var(--text-normal);
+      }
+      :root[data-theme="dark"] .operation-change-table th,
+      :root[data-theme="dark"] .operation-change-group td {
+        border-color: var(--line);
+        background: var(--panel-soft);
+        color: var(--text);
+      }
+      :root[data-theme="dark"] .operation-change-table td,
+      :root[data-theme="dark"] .operation-change-table .field-input {
+        border-color: var(--line);
+      }
+      :root[data-theme="dark"] .operation-change-table .field-input {
+        background: var(--input);
+        color: var(--text-normal);
+      }
 
       .project-requirement-snapshot {
         padding-top: 4px;
@@ -9835,14 +9900,65 @@
         const previewKind = operationPersonnelPreviewKind(preview);
         const willPublishBatch = previewKind === "initial"
           && !draft.previewOperationSnapshot?.batch?.published;
-        const scheduleRows = (draft.schedules || []).map((item) => `<tr><td>${safeText(item.scheduleCode || "--")}</td><td>${safeText(item.subjectName || item.subject || "--")}</td><td>${safeText(item.start || "--")}</td><td>${safeText(item.end || "--")}</td><td>${safeText(item.earlyLoginMinutes ?? "--")}</td></tr>`).join("");
-        const displayValue = (value) => {
-          if (value === "" || value === null || value === undefined) return "空";
-          return typeof value === "object" ? JSON.stringify(value) : String(value);
+        const operationChanges = Array.isArray(preview.operationChanges) ? preview.operationChanges : [];
+        const operationPersonnelFieldMeta = [
+          { path: "batch.published", group: "批次状态", label: "批次发布状态", source: "运控", readonly: true },
+          { path: "dates.start", group: "人员日期", label: "人员落实开始日期", source: "系统规则", edit: "start", type: "date" },
+          { path: "dates.end", group: "人员日期", label: "人员落实结束日期", source: "易考需求单", edit: "end", type: "date" },
+          { path: "dates.nameListDue", group: "人员日期", label: "人员名单提交日期", source: "易考需求单", edit: "nameListDue", type: "date" },
+          { path: "personnel.monitorCount", group: "人员配置", label: "监考人数", source: "易考需求单", edit: "monitorCount", type: "number" },
+          { path: "personnel.monitorRatio", group: "人员配置", label: "监考比例", source: "系统规则", edit: "monitorRatio", type: "text" },
+          { path: "personnel.platform", group: "人员配置", label: "人员落实平台", source: "固定规则", readonly: true },
+          { path: "personnel.serviceType", group: "人员配置", label: "人员服务类型", source: "固定规则", readonly: true },
+          { path: "personnel.loginMonitoring", group: "人员配置", label: "监考登录监控", source: "固定规则", readonly: true },
+          { path: "personnel.earliestLoginMinutes", group: "人员配置", label: "最早登录系统时间", source: "易考需求单", readonly: true },
+        ];
+        const fieldChanges = new Map(operationChanges.map((item) => [item.path, item]));
+        const draftFieldValue = (path) => {
+          if (path === "batch.published") {
+            return draft.batch?.published ?? draft.previewOperationSnapshot?.batch?.published ?? false;
+          }
+          if (path.startsWith("dates.")) return dates[path.slice("dates.".length)];
+          if (path.startsWith("personnel.")) return personnel[path.slice("personnel.".length)];
+          return undefined;
         };
-        const diffRows = (preview.operationChanges || [])
-          .map((item) => `<li>${safeText(item.path)}：${safeText(displayValue(item.before))} → ${safeText(displayValue(item.after))}</li>`)
-          .join("");
+        const displayValue = (value, path) => {
+          if (value === "" || value === null || value === undefined || typeof value === "object") return "未设置";
+          if (path === "batch.published" && typeof value === "boolean") return value ? "已发布" : "未发布";
+          return String(value);
+        };
+        let activeGroup = "";
+        const changeRows = operationPersonnelFieldMeta.map((meta) => {
+          const change = fieldChanges.get(meta.path);
+          const fallbackValue = draftFieldValue(meta.path);
+          const beforeValue = change && typeof change.before !== "object" ? change.before : fallbackValue;
+          const afterValue = change && typeof change.after !== "object" ? change.after : fallbackValue;
+          const groupRow = meta.group === activeGroup
+            ? ""
+            : `<tr class="operation-change-group"><td colspan="4">${safeText(meta.group)}</td></tr>`;
+          activeGroup = meta.group;
+          const afterContent = meta.edit
+            ? `<input class="field-input" type="${safeText(meta.type)}" ${meta.type === "number" ? 'min="1"' : ""} data-operation-personnel-edit="${safeText(meta.edit)}" value="${safeText(afterValue ?? "")}" />`
+            : `${safeText(displayValue(afterValue, meta.path))}<span class="operation-readonly-badge">只读</span>`;
+          return `${groupRow}<tr><td>${safeText(meta.label)}</td><td class="operation-change-before">${safeText(displayValue(beforeValue, meta.path))}</td><td class="operation-change-after">${afterContent}</td><td class="operation-change-source">来源：${safeText(meta.source)}</td></tr>`;
+        }).join("");
+        const managedSchedules = Array.isArray(draft.managedSchedules)
+          ? draft.managedSchedules
+          : (Array.isArray(draft.schedules) ? draft.schedules : []);
+        const scheduleRows = managedSchedules.map((item, index) => `<tr><td>${safeText(item.requirementIndex ?? item.scheduleCode ?? index + 1)}</td><td>${safeText(item.name || item.subjectName || item.subject || "--")}</td><td>${safeText(item.start || "--")}</td><td>${safeText(item.end || "--")}</td></tr>`).join("");
+        const scheduleChange = operationChanges.find((item) => String(item.path || "").includes("schedule"));
+        let scheduleSummary = "考试日程无变化";
+        if (scheduleChange) {
+          if (Array.isArray(scheduleChange.before) && Array.isArray(scheduleChange.after)
+            && scheduleChange.after.length > scheduleChange.before.length) {
+            scheduleSummary = `新增 ${scheduleChange.after.length - scheduleChange.before.length} 个考试日程`;
+          } else {
+            const changedCount = Array.isArray(scheduleChange.after)
+              ? Math.max(1, scheduleChange.after.length)
+              : 1;
+            scheduleSummary = `修改 ${changedCount} 个考试日程`;
+          }
+        }
         const recipients = draft.directoryMatch || {};
         const batchName = draft.operationBatch?.batchName
           || draft.previewOperationSnapshot?.batch?.batchName
@@ -9862,15 +9978,8 @@
           </div>
           <div class="operation-detail-subsection"><h4>阻断条件与发送条件</h4><div class="task-meta">阻断条件：${warnings.length ? warnings.map((item) => safeText(item.message || item.code)).join("；") : "无"}</div><ul>${conditions.length ? conditions.map((item) => `<li>${safeText(item.name || item.label || "--")}：${item.satisfied ? "已满足" : "未满足"}</li>`).join("") : "<li>运控任务单条件将在发送前再次核验</li>"}</ul></div>
           <div class="operation-detail-subsection"><h4>批次发布</h4><div class="task-meta">${willPublishBatch ? "本次将发布运控批次" : "运控批次无需重复发布"}</div></div>
-          <div class="operation-detail-subsection"><h4>运控修改前后</h4>${diffRows ? `<ul>${diffRows}</ul>` : '<div class="task-meta">没有需要修改的运控字段。</div>'}</div>
-          <div class="operation-detail-subsection"><h4>完整考试日程</h4><div class="exam-table-wrap"><table class="exam-table"><thead><tr><th>代码</th><th>科目</th><th>开始</th><th>结束</th><th>提前登录</th></tr></thead><tbody>${scheduleRows || '<tr><td colspan="5">暂无有效日程</td></tr>'}</tbody></table></div></div>
-          <div class="operation-detail-subsection"><h4>人员配置</h4><div class="settings-grid">
-            <label class="field"><span class="field-label">人员落实开始日期</span><input class="field-input" type="date" data-operation-personnel-edit="start" value="${safeText(dates.start || "")}" /></label>
-            <label class="field"><span class="field-label">人员落实结束日期</span><input class="field-input" type="date" data-operation-personnel-edit="end" value="${safeText(dates.end || "")}" /></label>
-            <label class="field"><span class="field-label">人员名单提交日期</span><input class="field-input" type="date" data-operation-personnel-edit="nameListDue" value="${safeText(dates.nameListDue || "")}" /></label>
-            <label class="field"><span class="field-label">监考人数</span><input class="field-input" type="number" min="1" data-operation-personnel-edit="monitorCount" value="${safeText(personnel.monitorCount || "")}" /></label>
-            <label class="field"><span class="field-label">监考比例</span><input class="field-input" data-operation-personnel-edit="monitorRatio" value="${safeText(personnel.monitorRatio || "")}" /></label>
-          </div><div class="task-meta">人员服务：${safeText(personnel.serviceType || "--")} · 平台：${safeText(personnel.platform || "--")} · 计算依据：${safeText(personnel.candidateBasis || "--")}</div></div>
+          <div class="operation-detail-subsection"><h4>运控修改前后</h4><div class="exam-table-wrap"><table class="operation-change-table"><thead><tr><th>业务项目</th><th>修改前</th><th>修改后</th><th>来源</th></tr></thead><tbody>${changeRows}</tbody></table></div></div>
+          <div class="operation-detail-subsection"><h4>考试日程 <span class="operation-readonly-badge">只读</span></h4><div class="task-meta">${safeText(scheduleSummary)}</div><div class="exam-table-wrap" style="margin-top:10px;"><table class="exam-table"><thead><tr><th>日程序号</th><th>考试名称</th><th>开始时间</th><th>结束时间</th></tr></thead><tbody>${scheduleRows || '<tr><td colspan="4">暂无有效日程</td></tr>'}</tbody></table></div></div>
           <div class="operation-detail-subsection"><h4>固定收件人</h4><div class="task-meta">To：${safeText(recipientNames(recipients.to))}</div><h4>固定抄送人</h4><div class="task-meta">CC：${safeText(recipientNames(recipients.cc))}</div></div>
           ${externalBaseline}
           <label class="field" ${isResend ? "" : "hidden"}><span class="field-label">重发变化摘要</span><textarea class="field-input" data-operation-personnel-change-summary>${safeText(state.changeSummary || preview.changes?.summary || "")}</textarea></label>
