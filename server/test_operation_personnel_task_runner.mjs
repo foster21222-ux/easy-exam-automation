@@ -1528,6 +1528,137 @@ test("attempt applies checkpoints in the approved order", async () => {
   ]);
 });
 
+test("unified attempt verifies once and confirms send directly after final readbacks", async () => {
+  const page = fakeOperationPage({
+    published: true,
+    personnelPlatform: "",
+    dates: {},
+    requirements: validInstruction().target.requirements,
+  });
+  const events = [];
+  let scheduleReads = 0;
+  let taskSheetScheduleReads = 0;
+  let recipientReads = 0;
+
+  await operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), attemptOptions(page, {
+    readBatch: async () => {
+      events.push("read_batch");
+      return { ...page.state.batch };
+    },
+    readSchedules: async () => {
+      scheduleReads += 1;
+      if (scheduleReads === 2) events.push("verify_exam_schedules");
+      return page.state.schedules;
+    },
+    syncPersonnelConfig: async (_actualPage, personnel) => {
+      events.push("sync_personnel_config");
+      page.state.personnel = structuredClone(personnel);
+    },
+    syncPersonnelDates: async (_actualPage, dates) => {
+      events.push("sync_personnel_dates");
+      page.state.dates = structuredClone(dates);
+    },
+    openTaskSheet: async () => events.push("verify_task_sheet"),
+    selectRecipients: async (_actualPage, recipients) => {
+      events.push("resolve_recipients");
+      page.state.selectedRecipients = structuredClone(recipients);
+    },
+    readTaskSheetSchedules: async () => {
+      taskSheetScheduleReads += 1;
+      if (taskSheetScheduleReads === 2) events.push("final_read_schedules");
+      return page.state.schedules;
+    },
+    readSelectedRecipients: async () => {
+      recipientReads += 1;
+      if (recipientReads === 2) events.push("final_read_recipients");
+      return page.state.selectedRecipients;
+    },
+    onCheckpoint: async ({ name, status }) => {
+      if (name === "submit_send" && status === "running") {
+        events.push("submit_send_running");
+      }
+    },
+    confirmSend: async (_actualPage, attempt) => {
+      events.push("confirm_send");
+      page.state.sendRecords.push({
+        type: attempt.kind === "resend" ? "再次发送" : "首次发送",
+        sentAt: new Date(Date.parse(attempt.startedAt) + 1000).toISOString(),
+      });
+    },
+  }));
+
+  assert.deepEqual(events, [
+    "read_batch",
+    "verify_exam_schedules",
+    "sync_personnel_config",
+    "sync_personnel_dates",
+    "verify_task_sheet",
+    "resolve_recipients",
+    "final_read_schedules",
+    "final_read_recipients",
+    "submit_send_running",
+    "confirm_send",
+  ]);
+  assert.equal(events.filter((event) => event === "confirm_send").length, 1);
+});
+
+test("final schedule readback drift blocks before submit and confirm", async () => {
+  const page = fakeOperationPage();
+  const events = [];
+  const options = attemptOptions(page, {
+    selectRecipients: async (_actualPage, recipients) => {
+      page.state.selectedRecipients = structuredClone(recipients);
+      page.state.schedules = [{
+        ...page.state.schedules[0],
+        end: "2026-08-22T12:00:00",
+      }];
+    },
+    readTaskSheetSchedules: async () => {
+      events.push("final_read_schedules");
+      return page.state.schedules;
+    },
+    onCheckpoint: async ({ name, status }) => {
+      if (name === "submit_send" && status === "running") {
+        events.push("submit_send_running");
+      }
+    },
+    confirmSend: async () => events.push("confirm_send"),
+  });
+
+  await assert.rejects(
+    operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
+    { code: "PERSONNEL_BATCH_SCHEDULE_CONFLICT" },
+  );
+  assert.equal(events.includes("submit_send_running"), false);
+  assert.equal(events.includes("confirm_send"), false);
+});
+
+test("final recipient readback drift blocks before submit and confirm", async () => {
+  const page = fakeOperationPage();
+  const events = [];
+  let recipientReads = 0;
+  const options = attemptOptions(page, {
+    readSelectedRecipients: async () => {
+      recipientReads += 1;
+      if (recipientReads === 1) return page.state.selectedRecipients;
+      return { to: [{ id: "other", name: "其他人员" }], cc: [] };
+    },
+    onCheckpoint: async ({ name, status }) => {
+      if (name === "submit_send" && status === "running") {
+        events.push("submit_send_running");
+      }
+    },
+    confirmSend: async () => events.push("confirm_send"),
+  });
+
+  await assert.rejects(
+    operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
+    { code: "PERSONNEL_OPERATION_CONFLICT" },
+  );
+  assert.equal(events.includes("submit_send_running"), false);
+  assert.equal(events.includes("confirm_send"), false);
+});
+
 test("attempt verifies schedules read only and never invokes schedule mutation", async () => {
   const page = fakeOperationPage();
   const observed = [];

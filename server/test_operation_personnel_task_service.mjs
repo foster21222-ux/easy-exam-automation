@@ -1585,31 +1585,50 @@ test("failure classification preserves the irreversible submit boundary", async 
   }
 });
 
-test("pre-click schedule and recipient drift remain resumable", async () => {
-  for (const code of [
-    "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
-    "PERSONNEL_OPERATION_CONFLICT",
-  ]) {
-    const harness = serviceHarness({
-      runnerResult: async () => {
-        throw Object.assign(new Error("final readback drift"), { code });
-      },
-    });
-    const preview = await harness.service.preview("task-a", owner(), {});
-    await harness.service.send("task-a", owner(), {
-      previewToken: preview.previewToken,
-      draftVersion: preview.draftVersion,
-      changeSummary: "",
-    });
+test("final schedule readback drift is failed_resumable before submit", async () => {
+  const code = "PERSONNEL_BATCH_SCHEDULE_CONFLICT";
+  const harness = serviceHarness({
+    runnerResult: async () => {
+      throw Object.assign(new Error("final schedule readback drift"), { code });
+    },
+  });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
 
-    await harness.runDeferred();
+  await harness.runDeferred();
 
-    const state = harness.task.config.operationPersonnelTask;
-    assert.equal(state.checkpoints.submit_send, undefined, code);
-    assert.equal(state.status, "failed_resumable", code);
-    assert.equal(state.activeAttempt.status, "failed_resumable", code);
-    assert.equal(state.activeAttempt.error.code, code);
-  }
+  const state = harness.task.config.operationPersonnelTask;
+  assert.equal(state.checkpoints.submit_send, undefined);
+  assert.equal(state.status, "failed_resumable");
+  assert.equal(state.activeAttempt.status, "failed_resumable");
+  assert.equal(state.activeAttempt.error.code, code);
+});
+
+test("final recipient readback drift is failed_resumable before submit", async () => {
+  const code = "PERSONNEL_OPERATION_CONFLICT";
+  const harness = serviceHarness({
+    runnerResult: async () => {
+      throw Object.assign(new Error("final recipient readback drift"), { code });
+    },
+  });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+
+  await harness.runDeferred();
+
+  const state = harness.task.config.operationPersonnelTask;
+  assert.equal(state.checkpoints.submit_send, undefined);
+  assert.equal(state.status, "failed_resumable");
+  assert.equal(state.activeAttempt.status, "failed_resumable");
+  assert.equal(state.activeAttempt.error.code, code);
 });
 
 test("restart recovery distinguishes pre-send failure from unknown send result", async () => {
