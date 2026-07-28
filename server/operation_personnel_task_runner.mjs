@@ -9,6 +9,7 @@ import {
   searchOperationBatchListPages,
   startOperationBatchListSearch,
 } from "./operation_batch_runner.mjs";
+import { openVisibleEztestSchedulePage } from "./operation_batch_update_runner.mjs";
 
 const RECIPIENT_RULES = Object.freeze({
   test: { toGroup: "演练组", toName: "张乐翔", ccGroup: "", ccCount: 0 },
@@ -1265,6 +1266,8 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     text(instruction.environment),
   );
   if (instruction.allowUnpublishedPreview === true && batch.published !== true) {
+    await (options.openEztestSchedulePage || openVisibleEztestSchedulePage)(page);
+    visibleSnapshot = undefined;
     const schedules = await read("readSchedules", "schedules", []);
     return normalizeOperationPersonnelSnapshot({
       batch,

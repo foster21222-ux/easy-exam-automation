@@ -115,3 +115,29 @@ Expected: 全部通过，且 `git diff --check` 无输出。
 git add server/operation_personnel_task_runner.mjs server/test_operation_personnel_task_runner.mjs docs/superpowers/plans/2026-07-28-operation-batch-visible-schedule-compatibility.md
 git commit -m "fix: read current operation schedule table"
 ```
+
+### Task 2: 未发布批次进入考试页签后刷新快照
+
+**Files:**
+- Modify: `server/operation_personnel_task_runner.mjs`
+- Test: `server/test_operation_personnel_task_runner.mjs`
+
+**Interfaces:**
+- Consumes: `openVisibleEztestSchedulePage(page)`，现有批次修改模块的只读“考试 → 易考”导航。
+- Produces: 未发布批次首次检查从考试页签重新读取的日程快照。
+
+- [ ] **Step 1: 增加失败测试**
+
+分别返回切换前无日程表、切换后有日程表的两份可见快照；断言检查先打开考试页签、读取两次快照并返回真实日程。
+
+- [ ] **Step 2: 确认旧代码失败**
+
+运行 `server/test_operation_personnel_task_runner.mjs`，预期失败信息为未打开考试页签或仍使用旧快照。
+
+- [ ] **Step 3: 实施最小修复**
+
+未发布预览读取日程前调用 `openVisibleEztestSchedulePage(page)`，随后清除缓存的 `visibleSnapshot`，再执行既有只读日程读取。
+
+- [ ] **Step 4: 验证**
+
+运行人员任务测试、全量 Node 测试、Python 测试、运行时同步和 8765 健康检查。

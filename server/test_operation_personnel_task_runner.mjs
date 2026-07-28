@@ -1497,6 +1497,7 @@ function attemptOptions(page = fakeOperationPage(), overrides = {}) {
     context: fakeOperationContext(page),
     readBatchPages: async () => exactBatchPages(),
     openBatchRow: async () => page.events.push("batch:open"),
+    openEztestSchedulePage: async () => page.events.push("exam-schedule:open"),
     readBatch: async () => ({ ...page.state.batch }),
     readSchedules: async () => page.state.schedules,
     readPersonnel: async () => page.state.personnel,
@@ -2635,6 +2636,7 @@ test("unpublished initial preview reads schedules without opening a task sheet",
     {
       readBatchPages: async () => exactBatchPages(),
       openBatchRow: async () => opened.push("batch"),
+      openEztestSchedulePage: async () => opened.push("exam-schedule"),
       readBatch: async () => ({
         code: "EZT260003",
         batchName: "目标批次",
@@ -2668,7 +2670,7 @@ test("unpublished initial preview reads schedules without opening a task sheet",
     },
   );
 
-  assert.deepEqual(opened, ["batch"]);
+  assert.deepEqual(opened, ["batch", "exam-schedule"]);
   assert.equal(snapshot.batch.published, false);
   assert.deepEqual(snapshot.schedules, [{
     scheduleEntryId: "",
@@ -2684,6 +2686,48 @@ test("unpublished initial preview reads schedules without opening a task sheet",
   assert.deepEqual(snapshot.taskSheet, { type: "", conditions: [], content: "" });
   assert.deepEqual(snapshot.sendRecords, []);
   assert.deepEqual(snapshot.directoryMatch, { to: [], cc: [] });
+});
+
+test("unpublished visible preview opens the exam schedule tab and refreshes its cached snapshot", async () => {
+  const opened = [];
+  let snapshotReads = 0;
+  const snapshot = await inspectOperationPersonnelTask(
+    {},
+    {
+      environment: "test",
+      allowUnpublishedPreview: true,
+      batch: { code: "EZT260003", batchName: "目标批次" },
+    },
+    {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => opened.push("batch"),
+      openEztestSchedulePage: async () => opened.push("exam-schedule"),
+      readVisibleSnapshot: async () => {
+        snapshotReads += 1;
+        const current = visibleSnapshot(snapshotReads === 1 ? {
+          schedules: { present: false, missing: ["考试日程表"] },
+        } : {});
+        current.batch = {
+          code: "EZT260003",
+          batchName: "目标批次",
+          published: false,
+        };
+        if (snapshotReads === 2) {
+          current.schedules = [{
+            scheduleCode: 17,
+            subjectName: "综合能力",
+            start: "2026-08-22 09:00",
+            end: "2026-08-22 11:00",
+          }];
+        }
+        return current;
+      },
+    },
+  );
+
+  assert.deepEqual(opened, ["batch", "exam-schedule"]);
+  assert.equal(snapshotReads, 2);
+  assert.equal(snapshot.schedules[0].scheduleCode, 17);
 });
 
 test("inspection resolves the exact directory only with a real probe summary", async () => {
