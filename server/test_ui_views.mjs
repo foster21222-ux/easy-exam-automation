@@ -1223,6 +1223,95 @@ test("personnel task labels and visible countdown follow server state", () => {
   );
 });
 
+test("project workflow cards render every known status in understandable Chinese", () => {
+  const labelsSource = sourceBetween(
+    "      const projectWorkflowStatusLabels = {",
+    "\n      };",
+  );
+  const projectWorkflowStatusLabels = Function(
+    `return (${labelsSource.slice(labelsSource.indexOf("{"))}\n});`,
+  )();
+  const expectedLabels = {
+    ready: "可执行",
+    success: "已完成",
+    sent: "已发送",
+    needs_review: "待补充",
+    reconciliation_required: "待同步",
+    waiting_schedule: "等待补全日程",
+    update_available: "可修改",
+    updating: "修改中",
+    update_conflict: "修改冲突",
+    update_failed: "修改失败",
+    waiting_batch: "等待批次",
+    waiting_execution: "等待执行数据",
+    skipped: "无需执行",
+    failed_resumable: "待继续处理",
+    result_unknown: "待核对发送结果",
+    changes_pending: "有变更待处理",
+    unsupported: "暂不支持",
+    blocked_pending_change: "有需求变更待审核",
+    operation_conflict: "数据不一致需人工处理",
+  };
+  assert.deepEqual(projectWorkflowStatusLabels, expectedLabels);
+
+  const projectWorkflowSteps = { innerHTML: "" };
+  const projectWorkflowGates = { innerHTML: "" };
+  const renderProjectWorkflow = compileInlineFunction(
+    "      function renderProjectWorkflow(task = {}, workflow = {}, batchDraft = {}) {",
+    "\n      function projectRequirementFormalTime",
+    {
+      taskViewState: {},
+      renderProjectSources: () => {},
+      projectWorkflowSteps,
+      projectWorkflowStepMeta: [
+        ["batch", "建批次", "泛微", "创建批次"],
+        ["personnel", "人员任务", "泛微", "发送人员任务"],
+        ["content", "内容任务", "易考需求单", "发送内容任务"],
+        ["archive", "运控归档", "实际执行", "归档"],
+      ],
+      projectWorkflowSourceChangeNotice: () => "",
+      safeText: (value) => String(value ?? ""),
+      projectWorkflowStatusLabels,
+      projectWorkflowStatusLabel: (status) => projectWorkflowStatusLabels[status] || "状态待确认",
+      renderOperationBatchDraft: () => "",
+      projectOperationBatchDraft: { innerHTML: "" },
+      renderOperationPersonnelDraft: () => "",
+      projectPersonnelTaskDraft: { innerHTML: "" },
+      renderWorkflowDraft: () => "",
+      projectOperationArchiveDraft: { innerHTML: "" },
+      projectExamRequirements: () => [],
+      projectContentTaskDraft: { innerHTML: "" },
+      renderProjectContentExamList: () => "",
+      projectWorkflowGates,
+    },
+  );
+
+  renderProjectWorkflow({}, {
+    steps: {
+      batch: { status: "unknown_future_status" },
+      personnel: { status: "failed_resumable" },
+      content: { status: "result_unknown" },
+      archive: { status: "operation_conflict" },
+    },
+  });
+
+  for (const label of [
+    "状态待确认",
+    "待继续处理",
+    "待核对发送结果",
+    "数据不一致需人工处理",
+  ]) {
+    assert.match(projectWorkflowSteps.innerHTML, new RegExp(label));
+    assert.match(projectWorkflowGates.innerHTML, new RegExp(label));
+  }
+  const visibleText = `${projectWorkflowSteps.innerHTML}${projectWorkflowGates.innerHTML}`
+    .replace(/<[^>]*>/g, " ");
+  assert.doesNotMatch(
+    visibleText,
+    /unknown_future_status|failed_resumable|result_unknown|operation_conflict/,
+  );
+});
+
 test("personnel confirmation keeps environment and recipients read only with one final send action", () => {
   const dialog = html.slice(
     html.indexOf('id="operationPersonnelConfirmDialog"'),

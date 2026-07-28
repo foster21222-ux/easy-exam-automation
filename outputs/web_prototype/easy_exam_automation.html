@@ -9327,7 +9327,17 @@
         waiting_batch: "等待批次",
         waiting_execution: "等待执行数据",
         skipped: "无需执行",
+        failed_resumable: "待继续处理",
+        result_unknown: "待核对发送结果",
+        changes_pending: "有变更待处理",
+        unsupported: "暂不支持",
+        blocked_pending_change: "有需求变更待审核",
+        operation_conflict: "数据不一致需人工处理",
       };
+
+      function projectWorkflowStatusLabel(status) {
+        return projectWorkflowStatusLabels[status] || "状态待确认";
+      }
 
       function renderWorkflowDraft(draft = {}) {
         const fields = draft.fields || {};
@@ -10317,7 +10327,7 @@
           const status = workflow.steps?.[key]?.status || "waiting_batch";
           const changeNotice = projectWorkflowSourceChangeNotice(task, key);
           const connector = index < projectWorkflowStepMeta.length - 1 ? `<span class="operation-workflow-connector" aria-hidden="true"></span>` : "";
-          return `<button class="operation-workflow-step ${safeText(status)}" type="button" data-workflow-step="${safeText(key)}" aria-selected="false"><span class="operation-workflow-index">${index + 1}</span><div class="operation-workflow-step-head"><span class="operation-workflow-step-title">${safeText(title)}</span><span class="operation-workflow-step-tags">${changeNotice ? `<span class="tag amber">${safeText(changeNotice)}</span>` : ""}<span class="tag ${status === "needs_review" || status === "reconciliation_required" ? "amber" : status === "ready" || status === "success" || status === "sent" ? "green" : ""}">${safeText(projectWorkflowStatusLabels[status] || status)}</span></span></div><p>${safeText(description)}<br>来源：${safeText(source)} · 点击查看</p>${connector}</button>`;
+          return `<button class="operation-workflow-step ${safeText(status)}" type="button" data-workflow-step="${safeText(key)}" aria-selected="false"><span class="operation-workflow-index">${index + 1}</span><div class="operation-workflow-step-head"><span class="operation-workflow-step-title">${safeText(title)}</span><span class="operation-workflow-step-tags">${changeNotice ? `<span class="tag amber">${safeText(changeNotice)}</span>` : ""}<span class="tag ${status === "needs_review" || status === "reconciliation_required" ? "amber" : status === "ready" || status === "success" || status === "sent" ? "green" : ""}">${safeText(projectWorkflowStatusLabel(status))}</span></span></div><p>${safeText(description)}<br>来源：${safeText(source)} · 点击查看</p>${connector}</button>`;
         }).join("");
         projectOperationBatchDraft.innerHTML = renderOperationBatchDraft(batchDraft);
         projectPersonnelTaskDraft.innerHTML = renderOperationPersonnelDraft(workflow.personnelDraft);
@@ -10329,7 +10339,7 @@
         projectWorkflowGates.innerHTML = projectWorkflowStepMeta.map(([key, title]) => {
           const status = workflow.steps?.[key]?.status || "waiting_batch";
           const ready = ["ready", "success", "skipped"].includes(status);
-          return `<div class="log ${ready ? "success" : status === "needs_review" ? "warn" : ""}"><div><strong>${safeText(title)}</strong>：${safeText(projectWorkflowStatusLabels[status] || status)}</div></div>`;
+          return `<div class="log ${ready ? "success" : status === "needs_review" ? "warn" : ""}"><div><strong>${safeText(title)}</strong>：${safeText(projectWorkflowStatusLabel(status))}</div></div>`;
         }).join("");
       }
 
