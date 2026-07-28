@@ -542,6 +542,48 @@ function visibleScheduleRange(value) {
   return { start: startValue, end };
 }
 
+function requiredVisibleScheduleValue(row = {}, labels = [], fieldName) {
+  const values = labels
+    .filter((label) => Object.hasOwn(row, label))
+    .map((label) => text(row[label]))
+    .filter(Boolean);
+  if (values.length !== 1) {
+    throw new Error(`运控人员任务检查阻断：考试日程“${fieldName}”必须精确匹配 1 个值`);
+  }
+  return values[0];
+}
+
+export function operationPersonnelBatchSchedulesFromVisibleRows(rows = []) {
+  return [...rows].map((row) => {
+    const combined = text(row?.["日程"]);
+    const separateStart = text(row?.["开始时间"]);
+    const separateEnd = text(row?.["结束时间"]);
+    if (combined && (separateStart || separateEnd)) {
+      throw new Error("运控人员任务检查阻断：考试日程同时包含组合和分列时间");
+    }
+    const range = combined
+      ? visibleScheduleRange(combined)
+      : {
+        start: requiredVisibleScheduleValue(row, ["开始时间"], "开始时间"),
+        end: requiredVisibleScheduleValue(row, ["结束时间"], "结束时间"),
+      };
+    return normalizeSchedule({
+      scheduleEntryId: row?.__scheduleEntryId || row?.["日程条目ID"] || row?.["日程稳定ID"],
+      scheduleCode: requiredVisibleScheduleValue(row, ["日程代码"], "日程代码"),
+      subjectCode: row?.["科目代码"],
+      subjectName: requiredVisibleScheduleValue(row, ["考试名称", "科目名称"], "考试名称"),
+      start: range.start,
+      end: range.end,
+      durationMinutes: requiredVisibleScheduleValue(row, ["时长(分钟)", "时长"], "时长"),
+      earlyLoginMinutes: requiredVisibleScheduleValue(
+        row,
+        ["考生提前登录(分钟)", "提前登录分钟数"],
+        "考生提前登录分钟数",
+      ),
+    });
+  });
+}
+
 function visibleConditionSatisfied(value) {
   const normalized = text(value);
   if (/未设置|未发布|已结束/.test(normalized)) return false;
@@ -1025,20 +1067,13 @@ async function readVisibleOperationPersonnelSnapshot(page) {
       const missing = labels[section].filter((label) => !fields[label].present);
       return { present: missing.length === 0, missing };
     };
-    const scheduleTable = table(["日程代码", "开始时间"]);
+    const currentScheduleTable = table(["日程代码", "日程"]);
+    const scheduleTable = currentScheduleTable.present
+      ? currentScheduleTable
+      : table(["日程代码", "开始时间", "结束时间"]);
     const requirementTable = table(["考务需求"]);
     const conditionTable = table(["发送条件"]);
     const sendRecordTable = table(["发送类型", "发送时间"]);
-    const schedules = scheduleTable.rows.map((row) => ({
-      scheduleEntryId: row.__scheduleEntryId || row["日程条目ID"] || row["日程稳定ID"],
-      scheduleCode: row["日程代码"],
-      subjectCode: row["科目代码"],
-      subjectName: row["科目名称"],
-      start: row["开始时间"],
-      end: row["结束时间"],
-      durationMinutes: row["时长"],
-      earlyLoginMinutes: row["提前登录分钟数"],
-    }));
     const requirements = requirementTable.rows.map((row) => ({
       name: row["考务需求"],
       value: row["需求内容"] || row["配置"],
@@ -1102,7 +1137,8 @@ async function readVisibleOperationPersonnelSnapshot(page) {
         systemType: fields["系统类型"].value,
         published: fields["发布状态"].value === "已发布",
       },
-      schedules,
+      schedules: [],
+      __scheduleRows: scheduleTable.rows,
       personnel: {
         serviceType: fields["人员服务类型"].value,
         platform: fields["人员落实平台"].value,
@@ -1161,6 +1197,10 @@ async function readVisibleOperationPersonnelSnapshot(page) {
       },
     };
   });
+  snapshot.schedules = operationPersonnelBatchSchedulesFromVisibleRows(
+    snapshot.__scheduleRows,
+  );
+  delete snapshot.__scheduleRows;
   if (Object.values(snapshot.__currentBatchRaw || {}).some((value) => (
     Array.isArray(value) ? value.length > 0 : Boolean(value)
   ))) {

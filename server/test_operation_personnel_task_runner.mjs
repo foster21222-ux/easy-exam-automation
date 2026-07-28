@@ -279,6 +279,63 @@ test("personnel date range selects both endpoints before saving", async () => {
   assert.deepEqual(events, ["input", "start", "end"]);
 });
 
+test("current operation batch schedule rows map the visible combined schedule columns", () => {
+  const schedules = operationPersonnelRunner.operationPersonnelBatchSchedulesFromVisibleRows([{
+    "场次": "1",
+    "日程代码": "1",
+    "日程": "2026-08-22 15:30~17:30",
+    "时长(分钟)": "120",
+    "考试名称": "中国邮政集团公司湖北省分公司招聘考试",
+    "考生提前登录(分钟)": "0",
+  }]);
+
+  assert.deepEqual(schedules, [{
+    scheduleEntryId: "",
+    scheduleCode: 1,
+    subjectCode: "",
+    subjectName: "中国邮政集团公司湖北省分公司招聘考试",
+    start: "2026-08-22 15:30",
+    end: "2026-08-22 17:30",
+    durationMinutes: 120,
+    earlyLoginMinutes: 0,
+  }]);
+});
+
+test("legacy operation batch schedule rows keep separate time column compatibility", () => {
+  const schedules = operationPersonnelRunner.operationPersonnelBatchSchedulesFromVisibleRows([{
+    "日程代码": "17",
+    "开始时间": "2026-08-22 09:00",
+    "结束时间": "2026-08-22 11:00",
+    "时长": "120",
+    "科目名称": "综合能力",
+    "提前登录分钟数": "30",
+  }]);
+
+  assert.deepEqual(schedules, [{
+    scheduleEntryId: "",
+    scheduleCode: 17,
+    subjectCode: "",
+    subjectName: "综合能力",
+    start: "2026-08-22 09:00",
+    end: "2026-08-22 11:00",
+    durationMinutes: 120,
+    earlyLoginMinutes: 30,
+  }]);
+});
+
+test("current operation batch schedule rows reject an invalid combined schedule range", () => {
+  assert.throws(
+    () => operationPersonnelRunner.operationPersonnelBatchSchedulesFromVisibleRows([{
+      "日程代码": "1",
+      "日程": "2026-08-22 15:30",
+      "时长(分钟)": "120",
+      "考试名称": "目标考试",
+      "考生提前登录(分钟)": "0",
+    }]),
+    /日程.*格式无效/,
+  );
+});
+
 function visiblePersonnelTaskSheetRaw(overrides = {}) {
   return {
     conditions: [
