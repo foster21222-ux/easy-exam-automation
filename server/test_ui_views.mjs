@@ -1269,8 +1269,7 @@ test("personnel confirmation edits stay local until final send", () => {
     '\n      operationPersonnelConfirmSendBtn.addEventListener("click", () => {',
   );
 
-  assert.match(changeHandler, /collectOperationPersonnelPreviewEdits/);
-  assert.doesNotMatch(changeHandler, /refreshOperationPersonnelPreviewFromDialog|previewOperationPersonnelTask|fetchJson/);
+  assert.doesNotMatch(changeHandler, /collectOperationPersonnelPreviewEdits|refreshOperationPersonnelPreviewFromDialog|previewOperationPersonnelTask|fetchJson/);
   assert.match(changeHandler, /内容已修改，发送时将统一重新校验/);
   assert.doesNotMatch(html, /function refreshOperationPersonnelPreviewFromDialog/);
 });

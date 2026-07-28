@@ -15932,7 +15932,6 @@
       });
       operationPersonnelConfirmContent.addEventListener("change", (event) => {
         if (!event.target.closest("[data-operation-personnel-edit]")) return;
-        collectOperationPersonnelPreviewEdits();
         operationPersonnelProgress.textContent = "内容已修改，发送时将统一重新校验";
       });
       operationPersonnelConfirmSendBtn.addEventListener("click", () => {
