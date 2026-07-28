@@ -1428,6 +1428,7 @@ function simulatedVisibleOperationPage(overrides = {}) {
     published: overrides.published,
     sendRecordsAfterReopen: overrides.sendRecordsAfterReopen,
   });
+  page.currentLocation = "batch-list";
   let dialogPurpose = "";
   const locator = (count, click, nested = {}) => ({
     count: async () => count,
@@ -1467,7 +1468,12 @@ function simulatedVisibleOperationPage(overrides = {}) {
   };
   page.getByRole = (role, options = {}) => {
     if (role === "button" && options.name === "发布") {
-      return locator(overrides.publishCount ?? 1, () => {
+      const publishCount = overrides.publishCount ?? (
+        overrides.publishOnlyOnBatchDetail && page.currentLocation !== "batch-detail"
+          ? 0
+          : 1
+      );
+      return locator(publishCount, () => {
         page.events.push("publish:click:visible");
         dialogPurpose = "publish";
       });
@@ -2001,6 +2007,36 @@ test("unpublished initial attempt publishes before opening the task sheet and re
     to: [{ group: "演练组", id: "u1", name: "张乐翔" }],
     cc: [],
   });
+});
+
+test("unpublished visible attempt restores the exact batch detail after schedule preview before publishing", async () => {
+  const page = simulatedVisibleOperationPage({ publishOnlyOnBatchDetail: true });
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      openBatchRow: async () => {
+        page.events.push("batch:open");
+        page.currentLocation = "batch-detail";
+      },
+      openEztestSchedulePage: async () => {
+        page.events.push("exam-schedule:open");
+        page.currentLocation = "exam-schedule";
+      },
+      publishBatch: undefined,
+      confirmSend: undefined,
+    }),
+  );
+
+  assert.equal(result.status, "sent");
+  const schedulePreviewIndex = page.events.indexOf("exam-schedule:open");
+  const publishIndex = page.events.indexOf("publish:click:visible");
+  assert.ok(schedulePreviewIndex >= 0);
+  assert.ok(publishIndex > schedulePreviewIndex);
+  assert.ok(
+    page.events.slice(schedulePreviewIndex + 1, publishIndex).includes("batch:open"),
+    "the exact batch detail must be reopened after schedule preview and before publishing",
+  );
 });
 
 test("published batches skip the publish click but still complete the checkpoint", async () => {

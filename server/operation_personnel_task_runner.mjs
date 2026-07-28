@@ -2160,7 +2160,8 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
   readSendRecords: (page) => readVisibleTopRightSendRecords(page),
   readDirectoryGroups: (page) => readVisibleSection(page, "directoryGroups"),
 
-  async publishBatch(page) {
+  async publishBatch(page, instruction, options = {}) {
+    await locateOperationPersonnelBatch(page, instruction, options);
     await clickUniqueVisible(
       page.getByRole("button", { name: "发布", exact: true }),
       "发布按钮",
@@ -2538,7 +2539,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     target: { ...target.batch, published: true },
     action: async () => {
       if (kind === "initial" && !snapshot.batch.published) {
-        await operationMethod(page, options, "publishBatch")(page, instruction);
+        await operationMethod(page, options, "publishBatch")(page, instruction, options);
       }
     },
     verify: readPublishedBatch,
