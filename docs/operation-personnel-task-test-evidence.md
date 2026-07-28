@@ -236,3 +236,52 @@
 
 - 终审修复后未执行真实首次发送、重发或最终确认，也未写入考试日程。
 - 本机仍没有同时满足“有效批次代码、运控可见日程完整、可进入确认页”的测试项目，因此确认页的最终实机验收仍需在用户新建完整测试项目后进行。
+
+## 2026-07-28 未发布批次发布位置恢复
+
+### 根因与修复
+
+- 未发布批次预检切换到“考试 → 易考”读取日程后，`publish_batch` 检查点仍在当前页面直接定位“发布”按钮，实际匹配为 `0`。
+- 修复后，首次发送发现批次未发布时，先按批次代码重新精确打开批次详情，再点击唯一“发布”按钮并回读“已发布”状态。
+- 已发布批次继续跳过发布动作；未扩大按钮选择器，也没有使用模糊文字匹配。
+
+### 红绿回归证据
+
+- 新增测试 `unpublished visible attempt restores the exact batch detail after schedule preview before publishing`。
+- 修复前单独运行该测试：`tests 1`、`pass 0`、`fail 1`，失败原文为：
+
+  ```text
+  运控可见页面控件“发布按钮”必须精确匹配 1 个，实际 0 个
+  ```
+
+- 修复后单独运行该测试：`tests 1`、`pass 1`、`fail 0`。
+- 人员任务执行器测试：`tests 103`、`pass 103`、`fail 0`。
+- 人员任务执行器、服务和接口相关测试：`tests 169`、`pass 169`、`fail 0`。
+
+### 全量测试
+
+- 全量 Node 测试退出码 `0`：
+  - `tests 1152`
+  - `pass 1152`
+  - `fail 0`
+  - `cancelled 0`
+  - `skipped 0`
+  - 耗时 `7516.226125ms`
+- 全量 Python 测试退出码 `0`：`Ran 54 tests in 2.772s`，`OK`。
+
+### 本机运行时
+
+- `node scripts/deploy_launchd_runtime.mjs` 退出码 `0`，返回 `"ok": true`，目标为 `/Users/ata/Library/Application Support/easy-exam-automation/app`。
+- `launchctl kickstart -k gui/501/com.ata.easy-exam-service` 退出码 `0`；重启后的 LaunchAgent PID 为 `22704`。
+- 重启后的沙箱内健康请求无法连接；用相同命令在沙箱外复核，退出码 `0`，原始响应为 `{"ok":true}`。
+- 部署运行时中的人员任务执行器测试：`tests 103`、`pass 103`、`fail 0`。
+- 源码与运行时 `operation_personnel_task_runner.mjs` SHA-256 一致：
+
+  ```text
+  5659a755dca150969bbd330dedf0966a7d03b9764bcfd852c09961851f5223f3
+  ```
+
+### 实机边界
+
+- 本次没有点击最终确认按钮，没有执行真实人员任务首次发送或再次发送。
+- 自动测试已验证重新定位、发布、状态回读和后续任务单顺序；实际运控页面的最终验证由用户使用测试项目再次发送时完成。
