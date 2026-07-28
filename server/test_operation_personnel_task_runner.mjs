@@ -1430,6 +1430,10 @@ function simulatedVisibleOperationPage(overrides = {}) {
   });
   page.currentLocation = "batch-list";
   let dialogPurpose = "";
+  const publishAccessibleName = overrides.publishAccessibleName ?? "发布";
+  const nameMatches = (expected, actual) => (
+    expected instanceof RegExp ? expected.test(actual) : expected === actual
+  );
   const locator = (count, click, nested = {}) => ({
     count: async () => count,
     click: async () => click?.(),
@@ -1467,7 +1471,7 @@ function simulatedVisibleOperationPage(overrides = {}) {
     locator: () => sendRecordLocator(overrides.visibleSendRecords || []),
   };
   page.getByRole = (role, options = {}) => {
-    if (role === "button" && options.name === "发布") {
+    if (role === "button" && nameMatches(options.name, publishAccessibleName)) {
       const publishCount = overrides.publishCount ?? (
         overrides.publishOnlyOnBatchDetail && page.currentLocation !== "batch-detail"
           ? 0
@@ -2037,6 +2041,32 @@ test("unpublished visible attempt restores the exact batch detail after schedule
     page.events.slice(schedulePreviewIndex + 1, publishIndex).includes("batch:open"),
     "the exact batch detail must be reopened after schedule preview and before publishing",
   );
+});
+
+test("default visible adapter uniquely matches the real spaced publish button name", async () => {
+  const page = simulatedVisibleOperationPage({
+    publishAccessibleName: "发 布",
+    publishOnlyOnBatchDetail: true,
+  });
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      openBatchRow: async () => {
+        page.events.push("batch:open");
+        page.currentLocation = "batch-detail";
+      },
+      openEztestSchedulePage: async () => {
+        page.events.push("exam-schedule:open");
+        page.currentLocation = "exam-schedule";
+      },
+      publishBatch: undefined,
+      confirmSend: undefined,
+    }),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.filter((item) => item === "publish:click:visible").length, 1);
 });
 
 test("published batches skip the publish click but still complete the checkpoint", async () => {

@@ -2163,7 +2163,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
   async publishBatch(page, instruction, options = {}) {
     await locateOperationPersonnelBatch(page, instruction, options);
     await clickUniqueVisible(
-      page.getByRole("button", { name: "发布", exact: true }),
+      page.getByRole("button", { name: /^发\s*布$/ }),
       "发布按钮",
     );
     await confirmTopVisibleDialog(page);
