@@ -27,7 +27,7 @@
 - Consumes: `page.getByRole("button", { name })` and the existing `clickUniqueVisible(locator, label)` uniqueness guard.
 - Produces: `VISIBLE_OPERATION_PERSONNEL_ADAPTER.publishBatch(page, instruction, options)` that accepts accessible names `发布` and `发 布` but no additional text.
 
-- [ ] **Step 1: Write the failing regression test**
+- [x] **Step 1: Write the failing regression test**
 
 Update `simulatedVisibleOperationPage` so its publish control has a configurable accessible name and applies string or regular-expression matching like Playwright:
 
@@ -72,7 +72,7 @@ test("default visible adapter uniquely matches the real spaced publish button na
 });
 ```
 
-- [ ] **Step 2: Run the regression test and verify RED**
+- [x] **Step 2: Run the regression test and verify RED**
 
 Run:
 
@@ -84,7 +84,7 @@ Run:
 
 Expected: FAIL with `PERSONNEL_OPERATION_CONTROL_AMBIGUOUS` and a publish-button count of `0`, proving the production selector still rejects `发 布`.
 
-- [ ] **Step 3: Implement the minimal production change**
+- [x] **Step 3: Implement the minimal production change**
 
 Change only the accessible-name matcher:
 
@@ -94,7 +94,7 @@ page.getByRole("button", { name: /^发\s*布$/ }),
 
 Keep `clickUniqueVisible(..., "发布按钮")` and the confirmation flow unchanged.
 
-- [ ] **Step 4: Run focused verification and verify GREEN**
+- [x] **Step 4: Run focused verification and verify GREEN**
 
 Run:
 
@@ -105,13 +105,13 @@ Run:
 
 Expected: all personnel runner tests PASS, including the new spaced-name regression and existing zero/multiple control blocking tests.
 
-- [ ] **Step 5: Run project verification**
+- [x] **Step 5: Run project verification**
 
 Run the repository's complete Node test suite and Python test suite using the same commands recorded for this branch, then run `git diff --check`.
 
 Expected: all tests PASS and `git diff --check` returns no output.
 
-- [ ] **Step 6: Commit the source fix**
+- [x] **Step 6: Commit the source fix**
 
 ```bash
 git add server/test_operation_personnel_task_runner.mjs \
@@ -119,7 +119,7 @@ git add server/test_operation_personnel_task_runner.mjs \
 git commit -m "fix: match spaced operation publish button"
 ```
 
-- [ ] **Step 7: Deploy and verify the local test runtime**
+- [x] **Step 7: Deploy and verify the local test runtime**
 
 Synchronize the committed source state to `/Users/ata/Library/Application Support/easy-exam-automation/app`, restart the local service on port `8765`, and run the runtime test suites plus the HTTP health check.
 

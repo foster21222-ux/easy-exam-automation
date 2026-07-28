@@ -285,3 +285,36 @@
 
 - 本次没有点击最终确认按钮，没有执行真实人员任务首次发送或再次发送。
 - 自动测试已验证重新定位、发布、状态回读和后续任务单顺序；实际运控页面的最终验证由用户使用测试项目再次发送时完成。
+
+## 2026-07-28 发布按钮字间空格兼容
+
+### 实机根因
+
+- 只读打开测试运控批次 `EZT260006` 后，页面 URL 为 `/batch/batchDetail?batch_guid=db910e963d9b4e929c13122b7c0b7701`。
+- 页面存在唯一、可点击且未禁用的 `button`，其可访问名称为“发 布”；原选择器使用精确字符串“发布”，因此匹配数为 `0`，发布动作从未执行。
+- 修复仅把按钮名称约束调整为锚定规则 `^发\s*布$`；`button` 角色和唯一匹配约束保持不变，零个或多个匹配仍阻断。
+
+### 红绿回归证据
+
+- 新增测试 `default visible adapter uniquely matches the real spaced publish button name`。
+- 修复前单独运行：`tests 1`、`pass 0`、`fail 1`，错误为“发布按钮实际 0 个”。
+- 修复后单独运行：`tests 1`、`pass 1`、`fail 0`。
+- 人员任务执行器测试：`tests 104`、`pass 104`、`fail 0`。
+
+### 全量测试与运行时
+
+- 全量 Node：`tests 1154`、`pass 1154`、`fail 0`。
+- 全量 Python：`Ran 54 tests in 1.410s`，`OK`。
+- 运行时人员任务执行器：`tests 104`、`pass 104`、`fail 0`。
+- 部署返回 `"ok": true`；LaunchAgent 经明确 `kickstart -k` 后从当前 Application Support `app` 目录启动。
+- 沙箱外健康检查原始响应为 `{"ok":true}`。
+- 源码与运行时 `operation_personnel_task_runner.mjs` SHA-256 一致：
+
+  ```text
+  0e1606056fc4610727a20fbcf7891daa89ad8003d532989279f6fdcc25fd6950
+  ```
+
+### 实机边界
+
+- 本轮只读检查了真实按钮结构，没有点击发布、确认弹窗或人员任务发送。
+- 用户下次在配置台确认发送时，系统才会按既有二次确认流程执行真实发布并回读“已发布”状态。
