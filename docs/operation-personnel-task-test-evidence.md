@@ -126,3 +126,67 @@
 - 点击运控最终发送前，再次读取任务单日程和已选收件人；任一变化均阻断发送。
 - 异步后台任务附带终止拒绝处理，持久化失败不会形成未处理的 Promise rejection。
 - 重发变化摘要使用中文业务字段名，不显示 `personnel.*`、`dates.*` 等内部路径。
+
+## 2026-07-28 全量验收（Task 5，以上旧数量以本节为准）
+
+### 自动测试与工作区
+
+- 相关 Node 测试命令：
+
+  ```bash
+  /Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test \
+    server/test_operation_personnel_task.mjs \
+    server/test_operation_personnel_schedule_gate.mjs \
+    server/test_operation_personnel_task_runner.mjs \
+    server/test_operation_personnel_task_service.mjs \
+    server/test_operation_personnel_task_routes.mjs \
+    server/test_ui_views.mjs
+  ```
+
+  最终重跑退出码 `0`：`tests 346`、`pass 346`、`fail 0`、`cancelled 0`、`skipped 0`、耗时 `3128.66525ms`。首次在受限沙箱运行退出码 `1`，其中 `9` 项路由测试均因 `listen EPERM: operation not permitted 127.0.0.1` 失败；获本机回环监听权限后以相同命令重跑，以上为有效结果。
+
+- 全量 Node 测试命令：
+
+  ```bash
+  /bin/zsh -lc 'for f in server/test_*.mjs; do [ "$f" = "server/test_exam_time_only.mjs" ] && continue; printf "%s\n" "$f"; done | xargs /Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --test'
+  ```
+
+  退出码 `0`：`tests 1140`、`pass 1140`、`fail 0`、`cancelled 0`、`skipped 0`、耗时 `13290.834875ms`。此前并发套件中止不构成证据；本次完整运行未在 `server/test_fanwei_helper_packaging.mjs` 或其他文件阻塞。
+
+- 全量 Python 测试命令：
+
+  ```bash
+  /Users/ata/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m unittest discover -s server -p 'test_*.py'
+  ```
+
+  退出码 `0`：`Ran 54 tests in 1.377s`，`OK`。
+
+- `git diff --check`：退出码 `0`，无输出；测试完成、更新证据前 `git status --short`：退出码 `0`，无输出。
+
+### 覆盖的关键安全断言
+
+- `personnel confirmation edits stay local until final send` 覆盖五字段本地编辑不触发预览 API。
+- `display schedules use exact operation schedule codes` 覆盖日程展示使用真实运控代码。
+- `final schedule readback drift blocks before submit and confirm`、`final recipient readback drift blocks before submit and confirm` 覆盖校验失败不进入 `submit_send` / 最终确认。
+- 本次没有执行真实人员任务发送；自动测试中的发送路径为隔离测试替身。
+
+### 2026-07-28 运行时同步与一致性
+
+- 部署命令 `node scripts/deploy_launchd_runtime.mjs` 退出码 `0`，返回 `"ok": true`；目标应用目录为 `/Users/ata/Library/Application Support/easy-exam-automation/app`。
+- `launchctl kickstart -k gui/$(id -u)/com.ata.easy-exam-service` 退出码 `0`。
+- `curl -sS --max-time 5 http://127.0.0.1:8765/api/health` 退出码 `0`，原始响应为 `{"ok":true}`。
+- 源码与运行时 SHA-256 逐对一致：
+
+  ```text
+  422d0318edb769349dd02e38c9b27d678f6b42e1d4dbc1a10d79ac314526c924  operation_personnel_task_service.mjs（源码/运行时）
+  eab8db4e9fff0586592f191c7545192fc5ffaa77794fdb3859f36e3e0043ab7f  operation_personnel_task_runner.mjs（源码/运行时）
+  ea5aca650f7c4b43921aaddc61438e69925fb088d93a691663c3eb101b02eb6a  easy_exam_automation.html（源码/运行时）
+  ```
+
+### 2026-07-28 只读配置台检查与限制
+
+- 先用只读 API `GET /api/tasks` 和 `GET /api/tasks/{taskId}/operation-personnel-task` 筛选本机全部 `5` 个项目，而非逐个打开运控。唯一同时报告 `status: ready`、批次代码 `EZT260006`、`1` 条需求日程及 `1` 条受管日程的候选为 `R0031682`（`taskId b8e1af6b-7f2f-4490-926e-c2dda94f1461`）。其余 `4` 个候选分别为 `changes_pending`（1 个）及 `waiting_batch` / `needs_review`（3 个），不满足“受管日程完整且可预览”的筛选条件。
+- 在 `http://127.0.0.1:8765` 打开该唯一候选的人员任务详情，展示批次代码 `EZT260006`，其来源标记为“运控结果”。
+- 点击非终态的“检查并发送人员任务单”后，页面安全阻断：`运控人员任务检查阻断：无法确认可见页面中的考试日程表`。项目详情同时显示“尚未创建场次”。
+- 因唯一静态候选未通过实际可见日程预检，本机没有同时满足“有效批次代码、受管日程完整、可预览”的项目；未进入人员任务确认页。故“日程代码”表头和值、五字段编辑后页面不关闭/不重复打开、以及五字段实机无预览请求均未能在该数据集上验证。
+- 最终“确认以上内容并校验发送”按钮未出现且从未点击；未执行真实人员任务发送或考试日程写入。
