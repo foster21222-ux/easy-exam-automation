@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { buildOperationPersonnelTaskDraft, operationPersonnelTaskFingerprint } from "./operation_personnel_task.mjs";
-import { normalizeOperationPersonnelSnapshot } from "./operation_personnel_task_runner.mjs";
+import {
+  normalizeOperationPersonnelSnapshot,
+  runOperationPersonnelAttempt,
+} from "./operation_personnel_task_runner.mjs";
 import { createOperationPersonnelTaskService } from "./operation_personnel_task_service.mjs";
 
 const START = Date.parse("2026-07-23T02:00:00.000Z");
@@ -364,6 +367,7 @@ function serviceHarness(options = {}) {
     runAttempt: async (instruction, runnerOptions) => {
       runnerCalls.push("attempt");
       attemptInstructions.push(structuredClone(instruction));
+      if (options.runAttempt) return options.runAttempt(instruction, runnerOptions);
       if (options.checkpoint) await runnerOptions.onCheckpoint(options.checkpoint);
       if (typeof runnerResult === "function") return runnerResult();
       return typeof runnerResult?.then === "function" ? runnerResult : structuredClone(runnerResult);
@@ -1606,6 +1610,91 @@ test("final schedule readback drift is failed_resumable before submit", async ()
   assert.equal(state.status, "failed_resumable");
   assert.equal(state.activeAttempt.status, "failed_resumable");
   assert.equal(state.activeAttempt.error.code, code);
+});
+
+test("real runner checkpoint callbacks keep final schedule drift resumable before send", async () => {
+  const events = [];
+  const harness = serviceHarness({
+    runAttempt: async (instruction, runnerOptions) => {
+      const page = {
+        state: {
+          batch: { ...instruction.baseline.batch },
+          schedules: structuredClone(instruction.target.schedules),
+          personnel: { platform: "" },
+          dates: {},
+          requirements: [],
+          taskSheet: structuredClone(instruction.target.taskSheet),
+          sendRecords: [],
+          selectedRecipients: { to: [], cc: [] },
+        },
+      };
+      let current = START;
+      return runOperationPersonnelAttempt(instruction, {
+        context: { pages: () => [page], close: async () => {} },
+        readBatchPages: async () => ({
+          headers: ["批次代码"],
+          pages: [[{ cells: [instruction.batch.code], pageNumber: 1 }]],
+        }),
+        openBatchRow: async () => {},
+        readBatch: async () => ({ ...page.state.batch }),
+        readSchedules: async () => page.state.schedules,
+        readPersonnel: async () => page.state.personnel,
+        readDates: async () => page.state.dates,
+        readRequirements: async () => page.state.requirements,
+        readTaskSheet: async () => page.state.taskSheet,
+        readTaskSheetSchedules: async () => page.state.schedules,
+        readSendRecords: async () => page.state.sendRecords,
+        readDirectoryGroups: async () => [{
+          name: "演练组",
+          people: [{ id: "t1", name: "张乐翔" }],
+        }],
+        publishBatch: async () => { page.state.batch.published = true; },
+        syncPersonnelConfig: async (_page, personnel) => {
+          page.state.personnel = structuredClone(personnel);
+        },
+        syncPersonnelDates: async (_page, dates) => {
+          page.state.dates = structuredClone(dates);
+        },
+        syncExamServiceRequirements: async (_page, requirements) => {
+          page.state.requirements = structuredClone(requirements);
+        },
+        openTaskSheet: async () => {},
+        selectRecipients: async (_page, recipients) => {
+          page.state.selectedRecipients = structuredClone(recipients);
+          page.state.schedules[0].end = "2026-08-22T12:00:00";
+        },
+        readSelectedRecipients: async () => page.state.selectedRecipients,
+        confirmSend: async () => events.push("confirm_send"),
+        closeTaskSheet: async () => {},
+        reopenTaskSheet: async () => {},
+        now: () => {
+          const value = current;
+          current += 1000;
+          return value;
+        },
+        onCheckpoint: async (checkpoint) => {
+          if (checkpoint.name === "submit_send") events.push("submit_send");
+          await runnerOptions.onCheckpoint(checkpoint);
+        },
+      });
+    },
+  });
+  const preview = await harness.service.preview("task-a", owner(), {});
+  await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+  });
+
+  await harness.runDeferred();
+
+  const state = harness.task.config.operationPersonnelTask;
+  assert.equal(state.checkpoints.submit_send, undefined);
+  assert.equal(state.status, "failed_resumable");
+  assert.equal(state.activeAttempt.status, "failed_resumable");
+  assert.equal(state.activeAttempt.error.code, "PERSONNEL_BATCH_SCHEDULE_CONFLICT");
+  assert.equal(events.includes("submit_send"), false);
+  assert.equal(events.includes("confirm_send"), false);
 });
 
 test("final recipient readback drift is failed_resumable before submit", async () => {
