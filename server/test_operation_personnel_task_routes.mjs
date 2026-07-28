@@ -547,6 +547,52 @@ test("personnel send returns 202 and ignores a forged request environment", asyn
   });
 });
 
+test("personnel send applies final edits and ignores forged read-only fields", async () => {
+  await withRuntime(async (runtimeDir) => {
+    const task = baseTask();
+    seedTask(runtimeDir, task, previewState(task));
+    const runtime = await startServer(runtimeDir, {
+      OPERATION_CONSOLE_AUTOMATION_ENABLED: "1",
+      OPERATION_CONSOLE_ENVIRONMENT: "test",
+    });
+    try {
+      const response = await fetch(`${runtime.baseUrl}/api/tasks/task-a/operation-personnel-task/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          previewToken: "preview-token",
+          draftVersion: 1,
+          changeSummary: "",
+          edits: {
+            dates: {
+              start: "2026-07-28",
+              end: "2026-08-19",
+              nameListDue: "2026-08-19",
+            },
+            personnel: { monitorCount: "80", monitorRatio: "1:50" },
+          },
+          schedules: [{ scheduleCode: "伪造值" }],
+          recipients: [{ name: "伪造收件人" }],
+        }),
+      });
+      assert.equal(response.status, 202);
+
+      const persisted = runTaskState(runtimeDir, "get", { taskId: "task-a" });
+      const state = persisted.config.operationPersonnelTask;
+      assert.equal(state.draft.dates.start, "2026-07-28");
+      assert.equal(state.activeAttempt.target.dates.start, "2026-07-28");
+      assert.equal(state.activeAttempt.target.personnel.monitorCount, 80);
+      assert.deepEqual(state.activeAttempt.target.schedules, []);
+      assert.deepEqual(state.activeAttempt.recipients, {
+        to: [{ group: "演练组", id: "demo-user", name: "张乐翔" }],
+        cc: [],
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+});
+
 test("personnel attempt route hides an attempt that does not belong to the project", async () => {
   await withRuntime(async (runtimeDir) => {
     const taskA = baseTask("task-a");

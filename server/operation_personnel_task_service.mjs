@@ -970,14 +970,17 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           "批次受管日程在确认发送前发生变化，请重新检查",
         );
       }
-      if ((state.draft.warnings || []).length) {
+      const edited = editableDraft(state.draft, input.edits || {});
+      const finalDraft = edited.draft;
+      if (finalDraft.warnings.length) {
         throw serviceError(
           "PERSONNEL_DRAFT_INCOMPLETE",
           409,
-          "人员任务草稿仍有未解决问题，请重新检查",
+          "人员任务字段无效，请检查日期、监考人数和监考比例",
         );
       }
-      const currentFingerprint = operationPersonnelTaskFingerprint(state.draft);
+      const finalDraftVersion = Number(state.draftVersion || 0) + (edited.changes.length ? 1 : 0);
+      const currentFingerprint = operationPersonnelTaskFingerprint(finalDraft);
       if (state.lastSuccessfulFingerprint
         && state.lastSuccessfulFingerprint === currentFingerprint) {
         throw serviceError(
@@ -1003,10 +1006,10 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         );
       }
       const target = targetFromDraft(
-        state.draft,
-        state.draft.previewOperationSnapshot || {},
+        finalDraft,
+        finalDraft.previewOperationSnapshot || {},
       );
-      const baseline = structuredClone(state.draft.previewBaselineSnapshot || {});
+      const baseline = structuredClone(finalDraft.previewBaselineSnapshot || {});
       if (kind === "resend" && preview.externalBaseline
         && !operationSnapshotChanges(baseline, target).length) {
         throw serviceError(
@@ -1019,8 +1022,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         ? state.activeAttempt
         : null;
       const recipients = {
-        to: structuredClone(state.draft.directoryMatch?.to || []),
-        cc: structuredClone(state.draft.directoryMatch?.cc || []),
+        to: structuredClone(finalDraft.directoryMatch?.to || []),
+        cc: structuredClone(finalDraft.directoryMatch?.cc || []),
       };
       const previewBinding = {
         baselineSnapshotFingerprint: preview.baselineSnapshotFingerprint,
@@ -1032,7 +1035,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         environment,
         kind,
         requirementVersion: preview.requirementVersion,
-        draftVersion: state.draftVersion,
+        draftVersion: finalDraftVersion,
         fingerprint: currentFingerprint,
         recipients,
         target,
@@ -1048,10 +1051,10 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         operator: text(actor?.email),
         environment,
         requirementVersion: preview.requirementVersion,
-        draftVersion: state.draftVersion,
+        draftVersion: finalDraftVersion,
         fingerprint: currentFingerprint,
         recipients,
-        managedSchedules: managedScheduleProjection(state.draft.managedSchedules),
+        managedSchedules: managedScheduleProjection(finalDraft.managedSchedules),
         changeSummary,
         createdAt,
         status: "queued",
@@ -1064,6 +1067,10 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       const next = {
         ...state,
         status: "ready",
+        draft: finalDraft,
+        draftVersion: finalDraftVersion,
+        sourceFingerprint: draftSourceFingerprint(finalDraft),
+        scheduleCodeMap: structuredClone(finalDraft.scheduleCodeMap || {}),
         activePreview: null,
         activeAttempt: attempt,
         checkpoints: resumeSameAttempt ? state.checkpoints : {},

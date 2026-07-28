@@ -1241,6 +1241,109 @@ test("send persists queued attempt and returns before the runner completes", asy
   pending.resolve(successfulAttemptResult());
 });
 
+test("send applies final edits once inside the task lock", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", ADMIN);
+  const queued = await harness.service.send("task-a", ADMIN, {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+    edits: {
+      dates: {
+        start: "2026-07-28",
+        end: "2026-08-19",
+        nameListDue: "2026-08-19",
+      },
+      personnel: { monitorCount: "80", monitorRatio: "1:50" },
+    },
+  });
+
+  const state = harness.task.config.operationPersonnelTask;
+  assert.equal(queued.statusCode, 202);
+  assert.equal(state.draftVersion, preview.draftVersion + 1);
+  assert.equal(state.draft.dates.start, "2026-07-28");
+  assert.equal(state.activeAttempt.draftVersion, state.draftVersion);
+  assert.equal(state.activeAttempt.target.dates.start, "2026-07-28");
+  assert.equal(state.activeAttempt.target.personnel.monitorCount, 80);
+});
+
+test("send rejects invalid final edits before queueing an attempt", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", ADMIN);
+
+  await assert.rejects(
+    harness.service.send("task-a", ADMIN, {
+      previewToken: preview.previewToken,
+      draftVersion: preview.draftVersion,
+      changeSummary: "",
+      edits: { personnel: { monitorCount: "0", monitorRatio: "1:0" } },
+    }),
+    (error) => error.code === "PERSONNEL_DRAFT_INCOMPLETE",
+  );
+  assert.equal(harness.attempts.length, 0);
+  assert.equal(harness.deferredJobs.length, 0);
+});
+
+test("send validates the original preview binding before applying final edits", async () => {
+  const cases = [
+    {
+      code: "PERSONNEL_PREVIEW_STALE",
+      change(harness) {
+        harness.task.config.examRequirement.version += 1;
+      },
+    },
+    {
+      code: "PERSONNEL_BATCH_UPDATE_REQUIRED",
+      change(harness) {
+        harness.setBatchScheduleStatus("update_available");
+      },
+    },
+    {
+      code: "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+      change(harness) {
+        harness.setSynchronizedManagedSchedule({
+          start: "2026-08-22T10:00:00",
+          end: "2026-08-22T12:00:00",
+        });
+      },
+    },
+    {
+      code: "PERSONNEL_PREVIEW_STALE",
+      change(harness) {
+        harness.task.config.operationPersonnelTask.draft.previewOperationSnapshot
+          .schedules[0].scheduleCode = 999;
+      },
+    },
+    {
+      code: "PERSONNEL_PREVIEW_STALE",
+      change(harness) {
+        harness.task.config.operationPersonnelTask.draft.directoryMatch.to = [{
+          group: "伪造组",
+          id: "forged-user",
+          name: "伪造收件人",
+        }];
+      },
+    },
+  ];
+  for (const scenario of cases) {
+    const harness = serviceHarness();
+    const preview = await harness.service.preview("task-a", ADMIN);
+    scenario.change(harness);
+
+    await assert.rejects(
+      harness.service.send("task-a", ADMIN, {
+        previewToken: preview.previewToken,
+        draftVersion: preview.draftVersion,
+        changeSummary: "",
+        edits: { personnel: { monitorCount: "80", monitorRatio: "1:50" } },
+      }),
+      { code: scenario.code, status: 409 },
+    );
+    assert.equal(harness.attempts.length, 0);
+    assert.equal(harness.deferredJobs.length, 0);
+  }
+});
+
 test("queued send rechecks managed schedules after acquiring the profile lock", async () => {
   const harness = serviceHarness();
   const preview = await harness.service.preview("task-a", owner(), {});
