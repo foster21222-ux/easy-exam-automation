@@ -46,6 +46,47 @@ test("display schedules reject extra operation schedules and duplicate managed s
   ], operation), /一一对应/);
 });
 
+test("display schedules compare real minute-only parser output with zero-second managed times", () => {
+  const visible = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(
+    visiblePersonnelTaskSheetRaw({
+      scheduleRows: [
+        ["1", "17", "2026-08-22 09:00~11:00", "120", "湖北邮政招聘考试", "30"],
+      ],
+    }),
+  );
+
+  assert.deepEqual(operationPersonnelDisplaySchedules(
+    [{
+      requirementIndex: 0,
+      name: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+    }],
+    visible.schedules,
+  ), [{
+    scheduleCode: 17,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }]);
+});
+
+test("display schedules block invalid or non-zero-second times", () => {
+  for (const time of [
+    "2026-02-30T09:00:00",
+    "2026-08-22T09:00:01",
+    "2026-08-22 09:60",
+  ]) {
+    assert.throws(
+      () => operationPersonnelDisplaySchedules(
+        [{ requirementIndex: 0, name: "综合能力", start: time, end: "2026-08-22 11:00" }],
+        [{ scheduleCode: 17, subjectName: "综合能力", start: time, end: "2026-08-22 11:00" }],
+      ),
+      { code: "PERSONNEL_BATCH_SCHEDULE_CONFLICT" },
+    );
+  }
+});
+
 test("current operation detail header maps exact visible batch identity", () => {
   assert.deepEqual(operationPersonnelBatchIdentityFromVisibleRaw({
     titleCount: 1,
@@ -1285,6 +1326,12 @@ function validInstruction(overrides = {}) {
       start: "2026-08-22T09:00:00",
       end: "2026-08-22T11:00:00",
     }],
+    displaySchedules: [{
+      scheduleCode: 1,
+      name: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+    }],
     target,
     checkpoints: {},
     ...overrides,
@@ -1539,13 +1586,24 @@ test("unified attempt verifies once and confirms send directly after final readb
   let scheduleReads = 0;
   let taskSheetScheduleReads = 0;
   let recipientReads = 0;
+  let runnerPages = 0;
+  const context = {
+    pages: () => {
+      runnerPages += 1;
+      return [page];
+    },
+    close: async () => {},
+  };
 
   await operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), attemptOptions(page, {
-    readBatch: async () => {
+    context,
+    readBatch: async (actualPage) => {
+      assert.equal(actualPage, page);
       events.push("read_batch");
       return { ...page.state.batch };
     },
-    readSchedules: async () => {
+    readSchedules: async (actualPage) => {
+      assert.equal(actualPage, page);
       scheduleReads += 1;
       if (scheduleReads === 2) events.push("verify_exam_schedules");
       return page.state.schedules;
@@ -1578,7 +1636,8 @@ test("unified attempt verifies once and confirms send directly after final readb
         events.push("submit_send_running");
       }
     },
-    confirmSend: async (_actualPage, attempt) => {
+    confirmSend: async (actualPage, attempt) => {
+      assert.equal(actualPage, page);
       events.push("confirm_send");
       page.state.sendRecords.push({
         type: attempt.kind === "resend" ? "再次发送" : "首次发送",
@@ -1599,7 +1658,87 @@ test("unified attempt verifies once and confirms send directly after final readb
     "submit_send_running",
     "confirm_send",
   ]);
+  assert.equal(runnerPages, 1);
   assert.equal(events.filter((event) => event === "confirm_send").length, 1);
+});
+
+test("final schedule readback accepts reordered exact code and content rows", async () => {
+  const instruction = validInstruction();
+  instruction.managedSchedules.push({
+    requirementIndex: 1,
+    name: "专业知识",
+    start: "2026-08-22T14:00:00",
+    end: "2026-08-22T16:00:00",
+  });
+  instruction.displaySchedules = [
+    {
+      scheduleCode: 88,
+      name: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+    },
+    {
+      scheduleCode: 17,
+      name: "专业知识",
+      start: "2026-08-22T14:00:00",
+      end: "2026-08-22T16:00:00",
+    },
+  ];
+  instruction.target.schedules = [
+    {
+      scheduleCode: 88,
+      subjectName: "湖北邮政招聘考试",
+      start: "2026-08-22T09:00:00",
+      end: "2026-08-22T11:00:00",
+    },
+    {
+      scheduleCode: 17,
+      subjectName: "专业知识",
+      start: "2026-08-22T14:00:00",
+      end: "2026-08-22T16:00:00",
+    },
+  ];
+  const page = fakeOperationPage({
+    schedules: [...instruction.target.schedules].reverse(),
+  });
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    instruction,
+    attemptOptions(page),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.filter((item) => item === "send:confirm").length, 1);
+});
+
+test("final schedule readback blocks recreated, missing, or duplicate exact codes before submit", async () => {
+  for (const scheduleCode of [2, "", 1]) {
+    const page = fakeOperationPage();
+    const checkpoints = [];
+    const options = attemptOptions(page, {
+      selectRecipients: async (_actualPage, recipients) => {
+        page.state.selectedRecipients = structuredClone(recipients);
+        page.state.schedules[0].scheduleCode = scheduleCode;
+        if (scheduleCode === 1) {
+          page.state.schedules.push({
+            ...page.state.schedules[0],
+            scheduleEntryId: "schedule-duplicate",
+          });
+        }
+      },
+      onCheckpoint: async ({ name, status }) => checkpoints.push(`${name}:${status}`),
+    });
+
+    await assert.rejects(
+      operationPersonnelRunner.runOperationPersonnelAttempt(validInstruction(), options),
+      { code: "PERSONNEL_BATCH_SCHEDULE_CONFLICT" },
+    );
+    assert.equal(
+      checkpoints.some((item) => item.startsWith("submit_send:")),
+      false,
+    );
+    assert.equal(page.events.includes("send:confirm"), false);
+  }
 });
 
 test("final schedule readback drift blocks before submit and confirm", async () => {

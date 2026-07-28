@@ -9989,8 +9989,11 @@
             : `${safeText(displayValue(afterValue, meta.path))}<span class="operation-readonly-badge">只读</span>`;
           return `${groupRow}<tr><td>${safeText(meta.label)}</td><td class="operation-change-before">${safeText(displayValue(beforeValue, meta.path))}</td><td class="operation-change-after">${afterContent}</td><td class="operation-change-source">来源：${safeText(meta.source)}</td></tr>`;
         }).join("");
+        const displaySchedules = Array.isArray(draft.displaySchedules)
+          ? draft.displaySchedules
+          : [];
         const hasDisplaySchedules = Array.isArray(draft.displaySchedules);
-        const scheduleRows = (draft.displaySchedules || []).map((item) => (
+        const scheduleRows = displaySchedules.map((item) => (
           `<tr><td>${safeText(item.scheduleCode)}</td><td>${safeText(item.name)}</td>`
           + `<td>${safeText(item.start)}</td><td>${safeText(item.end)}</td></tr>`
         )).join("");
@@ -10071,7 +10074,7 @@
           <div class="operation-detail-subsection"><h4>考试日程 <span class="operation-readonly-badge">只读</span></h4><div class="task-meta">${safeText(scheduleSummary)}</div><div class="exam-table-wrap" style="margin-top:10px;"><table class="exam-table"><thead><tr><th>日程代码</th><th>考试名称</th><th>开始时间</th><th>结束时间</th></tr></thead><tbody>${hasDisplaySchedules ? (scheduleRows || '<tr><td colspan="4">暂无有效日程</td></tr>') : '<tr><td colspan="4">缺少真实日程代码，无法发送人员任务单</td></tr>'}</tbody></table></div></div>
           <div class="operation-detail-subsection"><h4>固定收件人</h4><div class="task-meta">To：${safeText(recipientNames(recipients.to))}</div><h4>固定抄送人</h4><div class="task-meta">CC：${safeText(recipientNames(recipients.cc))}</div></div>
           ${externalBaseline}
-          <label class="field" ${isResend ? "" : "hidden"}><span class="field-label">重发变化摘要</span><textarea class="field-input" data-operation-personnel-change-summary>${safeText(state.changeSummary || preview.changes?.summary || "")}</textarea></label>
+          <label class="field" ${isResend ? "" : "hidden"}><span class="field-label">重发变化摘要</span><textarea class="field-input" data-operation-personnel-change-summary>${safeText(preview.changes?.summary || "")}</textarea></label>
         `;
         operationPersonnelConfirmSendBtn.disabled = warnings.length > 0
           || conditions.some((item) => item.satisfied === false)

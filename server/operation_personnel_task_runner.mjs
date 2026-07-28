@@ -63,15 +63,56 @@ function assertScheduleCodes(schedules = []) {
   }
 }
 
+function comparableScheduleMinute(value) {
+  const raw = text(value);
+  const match = raw.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (!match || (match[6] !== undefined && match[6] !== "00")) {
+    throw batchScheduleConflict(
+      `考试日程时间 ${raw || "空"} 无效或包含页面无法核验的非零秒`,
+    );
+  }
+  const [, year, month, day, hour, minute] = match;
+  const parsed = new Date(Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+  ));
+  if (parsed.getUTCFullYear() !== Number(year)
+      || parsed.getUTCMonth() !== Number(month) - 1
+      || parsed.getUTCDate() !== Number(day)
+      || parsed.getUTCHours() !== Number(hour)
+      || parsed.getUTCMinutes() !== Number(minute)) {
+    throw batchScheduleConflict(`考试日程时间 ${raw} 无效`);
+  }
+  return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+function comparableScheduleContent(schedule = {}) {
+  return {
+    name: text(schedule.name ?? schedule.subjectName),
+    start: comparableScheduleMinute(schedule.start),
+    end: comparableScheduleMinute(schedule.end),
+  };
+}
+
+function sameScheduleContent(left, right) {
+  return sameData(
+    comparableScheduleContent(left),
+    comparableScheduleContent(right),
+  );
+}
+
 export function operationPersonnelDisplaySchedules(managedSchedules = [], operationSchedules = []) {
   const actual = operationSchedules.map(normalizeSchedule);
   assertScheduleCodes(actual);
   const matchedCodes = new Set();
   const displaySchedules = managedSchedules.map((managed) => {
     const matches = actual.filter((schedule) => (
-      text(schedule.subjectName) === text(managed.name)
-      && text(schedule.start) === text(managed.start)
-      && text(schedule.end) === text(managed.end)
+      sameScheduleContent(schedule, managed)
     ));
     const code = text(matches[0]?.scheduleCode);
     if (matches.length !== 1 || matchedCodes.has(code)) {
@@ -2369,22 +2410,33 @@ function assertTaskSheetReady(expected, actual) {
   return actual;
 }
 
-function assertManagedSchedules(managedSchedules, schedules) {
-  const visible = [...(schedules || [])]
-    .map(normalizeSchedule)
-    .sort(byScheduleCode)
-    .map((schedule, requirementIndex) => ({
-      requirementIndex,
-      name: schedule.subjectName,
+function assertManagedSchedules(managedSchedules, displaySchedules, schedules) {
+  const expected = operationPersonnelDisplaySchedules(
+    managedSchedules,
+    (displaySchedules || []).map((schedule) => ({
+      scheduleCode: schedule.scheduleCode,
+      subjectName: schedule.name,
       start: schedule.start,
       end: schedule.end,
-    }));
-  if (!sameData(visible, managedSchedules)) {
+    })),
+  );
+  const actual = [...(schedules || [])].map(normalizeSchedule);
+  assertScheduleCodes(actual);
+  const actualByCode = new Map(actual.map((schedule) => [
+    text(schedule.scheduleCode),
+    schedule,
+  ]));
+  const complete = expected.length === actual.length
+    && expected.every((schedule) => {
+      const visible = actualByCode.get(text(schedule.scheduleCode));
+      return visible && sameScheduleContent(schedule, visible);
+    });
+  if (!complete) {
     throw batchScheduleConflict(
       "运控可见日程与已确认受管日程不一致，请先在建批次环节完成批次信息修改",
     );
   }
-  return visible;
+  return expected;
 }
 
 function scheduleNotUnique(schedule, count) {
@@ -2404,6 +2456,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   const managedSchedules = [...(instruction.managedSchedules || [])]
     .map(normalizeManagedSchedule)
     .sort((left, right) => left.requirementIndex - right.requirementIndex);
+  const displaySchedules = structuredClone(instruction.displaySchedules || []);
   const inspect = async () => {
     const actual = await inspectOperationPersonnelTask(page, {
       ...instruction,
@@ -2523,12 +2576,13 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   const readManagedSchedules = async () => {
     return assertManagedSchedules(
       managedSchedules,
+      displaySchedules,
       await operationMethod(page, options, "readSchedules")(page, instruction),
     );
   };
   await runPersonnelCheckpoint({
     name: OPERATION_PERSONNEL_CHECKPOINTS[2],
-    target: managedSchedules,
+    target: displaySchedules,
     action: async () => {},
     verify: readManagedSchedules,
     verifyCompleted: readManagedSchedules,
@@ -2560,7 +2614,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
       options,
       "readTaskSheetSchedules",
     )(page, instruction);
-    assertManagedSchedules(managedSchedules, taskSheetSchedules);
+    assertManagedSchedules(managedSchedules, displaySchedules, taskSheetSchedules);
     return assertTaskSheetReady(target.taskSheet, taskSheet);
   };
   await runPersonnelCheckpoint({
@@ -2629,6 +2683,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     beforeAction: async () => {
       assertManagedSchedules(
         managedSchedules,
+        displaySchedules,
         await operationMethod(page, options, "readTaskSheetSchedules")(page, instruction),
       );
       await readAndVerifyRecipients();

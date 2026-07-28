@@ -576,16 +576,11 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           : structuredClone(target);
       if (kind === "initial") baseline.batch.published = snapshot.batch.published;
       operationChanges = operationSnapshotChanges(snapshot, target);
-      if (externalBaseline) {
-        if (!operationChanges.length) {
-          throw serviceError(
-            "PERSONNEL_CONTENT_UNCHANGED",
-            409,
-            "人员任务内容未变化，不允许重复发送",
-          );
-        }
-        const directoryProbeSummary = suggestedChangeSummary(
-          confirmationOperationChanges(operationChanges),
+      if (kind === "resend") {
+        const directoryProbeSummary = text(
+          diffOperationPersonnelTaskDrafts(existing.draft || {}, draft).summary
+          || suggestedChangeSummary(confirmationOperationChanges(operationChanges))
+          || "本次人员任务重发收件目录核验",
         );
         const fullSnapshot = normalizeOperationPersonnelSnapshot(await runInspection({
           environment,
@@ -607,10 +602,10 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           throw error;
         }
         snapshot = fullSnapshot;
-        baseline = structuredClone(fullSnapshot);
+        if (externalBaseline) baseline = structuredClone(fullSnapshot);
         target = targetFromDraft(draft, fullSnapshot);
         operationChanges = operationSnapshotChanges(snapshot, target);
-        if (!operationChanges.length) {
+        if (externalBaseline && !operationChanges.length) {
           throw serviceError(
             "PERSONNEL_CONTENT_UNCHANGED",
             409,
@@ -693,6 +688,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         operationSnapshotFingerprint: fingerprint(snapshot),
         directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
         managedScheduleFingerprint: fingerprint(draft.managedSchedules),
+        displayScheduleFingerprint: fingerprint(draft.displaySchedules),
       };
       const events = [
         ...freshState.events,
@@ -875,6 +871,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         batch: attempt.target.batch,
         target: attempt.target,
         managedSchedules: managedScheduleProjection(attempt.managedSchedules),
+        displaySchedules: structuredClone(attempt.displaySchedules),
         baseline: attempt.baseline,
         changeSummary: attempt.changeSummary,
         checkpoints: running.checkpoints,
@@ -946,7 +943,8 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           !== fingerprint(state.draft.previewBaselineSnapshot || {})
         || preview.operationSnapshotFingerprint
           !== fingerprint(state.draft.previewOperationSnapshot || {})
-        || preview.directoryMatchFingerprint !== fingerprint(state.draft.directoryMatch || {});
+        || preview.directoryMatchFingerprint !== fingerprint(state.draft.directoryMatch || {})
+        || preview.displayScheduleFingerprint !== fingerprint(state.draft.displaySchedules || []);
       if (stale) {
         throw serviceError(
           "PERSONNEL_PREVIEW_STALE",
@@ -1030,6 +1028,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         operationSnapshotFingerprint: preview.operationSnapshotFingerprint,
         directoryMatchFingerprint: preview.directoryMatchFingerprint,
         managedScheduleFingerprint: preview.managedScheduleFingerprint,
+        displayScheduleFingerprint: preview.displayScheduleFingerprint,
       };
       const resumeSameAttempt = attemptMatchesPreview(previous, {
         environment,
@@ -1055,6 +1054,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         fingerprint: currentFingerprint,
         recipients,
         managedSchedules: managedScheduleProjection(finalDraft.managedSchedules),
+        displaySchedules: structuredClone(finalDraft.displaySchedules),
         changeSummary,
         createdAt,
         status: "queued",

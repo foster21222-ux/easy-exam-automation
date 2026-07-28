@@ -108,7 +108,12 @@ function previewState(task, {
       systemType: "",
       published: false,
     },
-    schedules: [],
+    schedules: [{
+      scheduleCode: 17,
+      subjectName: "湖北邮政招聘考试",
+      start: "2026-08-22 09:00",
+      end: "2026-08-22 11:00",
+    }],
     personnel: {},
     dates: {},
     requirements: [],
@@ -129,6 +134,12 @@ function previewState(task, {
   draft.directoryMatch = structuredClone(snapshot.directoryMatch);
   draft.previewOperationSnapshot = structuredClone(snapshot);
   draft.previewBaselineSnapshot = structuredClone(snapshot);
+  draft.displaySchedules = [{
+    scheduleCode: 17,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }];
   const activeAttempt = attemptId ? {
     attemptId,
     kind: "initial",
@@ -139,6 +150,7 @@ function previewState(task, {
     fingerprint: operationPersonnelTaskFingerprint(draft),
     recipients: { to: draft.directoryMatch.to, cc: [] },
     managedSchedules: structuredClone(draft.managedSchedules),
+    displaySchedules: structuredClone(draft.displaySchedules),
     changeSummary: "",
     createdAt: "2026-07-23T02:00:00.000Z",
     startedAt: "2026-07-23T02:00:01.000Z",
@@ -150,6 +162,7 @@ function previewState(task, {
       operationSnapshotFingerprint: fingerprint(snapshot),
       directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
       managedScheduleFingerprint: fingerprint(draft.managedSchedules),
+      displayScheduleFingerprint: fingerprint(draft.displaySchedules),
     },
     verification: {
       phase: "reopened",
@@ -186,6 +199,7 @@ function previewState(task, {
       operationSnapshotFingerprint: fingerprint(snapshot),
       directoryMatchFingerprint: fingerprint(snapshot.directoryMatch),
       managedScheduleFingerprint: fingerprint(draft.managedSchedules),
+      displayScheduleFingerprint: fingerprint(draft.displaySchedules),
     },
     activeAttempt,
     sendHistory: [],
@@ -582,7 +596,9 @@ test("personnel send applies final edits and ignores forged read-only fields", a
       assert.equal(state.draft.dates.start, "2026-07-28");
       assert.equal(state.activeAttempt.target.dates.start, "2026-07-28");
       assert.equal(state.activeAttempt.target.personnel.monitorCount, 80);
-      assert.deepEqual(state.activeAttempt.target.schedules, []);
+      assert.equal(state.activeAttempt.target.schedules.length, 1);
+      assert.equal(state.activeAttempt.target.schedules[0].scheduleCode, 17);
+      assert.notEqual(state.activeAttempt.target.schedules[0].scheduleCode, "伪造值");
       assert.deepEqual(state.activeAttempt.recipients, {
         to: [{ group: "演练组", id: "demo-user", name: "张乐翔" }],
         cc: [],

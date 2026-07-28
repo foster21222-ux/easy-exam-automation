@@ -1388,6 +1388,116 @@ test("personnel confirmation renders a Chinese grouped comparison with exactly f
   assert.equal(operationPersonnelConfirmSendBtn.disabled, true);
 });
 
+test("personnel resend renders and submits only the current preview summary", () => {
+  const operationPersonnelConfirmContent = { innerHTML: "" };
+  const operationPersonnelConfirmSendBtn = { disabled: false };
+  const operationPersonnelProgress = { textContent: "" };
+  const operationPersonnelPreviewKind = compileInlineFunction(
+    "      function operationPersonnelPreviewKind(preview = {}) {",
+    "\n      function renderOperationPersonnelConfirmation",
+  );
+  const renderOperationPersonnelConfirmation = compileInlineFunction(
+    "      function renderOperationPersonnelConfirmation(preview = {}) {",
+    "\n      function collectOperationPersonnelPreviewEdits",
+    {
+      taskViewState: { currentProject: { taskId: "task-a", projectName: "示例考试" } },
+      operationPersonnelConfirmContent,
+      operationPersonnelConfirmSendBtn,
+      operationPersonnelProgress,
+      operationPersonnelPreviewKind,
+      safeText: (value) => String(value ?? ""),
+    },
+  );
+  const operationPersonnelSendPayload = compileInlineFunction(
+    "      function operationPersonnelSendPayload(preview = {}, changeSummary = \"\", edits = {}) {",
+    "\n      function operationPersonnelRequestIsCurrent",
+  );
+  const preview = {
+    previewToken: "preview-a",
+    draftVersion: 7,
+    changes: { fields: [], summary: "本次人员日期调整" },
+    state: {
+      changeSummary: "上次监考人数调整",
+      activePreview: { kind: "resend", requirementVersion: 3 },
+      draft: {
+        batch: { code: "EZT260003" },
+        displaySchedules: [{
+          scheduleCode: 17,
+          name: "综合能力",
+          start: "2026-08-22 09:00",
+          end: "2026-08-22 11:00",
+        }],
+        personnel: {},
+        dates: {},
+        operationTaskSheet: { conditions: [] },
+        directoryMatch: { to: [], cc: [] },
+        warnings: [],
+      },
+    },
+  };
+
+  renderOperationPersonnelConfirmation(preview);
+  const renderedSummary = operationPersonnelConfirmContent.innerHTML
+    .match(/data-operation-personnel-change-summary>([^<]*)<\/textarea>/)?.[1];
+  assert.equal(renderedSummary, "本次人员日期调整");
+  assert.deepEqual(operationPersonnelSendPayload(preview, renderedSummary, {}), {
+    previewToken: "preview-a",
+    draftVersion: 7,
+    changeSummary: "本次人员日期调整",
+    edits: {},
+  });
+
+  preview.changes.summary = "";
+  renderOperationPersonnelConfirmation(preview);
+  assert.match(
+    operationPersonnelConfirmContent.innerHTML,
+    /data-operation-personnel-change-summary><\/textarea>/,
+  );
+  assert.doesNotMatch(operationPersonnelConfirmContent.innerHTML, /上次监考人数调整/);
+});
+
+test("personnel confirmation blocks a malformed truthy display schedule DTO without throwing", () => {
+  const operationPersonnelConfirmContent = { innerHTML: "" };
+  const operationPersonnelConfirmSendBtn = { disabled: false };
+  const operationPersonnelProgress = { textContent: "" };
+  const operationPersonnelPreviewKind = compileInlineFunction(
+    "      function operationPersonnelPreviewKind(preview = {}) {",
+    "\n      function renderOperationPersonnelConfirmation",
+  );
+  const renderOperationPersonnelConfirmation = compileInlineFunction(
+    "      function renderOperationPersonnelConfirmation(preview = {}) {",
+    "\n      function collectOperationPersonnelPreviewEdits",
+    {
+      taskViewState: { currentProject: { taskId: "task-a", projectName: "示例考试" } },
+      operationPersonnelConfirmContent,
+      operationPersonnelConfirmSendBtn,
+      operationPersonnelProgress,
+      operationPersonnelPreviewKind,
+      safeText: (value) => String(value ?? ""),
+    },
+  );
+
+  assert.doesNotThrow(() => renderOperationPersonnelConfirmation({
+    previewToken: "preview-a",
+    state: {
+      activePreview: { kind: "initial", requirementVersion: 3 },
+      draft: {
+        displaySchedules: { scheduleCode: 17 },
+        personnel: {},
+        dates: {},
+        operationTaskSheet: { conditions: [] },
+        directoryMatch: { to: [], cc: [] },
+        warnings: [],
+      },
+    },
+  }));
+  assert.match(
+    operationPersonnelConfirmContent.innerHTML,
+    /缺少真实日程代码，无法发送人员任务单/,
+  );
+  assert.equal(operationPersonnelConfirmSendBtn.disabled, true);
+});
+
 test("personnel confirmation summarizes schedule object changes without exposing paths or JSON", () => {
   const operationPersonnelConfirmContent = { innerHTML: "" };
   const operationPersonnelConfirmSendBtn = { disabled: false };

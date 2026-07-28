@@ -241,6 +241,12 @@ function serviceHarness(options = {}) {
     draft.operationTaskSheet = structuredClone(operationSnapshot.taskSheet);
     draft.directoryMatch = structuredClone(operationSnapshot.directoryMatch);
     draft.previewOperationSnapshot = structuredClone(operationSnapshot);
+    draft.displaySchedules = operationSnapshot.schedules.map((schedule, index) => ({
+      scheduleCode: schedule.scheduleCode,
+      name: draft.managedSchedules[index].name,
+      start: draft.managedSchedules[index].start,
+      end: draft.managedSchedules[index].end,
+    }));
     const target = normalizeOperationPersonnelSnapshot({
       batch: {
         ...draft.operationBatch,
@@ -265,6 +271,7 @@ function serviceHarness(options = {}) {
       fingerprint: operationPersonnelTaskFingerprint(draft),
       recipients: { to: inspection.directoryMatch.to, cc: inspection.directoryMatch.cc },
       managedSchedules: structuredClone(draft.managedSchedules),
+      displaySchedules: structuredClone(draft.displaySchedules),
       changeSummary: "",
       createdAt: "2026-07-23T02:00:00.000Z",
       startedAt: "2026-07-23T02:00:01.000Z",
@@ -275,6 +282,7 @@ function serviceHarness(options = {}) {
         operationSnapshotFingerprint: valueFingerprint(operationSnapshot),
         directoryMatchFingerprint: valueFingerprint(operationSnapshot.directoryMatch),
         managedScheduleFingerprint: valueFingerprint(draft.managedSchedules),
+        displayScheduleFingerprint: valueFingerprint(draft.displaySchedules),
       },
     };
     task.config.operationPersonnelTask = {
@@ -423,6 +431,7 @@ test("preview token binds requirement, draft, operation snapshot and directory",
   assert.match(active.operationSnapshotFingerprint, /^[a-f0-9]{64}$/);
   assert.match(active.directoryMatchFingerprint, /^[a-f0-9]{64}$/);
   assert.match(active.managedScheduleFingerprint, /^[a-f0-9]{64}$/);
+  assert.match(active.displayScheduleFingerprint, /^[a-f0-9]{64}$/);
   harness.task.config.examRequirement.version += 1;
 
   await assert.rejects(
@@ -573,12 +582,28 @@ test("send keeps managed schedules outside the operation target and forwards the
   const attempt = harness.task.config.operationPersonnelTask.activeAttempt;
   assert.deepEqual(attempt.target.schedules, visible.schedules);
   assert.deepEqual(attempt.managedSchedules, [managedSchedule()]);
+  assert.deepEqual(attempt.displaySchedules, [{
+    scheduleCode: 88,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-22T09:00:00",
+    end: "2026-08-22T11:00:00",
+  }]);
   await harness.runDeferred();
   assert.deepEqual(harness.attempts[0].managedSchedules, [managedSchedule()]);
+  assert.deepEqual(harness.attempts[0].displaySchedules, attempt.displaySchedules);
 });
 
 test("ordinary resend uses draft changes even when operation configuration is unchanged", async () => {
-  const harness = serviceHarness({ changedAfterSend: true });
+  const harness = serviceHarness({
+    changedAfterSend: true,
+    inspectionResult(instruction, current) {
+      const result = structuredClone(current);
+      if (!instruction.directoryProbeSummary) {
+        result.directoryMatch = { to: [], cc: [] };
+      }
+      return result;
+    },
+  });
   harness.task.config.examRequirement.fields["考试日期时间"] =
     "2026/08/22 10:00 - 2026/08/22 12:00";
   harness.task.config.operationBatch.managedSnapshot = {
@@ -610,9 +635,24 @@ test("ordinary resend uses draft changes even when operation configuration is un
   current.dates = structuredClone(draft.dates);
   current.requirements = requirementsForPersonnel(draft.personnel);
   harness.task.config.operationPersonnelTask.lastOperationSnapshot = structuredClone(current);
+  harness.task.config.operationPersonnelTask.changeSummary = "上次监考人数调整";
   harness.setInspection(current);
 
   const preview = await harness.service.preview("task-a", ADMIN);
+  assert.equal(harness.inspectionInstructions.length, 2);
+  assert.equal(harness.inspectionInstructions[0].directoryProbeSummary, undefined);
+  assert.match(
+    harness.inspectionInstructions[1].directoryProbeSummary,
+    /批次受管日程/,
+  );
+  assert.doesNotMatch(
+    harness.inspectionInstructions[1].directoryProbeSummary,
+    /上次监考人数调整/,
+  );
+  assert.deepEqual(preview.state.draft.directoryMatch, {
+    to: [{ group: "演练组", id: "t1", name: "张乐翔" }],
+    cc: [],
+  });
   assert.deepEqual(preview.operationChanges, []);
   assert.equal(
     preview.changes.fields.some((item) => item.path === "managedSchedules"),
@@ -624,6 +664,29 @@ test("ordinary resend uses draft changes even when operation configuration is un
     changeSummary: "批次受管日程已调整",
   });
   assert.equal(accepted.statusCode, 202);
+});
+
+test("ordinary resend blocks non-directory drift between initial and recipient inspections", async () => {
+  const harness = serviceHarness({
+    changedAfterSend: true,
+    inspectionResult(instruction, current) {
+      const result = structuredClone(current);
+      if (!instruction.directoryProbeSummary) {
+        result.directoryMatch = { to: [], cc: [] };
+      } else {
+        result.dates.end = "2099-01-01";
+      }
+      return result;
+    },
+  });
+
+  await assert.rejects(
+    harness.service.preview("task-a", ADMIN),
+    (error) => error.code === "PERSONNEL_OPERATION_CONFLICT"
+      && error.conflicts.some((item) => item.path === "dates.end"),
+  );
+  assert.equal(harness.inspectionInstructions.length, 2);
+  assert.equal(harness.task.config.operationPersonnelTask.activePreview, null);
 });
 
 test("unpublished initial preview defers task sheet and directory inspection until send", async () => {
@@ -746,7 +809,7 @@ test("visible prior send record adopts an external resend baseline in two inspec
   assert.equal(harness.inspectionInstructions[0].directoryProbeSummary, undefined);
   assert.match(
     harness.inspectionInstructions[1].directoryProbeSummary,
-    /personnel|dates|schedules/,
+    /人员|考试日程|批次受管日程/,
   );
   assert.equal(state.activePreview.kind, "resend");
   assert.equal(state.activePreview.externalBaseline, true);
@@ -824,7 +887,7 @@ test("test external baseline excludes allowed identity and equivalent schedule d
   );
 });
 
-test("unchanged external baseline blocks before directory inspection", async () => {
+test("unchanged external baseline still probes fixed recipients before blocking", async () => {
   const harness = serviceHarness({ externalBaseline: true });
   const draft = buildOperationPersonnelTaskDraft(harness.task, {
     environment: "test",
@@ -847,7 +910,11 @@ test("unchanged external baseline blocks before directory inspection", async () 
     harness.service.preview("task-a", owner(), {}),
     { code: "PERSONNEL_CONTENT_UNCHANGED", status: 409 },
   );
-  assert.equal(harness.inspectionInstructions.length, 1);
+  assert.equal(harness.inspectionInstructions.length, 2);
+  assert.match(
+    harness.inspectionInstructions[1].directoryProbeSummary,
+    /人员|考试日程|批次受管日程/,
+  );
   assert.equal(harness.task.config.operationPersonnelTask, undefined);
 });
 
@@ -1612,7 +1679,7 @@ test("final schedule readback drift is failed_resumable before submit", async ()
   assert.equal(state.activeAttempt.error.code, code);
 });
 
-test("real runner checkpoint callbacks keep final schedule drift resumable before send", async () => {
+test("real runner checkpoint callbacks keep final schedule code drift resumable before send", async () => {
   const events = [];
   const harness = serviceHarness({
     runAttempt: async (instruction, runnerOptions) => {
@@ -1661,7 +1728,7 @@ test("real runner checkpoint callbacks keep final schedule drift resumable befor
         openTaskSheet: async () => {},
         selectRecipients: async (_page, recipients) => {
           page.state.selectedRecipients = structuredClone(recipients);
-          page.state.schedules[0].end = "2026-08-22T12:00:00";
+          page.state.schedules[0].scheduleCode = 999;
         },
         readSelectedRecipients: async () => page.state.selectedRecipients,
         confirmSend: async () => events.push("confirm_send"),
