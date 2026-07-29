@@ -1692,7 +1692,7 @@ async function readVisiblePersonnelPage(page) {
       const value = String(document.body?.innerText ?? "");
       return value.includes("人员落实日期")
         && value.includes("人员落实平台")
-        && value.includes("正式考试-监考人员数量");
+        && value.includes("人员名单提交日期");
     }, undefined, { timeout: 10_000 });
   }
   const raw = await page.evaluate(() => ({
