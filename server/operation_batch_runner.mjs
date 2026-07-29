@@ -569,6 +569,28 @@ async function waitForStableOperationBatchRows(page, options = {}, expectedIdent
   throw reconciliationRequiredError(new Error("批次列表在安全等待时间内未稳定，无法确认完整查询结果"));
 }
 
+async function waitForStableExactOperationBatchSearch(page, expectedBatchName, options = {}) {
+  const stablePollMs = Math.max(0, Number(options.tableStablePollMs ?? 100));
+  const maxChecks = Math.max(2, Number(options.tableStableMaxChecks || 50));
+  const expected = operationBatchIdentityText(expectedBatchName);
+  let previousSignature = "";
+  for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+    const snapshot = await operationBatchListSnapshot(page);
+    const identities = operationBatchSnapshotIdentities(snapshot);
+    const exact = identities?.filter(([code, name]) => code === expected || name === expected) || [];
+    const signature = JSON.stringify(snapshot);
+    if (snapshot.rows.length === 1 && exact.length === 1
+      && attempt > 0 && signature === previousSignature) {
+      return snapshot.rows;
+    }
+    previousSignature = snapshot.layout === "pending" ? "" : signature;
+    await page.waitForTimeout(stablePollMs);
+  }
+  throw reconciliationRequiredError(new Error(
+    `批次列表未稳定显示唯一精确结果：${expected}`,
+  ));
+}
+
 export async function performOperationBatchTableAction(page, action, options = {}, responseOptions = {}) {
   const batchListUrl = text(responseOptions.batchListUrl);
   assertOperationBatchListPage(page, batchListUrl);
@@ -582,7 +604,21 @@ export async function performOperationBatchTableAction(page, action, options = {
   responseWait.catch(() => {});
   try {
     await action();
-    const response = await responseWait;
+    const expectedBatchName = text(responseOptions.expectedBatchName);
+    const visibleProof = expectedBatchName
+      ? waitForStableExactOperationBatchSearch(page, expectedBatchName, options)
+        .then((rows) => ({ rows }))
+        .catch(() => new Promise(() => {}))
+      : new Promise(() => {});
+    const outcome = await Promise.race([
+      responseWait.then((response) => ({ response })),
+      visibleProof,
+    ]);
+    if (outcome.rows) {
+      assertOperationBatchListPage(page, batchListUrl);
+      return outcome.rows;
+    }
+    const response = outcome.response;
     if (typeof response.ok === "function" && !response.ok()) {
       throw new Error(`批次列表查询请求失败：${response.url()}`);
     }

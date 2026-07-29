@@ -567,6 +567,36 @@ test("table action handles a response timeout before a slower action completes",
   );
 });
 
+test("batch search accepts a stable unique visible exact result when the request payload is opaque", async () => {
+  const cardPage = fakeBatchCardsPage([
+    { code: "EZT260006", name: "湖北邮政_2026年8月" },
+  ]);
+  const page = {
+    ...cardPage,
+    url: () => "http://operation/batch/batchList",
+    locator(selector) {
+      if (selector === ".ant-table-wrapper .ant-spin-spinning, .ant-table .ant-spin-spinning") {
+        return { first: () => ({ waitFor: async () => {} }) };
+      }
+      return cardPage.locator(selector);
+    },
+    waitForResponse: () => new Promise((resolve, reject) => {
+      setTimeout(() => reject(new Error("opaque request timeout")), 25);
+    }),
+    waitForTimeout: async () => {},
+  };
+
+  assert.deepEqual(await performOperationBatchTableAction(
+    page,
+    async () => {},
+    { tableStablePollMs: 0 },
+    {
+      batchListUrl: "http://operation/batch/batchList",
+      expectedBatchName: "EZT260006",
+    },
+  ), [["EZT260006", "湖北邮政_2026年8月"]]);
+});
+
 test("submitted batch only trusts a detail page with a batch guid", async () => {
   const expected = {
     operationBatchCode: "QTT260007",

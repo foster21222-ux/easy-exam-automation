@@ -1508,6 +1508,7 @@ export function operationPersonnelConflicts(expected = {}, actual = {}, mode = "
     const expectedValue = expectedFields.get(fieldPath);
     const actualValue = actualFields.get(fieldPath);
     if (sameValue(expectedValue, actualValue)) return [];
+    if (fieldPath === "personnel.candidateBasis" && empty(actualValue)) return [];
     const batchIdentity = fieldPath.startsWith("batch.");
     if (mode === "initial" && !batchIdentity && empty(actualValue)) return [];
     return [{ path: fieldPath, expected: expectedValue ?? "", actual: actualValue ?? "" }];

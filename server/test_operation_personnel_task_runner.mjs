@@ -4084,6 +4084,26 @@ test("resend blocks any drift from the last successful operation snapshot", () =
   assert.equal(conflicts[0].path, "schedules.1.start");
 });
 
+test("resend does not treat the non-visible candidate basis as operation drift", () => {
+  assert.deepEqual(operationPersonnelConflicts(
+    {
+      personnel: {
+        monitorRatio: "1:50",
+        candidateBasis: 4000,
+        monitorCount: 80,
+      },
+    },
+    {
+      personnel: {
+        monitorRatio: "1:50",
+        candidateBasis: "",
+        monitorCount: 80,
+      },
+    },
+    "resend",
+  ), []);
+});
+
 test("missing or duplicate schedule codes are rejected before comparison", () => {
   assert.throws(() => normalizeOperationPersonnelSnapshot({
     schedules: [{ start: "2026-08-22 10:00" }],
