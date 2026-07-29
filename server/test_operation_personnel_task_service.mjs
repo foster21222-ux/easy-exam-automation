@@ -1704,6 +1704,7 @@ test("real runner checkpoint callbacks keep final schedule code drift resumable 
         }),
         openBatchRow: async () => {},
         openEztestSchedulePage: async () => {},
+        openPersonnelPage: async () => {},
         readBatch: async () => ({ ...page.state.batch }),
         readSchedules: async () => page.state.schedules,
         readPersonnel: async () => page.state.personnel,

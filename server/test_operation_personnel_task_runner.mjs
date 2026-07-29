@@ -2088,6 +2088,7 @@ function attemptOptions(page = fakeOperationPage(), overrides = {}) {
     readBatchPages: async () => exactBatchPages(),
     openBatchRow: async () => page.events.push("batch:open"),
     openEztestSchedulePage: async () => page.events.push("exam-schedule:open"),
+    openPersonnelPage: async () => {},
     readBatch: async () => ({ ...page.state.batch }),
     readSchedules: async () => page.state.schedules,
     readPersonnel: async () => page.state.personnel,
@@ -2221,6 +2222,65 @@ test("attempt applies checkpoints in the approved order", async () => {
     "submit_send:completed",
     "verify_send_record:completed",
   ]);
+});
+
+test("resumed attempt restores the personnel page before reading dates after completed config", async () => {
+  const checkpoints = {};
+  const firstPage = fakeOperationPage({
+    published: true,
+    personnelPlatform: "悦站",
+    dates: validInstruction().target.dates,
+    requirements: validInstruction().target.requirements,
+  });
+  firstPage.currentLocation = "batch-detail";
+  await assert.rejects(
+    operationPersonnelRunner.runOperationPersonnelAttempt(
+      validInstruction(),
+      attemptOptions(firstPage, {
+        openEztestSchedulePage: async () => {
+          firstPage.currentLocation = "exam-schedules";
+        },
+        readDates: async () => {
+          if (firstPage.currentLocation === "exam-schedules") {
+            throw new Error("stop after personnel config checkpoint");
+          }
+          return firstPage.state.dates;
+        },
+        onCheckpoint: async (checkpoint) => {
+          if (checkpoint.status === "completed") checkpoints[checkpoint.name] = checkpoint;
+        },
+      }),
+    ),
+    /stop after personnel config checkpoint/,
+  );
+  assert.equal(
+    checkpoints.sync_personnel_config?.status,
+    "completed",
+    JSON.stringify(checkpoints),
+  );
+
+  const resumedPage = fakeOperationPage({
+    published: true,
+    personnelPlatform: "悦站",
+    dates: validInstruction().target.dates,
+    requirements: validInstruction().target.requirements,
+  });
+  resumedPage.currentLocation = "batch-detail";
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({ checkpoints }),
+    attemptOptions(resumedPage, {
+      openEztestSchedulePage: async () => {
+        resumedPage.currentLocation = "exam-schedules";
+      },
+      openPersonnelPage: async () => {
+        resumedPage.currentLocation = "personnel";
+      },
+      readDates: async () => {
+        assert.notEqual(resumedPage.currentLocation, "exam-schedules");
+        return resumedPage.state.dates;
+      },
+    }),
+  );
 });
 
 test("unified attempt verifies once and confirms send directly after final readbacks", async () => {

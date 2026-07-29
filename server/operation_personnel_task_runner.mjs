@@ -2373,6 +2373,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
   readPersonnel: (page) => readVisiblePersonnelPageSection(page, "personnel"),
   readDates: (page) => readVisiblePersonnelPageSection(page, "dates"),
   readRequirements: (page) => readVisiblePersonnelPageSection(page, "requirements"),
+  openPersonnelPage: (page, instruction = {}) => ensureVisiblePersonnelPage(page, instruction),
   readTaskSheet: async (page) => (await readVisiblePersonnelTaskSheet(page)).taskSheet,
   readTaskSheetSchedules: async (page) => (await readVisiblePersonnelTaskSheet(page)).schedules,
   readSendRecords: (page) => readVisibleTopRightSendRecords(page),
@@ -2930,6 +2931,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     undefined,
     personnelConfigProjection,
   );
+  await operationMethod(page, options, "openPersonnelPage")(page, instruction);
   snapshot.dates = normalizeDates(await readSection("readDates", "dates"));
   await sync(OPERATION_PERSONNEL_CHECKPOINTS[4], "syncPersonnelDates", "readDates", "dates");
   await sync(
