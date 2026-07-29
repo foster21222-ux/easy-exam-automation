@@ -368,10 +368,14 @@ test("personnel date range waits for the end date after the calendar rerenders",
 
 test("personnel date range uses the real calendar inputs instead of day cells", async () => {
   const events = [];
-  const inputControl = (label) => ({
+  const activeInputControl = (label) => ({
     count: async () => 1,
     fill: async (value) => events.push(`${label}:fill:${value}`),
     press: async (key) => events.push(`${label}:press:${key}`),
+  });
+  const inputControl = (label) => ({
+    count: async () => 2,
+    first: () => activeInputControl(label),
   });
   const calendar = {
     count: async () => 1,

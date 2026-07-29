@@ -1792,11 +1792,13 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     if (await endInput.count() === 0) {
       await endInput.waitFor({ state: "visible", timeout: 10_000 });
     }
-    if (await startInput.count() === 1 && await endInput.count() === 1) {
-      await startInput.fill(text(start));
-      await startInput.press("Enter");
-      await endInput.fill(text(end));
-      await endInput.press("Enter");
+    if (await startInput.count() > 0 && await endInput.count() > 0) {
+      const activeStartInput = startInput.first();
+      const activeEndInput = endInput.first();
+      await activeStartInput.fill(text(start));
+      await activeStartInput.press("Enter");
+      await activeEndInput.fill(text(end));
+      await activeEndInput.press("Enter");
       await calendars.waitFor({ state: "hidden", timeout: 10_000 });
       return;
     }
