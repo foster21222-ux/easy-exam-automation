@@ -1744,6 +1744,7 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
     + ":not(.ant-calendar-last-month-cell)"
     + ":not(.ant-calendar-next-month-btn-day)";
   const cell = page.locator(`${selector}:visible`);
+  let targetMonthSelected = false;
   if (nextMonthAttempts > 0) {
     const targetDate = new Date(`${text(value).replaceAll("/", "-")}T00:00:00`);
     const monthSelects = page.locator(".ant-calendar-month-select:visible");
@@ -1761,6 +1762,7 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
         monthOption,
         `${monthNumber}月选项`,
       )).click();
+      targetMonthSelected = true;
       nextMonthAttempts = 0;
     }
   }
@@ -1774,6 +1776,19 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
       break;
     }
     if (typeof page.waitForTimeout === "function") await page.waitForTimeout(200);
+  }
+  if (await cell.count() === 0 && targetMonthSelected) {
+    const dayText = String(new Date(`${text(value).replaceAll("/", "-")}T00:00:00`).getDate());
+    const rightPanelDay = page
+      .locator(
+        ".ant-calendar-range-right:visible "
+          + "td:not(.ant-calendar-last-month-cell):not(.ant-calendar-next-month-btn-day) "
+          + ".ant-calendar-date",
+      )
+      .filter({ hasText: new RegExp(`^${dayText}$`) });
+    if (await rightPanelDay.count() > 0) {
+      return uniqueVisibleControl(rightPanelDay, `${text(value)}日期单元格`);
+    }
   }
   if (await cell.count() === 0) {
     await cell.waitFor({ state: "visible", timeout: 10_000 });

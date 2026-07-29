@@ -402,7 +402,12 @@ test("personnel date range selects active day cells for readonly range inputs", 
       if (selector === ".ant-calendar-picker-container:visible") return calendar;
       if (selector.includes('[title="2026年7月29日"]')) return cell("start-cell");
       if (selector.includes('[title="2026年8月19日"]')) {
-        return cell("end-cell", () => endReady);
+        return cell("missing-end-cell", () => false);
+      }
+      if (selector.includes(".ant-calendar-range-right") && selector.includes(".ant-calendar-date")) {
+        return {
+          filter: ({ hasText }) => cell("end-cell", () => endReady && hasText.test("19")),
+        };
       }
       if (selector === ".ant-calendar-next-month-btn:visible") {
         return {
