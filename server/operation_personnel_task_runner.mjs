@@ -776,12 +776,31 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   if (await search.count() !== 1) {
     throw operationControlError("分散在线监考任务筛选框", await search.count());
   }
-  await search.fill(batchCode);
+  const visibleTables = page.locator("table:visible");
+  let batchCodeColumnVisible = false;
+  let batchNameColumnVisible = false;
+  for (let index = 0; index < await visibleTables.count(); index += 1) {
+    const headers = (await visibleTables.nth(index).locator("thead th").allInnerTexts()).map(text);
+    batchCodeColumnVisible ||= headers.includes("批次代码");
+    batchNameColumnVisible ||= headers.includes("批次名称");
+  }
+  const searchValue = !batchCodeColumnVisible && batchNameColumnVisible
+    ? batchName
+    : batchCode;
+  await search.fill(searchValue);
   await search.press("Enter");
-  await page.getByText(batchCode, { exact: true }).first().waitFor({
-    state: "visible",
-    timeout: 10_000,
-  });
+  try {
+    await page.getByText(searchValue, { exact: true }).first().waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+  } catch (cause) {
+    const error = new Error(`运控批次 ${batchCode}/${batchName} 尚未生成人员任务单`);
+    error.code = "PERSONNEL_TASK_SHEET_NOT_READY";
+    error.status = 409;
+    error.cause = cause;
+    throw error;
+  }
 
   const currentPage = async () => {
     const pagination = page.locator(".ant-pagination:visible");
@@ -834,7 +853,7 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
     for (let index = 0; index < await tables.count(); index += 1) {
       const table = tables.nth(index);
       const headers = (await table.locator("thead th").allInnerTexts()).map(text);
-      if (headers.includes("批次代码") && headers.includes("批次名称")) {
+      if (headers.includes("批次名称")) {
         matches.push({ table, headers });
       }
     }
@@ -848,7 +867,8 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
     const exact = [];
     for (let index = 0; index < await rows.count(); index += 1) {
       const cells = (await rows.nth(index).locator("td").allInnerTexts()).map(text);
-      if (cells[batchCodeIndex] === batchCode && cells[batchNameIndex] === batchName) {
+      if (cells[batchNameIndex] === batchName
+        && (batchCodeIndex < 0 || cells[batchCodeIndex] === batchCode)) {
         exact.push({ pageNumber: await currentPage(), rowIndex: index });
       }
     }
@@ -864,7 +884,7 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   }
   const selected = exactRows[0];
   if (await currentPage() > selected.pageNumber) {
-    await search.fill(batchCode);
+    await search.fill(searchValue);
     await search.press("Enter");
     if (typeof page.waitForFunction === "function") {
       await page.waitForFunction(() => Number(
@@ -1273,7 +1293,10 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
     batch,
     text(instruction.environment),
   );
-  if (instruction.allowUnpublishedPreview === true && batch.published !== true) {
+  const setupPreview = async (restoreBatchDetail = false) => {
+    if (restoreBatchDetail) {
+      await locateOperationPersonnelBatch(page, instruction, options);
+    }
     await (options.openEztestSchedulePage || openVisibleEztestSchedulePage)(page);
     visibleSnapshot = undefined;
     const schedules = await read("readSchedules", "schedules", []);
@@ -1287,6 +1310,9 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
       sendRecords: [],
       directoryMatch: { to: [], cc: [] },
     });
+  };
+  if (instruction.allowUnpublishedPreview === true && batch.published !== true) {
+    return setupPreview();
   }
   const legacySectionReaders = [
     "readSchedules",
@@ -1298,12 +1324,20 @@ export async function inspectOperationPersonnelTask(page, instruction = {}, opti
   ].some((name) => typeof options[name] === "function")
     || typeof options.readVisibleSnapshot === "function";
   if (!legacySectionReaders) {
-    await (
-      options.openPersonnelTaskSheet
-      || ((actualPage, actualInstruction) => (
-        openVisiblePersonnelTaskSheet(actualPage, actualInstruction, options)
-      ))
-    )(page, instruction);
+    try {
+      await (
+        options.openPersonnelTaskSheet
+        || ((actualPage, actualInstruction) => (
+          openVisiblePersonnelTaskSheet(actualPage, actualInstruction, options)
+        ))
+      )(page, instruction);
+    } catch (error) {
+      if (instruction.allowUnpublishedPreview === true
+        && error?.code === "PERSONNEL_TASK_SHEET_NOT_READY") {
+        return setupPreview(true);
+      }
+      throw error;
+    }
     const taskSnapshot = normalizeOperationPersonnelSnapshot(await (
       options.readPersonnelTaskSheetSnapshot || readVisiblePersonnelTaskSheet
     )(page, instruction));

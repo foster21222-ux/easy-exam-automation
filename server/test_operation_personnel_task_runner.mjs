@@ -611,6 +611,7 @@ function fakePersonnelTaskListPage(rows = [], {
   firstPageRowsAfterReset = null,
   searchInitiallyMissing = false,
   taskSheetTextHasNoExactNode = false,
+  withoutBatchCodeColumn = false,
 } = {}) {
   const events = [];
   const pages = [rows, ...additionalPages];
@@ -622,7 +623,7 @@ function fakePersonnelTaskListPage(rows = [], {
       if (selector === "thead th") {
         return {
           allInnerTexts: async () => [
-            "批次代码",
+            ...(withoutBatchCodeColumn ? [] : ["批次代码"]),
             "批次名称",
             "项目部归属",
             "项目经理",
@@ -794,6 +795,22 @@ test("current personnel task list opens the exact fixed action row", async () =>
     "click:1",
     "wait:任务单发送需满足以下条件",
   ]);
+});
+
+test("current personnel task list uses the batch name when the real table omits batch code", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["目标批次", "项目实施五部", "经理", "", ""],
+  ], { withoutBatchCodeColumn: true });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
+    { baseUrl: "http://operation.test/" },
+  );
+
+  assert.equal(page.events.includes("fill:目标批次"), true);
+  assert.equal(page.events.includes("wait:目标批次"), true);
+  assert.equal(page.events.includes("click:0"), true);
 });
 
 test("current personnel task list waits for its React filter", async () => {
@@ -2955,6 +2972,62 @@ test("unpublished initial preview reads schedules without opening a task sheet",
   assert.deepEqual(snapshot.taskSheet, { type: "", conditions: [], content: "" });
   assert.deepEqual(snapshot.sendRecords, []);
   assert.deepEqual(snapshot.directoryMatch, { to: [], cc: [] });
+});
+
+test("initial preview reads schedules when the published batch has not generated a task sheet", async () => {
+  const page = fakeOperationPage({ published: true });
+  page.evaluate = async () => ({
+    batch: { ...page.state.batch },
+    __scheduleRows: [{
+      "日程代码": "1",
+      "日程": "2026-08-22 09:00~11:00",
+      "时长(分钟)": "120",
+      "考试名称": "湖北邮政招聘考试",
+      "考生提前登录(分钟)": "30",
+    }],
+    evidence: {
+      batch: { present: true, missing: [] },
+      schedules: { present: true, missing: [] },
+    },
+  });
+  let schedulePageOpens = 0;
+
+  const snapshot = await operationPersonnelRunner.inspectOperationPersonnelTask(
+    page,
+    {
+      ...validInstruction(),
+      allowUnpublishedPreview: true,
+    },
+    {
+      readBatchPages: async () => exactBatchPages(),
+      openBatchRow: async () => {},
+      openPersonnelTaskSheet: async () => {
+        const error = new Error("任务单尚未生成");
+        error.code = "PERSONNEL_TASK_SHEET_NOT_READY";
+        throw error;
+      },
+      openEztestSchedulePage: async () => {
+        schedulePageOpens += 1;
+      },
+    },
+  );
+
+  assert.equal(schedulePageOpens, 1);
+  assert.equal(snapshot.schedules.length, 1);
+  assert.equal(snapshot.schedules[0].scheduleCode, 1);
+  assert.equal(snapshot.schedules[0].subjectName, "湖北邮政招聘考试");
+  assert.equal(snapshot.schedules[0].start, "2026-08-22 09:00");
+  assert.equal(snapshot.schedules[0].end, "2026-08-22 11:00");
+  assert.deepEqual(snapshot.personnel, {
+    serviceType: "",
+    platform: "",
+    loginMonitoring: "",
+    monitorRatio: "",
+    candidateBasis: "",
+    monitorCount: "",
+    earliestLoginMinutes: "",
+    trialIncluded: false,
+  });
 });
 
 test("unpublished visible preview opens the exam schedule tab and refreshes its cached snapshot", async () => {
