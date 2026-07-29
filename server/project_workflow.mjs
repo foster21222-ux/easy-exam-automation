@@ -2,6 +2,7 @@ import { operationBatchCodeIsValid, operationBatchNeedsReconciliation } from "./
 import { defaultOperationBatchName, resolveOperationBatchName } from "./operation_batch_name.mjs";
 import { operationBatchUpdateState } from "./operation_batch_update.mjs";
 import { buildOperationPersonnelTaskDraft, buildOperationPersonnelTaskStatus } from "./operation_personnel_task.mjs";
+import { operationPersonnelScheduleGate } from "./operation_personnel_schedule_gate.mjs";
 
 const PERSISTED_BATCH_UPDATE_STATES = new Set([
   "updating",
@@ -231,6 +232,10 @@ export function buildProjectWorkflow(task = {}, batchDraft = null) {
   const batchCode = first(task.config?.operationBatchCode, task.config?.operationBatch?.code);
   const hasBatchCode = operationBatchCodeIsValid(batchCode);
   const personnelDraft = buildOperationPersonnelTaskDraft(task);
+  const personnelScheduleGate = operationPersonnelScheduleGate(task);
+  if (personnelScheduleGate.ok) {
+    personnelDraft.managedSchedules = structuredClone(personnelScheduleGate.schedules);
+  }
   const personnelStatus = buildOperationPersonnelTaskStatus(task, personnelDraft);
   const personnelNotRequired = text(business.ata_invigilator_arrangement).includes("不需要");
   const archiveDraft = buildOperationArchiveDraft(task);

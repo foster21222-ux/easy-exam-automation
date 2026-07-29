@@ -161,6 +161,65 @@ test("workflow exposes the stable personnel-task status and actions", () => {
   assert.deepEqual(workflow.steps.personnel.actions, []);
 });
 
+test("workflow includes synchronized managed schedules when deciding whether personnel content changed", () => {
+  const task = {
+    config: {
+      operationBatchCode: "EZT260003",
+      businessRequirement: {
+        batch_name: "湖北邮政_2026年8月",
+        ata_invigilator_arrangement: "需要安排分散人工监考",
+        estimated_subject_count: "4000",
+      },
+      operationBatch: {
+        estimatedMaxSubjectCount: 4000,
+        managedSnapshot: {
+          batchName: "湖北邮政_2026年8月",
+          examStartDate: "2026-08-22",
+          examEndDate: "2026-08-22",
+          schedules: [{
+            requirementIndex: 0,
+            name: "湖北邮政招聘考试",
+            start: "2026-08-22T09:00:00",
+            end: "2026-08-22T11:00:00",
+          }],
+        },
+      },
+      examRequirements: [{
+        id: "requirement-1",
+        version: 2,
+        fields: {
+          "考试名称": "湖北邮政招聘考试",
+          "考试日期时间": "2026/08/22 09:00 - 2026/08/22 11:00",
+          "科目信息": "综合能力",
+        },
+        config: {
+          startTimeDisplay: "2026/08/22 09:00",
+          endTimeDisplay: "2026/08/22 11:00",
+          courses: [{ code: "20260822-01-01", name: "湖北邮政招聘考试" }],
+        },
+      }],
+    },
+    sessions: [],
+  };
+  const sentDraft = buildOperationPersonnelTaskDraft(task);
+  sentDraft.managedSchedules = structuredClone(
+    task.config.operationBatch.managedSnapshot.schedules,
+  );
+  task.config.operationPersonnelTask = {
+    status: "sent",
+    lastSuccessfulFingerprint: operationPersonnelTaskFingerprint(sentDraft),
+  };
+
+  const workflow = buildProjectWorkflow(task, { warnings: [] });
+
+  assert.deepEqual(workflow.personnelDraft.managedSchedules, sentDraft.managedSchedules);
+  assert.equal(
+    operationPersonnelTaskFingerprint(workflow.personnelDraft),
+    task.config.operationPersonnelTask.lastSuccessfulFingerprint,
+  );
+  assert.deepEqual(workflow.steps.personnel, { status: "sent", actions: [] });
+});
+
 test("workflow keeps no-personnel arrangements skipped", () => {
   const config = buildFanweiProjectConfig({ fanwei, model, parsed: { config: {} } });
   config.businessRequirement.ata_invigilator_arrangement = "不需要安排人工监考";
