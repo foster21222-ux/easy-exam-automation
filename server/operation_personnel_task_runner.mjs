@@ -2167,6 +2167,23 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
       "发布按钮",
     );
     await confirmTopVisibleDialog(page);
+    await page.waitForFunction(() => {
+      const clean = (value) => String(value ?? "").trim();
+      const visible = (node) => Boolean(
+        node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length),
+      );
+      const titles = [...document.querySelectorAll(".header-title")].filter(visible);
+      if (titles.length !== 1) return false;
+      const headerRoot = titles[0].parentElement?.parentElement;
+      const statusNodes = headerRoot
+        ? [...headerRoot.querySelectorAll(".right p")].filter(
+          (node) => visible(node) && clean(node.textContent).startsWith("批次状态"),
+        )
+        : [];
+      return statusNodes.length === 1
+        && [...statusNodes[0].querySelectorAll(".ant-tag")]
+          .some((node) => clean(node.textContent) === "已发布");
+    }, null, { timeout: 30_000 });
   },
 
   async syncExamSchedules(page, target = [], current = []) {
