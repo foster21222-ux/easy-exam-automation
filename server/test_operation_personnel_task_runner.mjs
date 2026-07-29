@@ -333,6 +333,39 @@ test("personnel date range selects both endpoints before saving", async () => {
   assert.deepEqual(events, ["input", "start", "end"]);
 });
 
+test("personnel date range waits for the end date after the calendar rerenders", async () => {
+  const events = [];
+  let endReady = false;
+  const control = (label, ready = () => true) => ({
+    count: async () => ready() ? 1 : 0,
+    click: async () => events.push(label),
+    waitFor: async ({ state }) => {
+      assert.equal(state, "visible");
+      endReady = true;
+      events.push(`${label}:visible`);
+    },
+  });
+  const dialog = { locator: () => control("input") };
+  const page = {
+    locator: (selector) => {
+      if (selector.includes("2026年7月24日")) return control("start");
+      if (selector.includes("2026年8月19日")) {
+        return control("end", () => endReady);
+      }
+      return control("calendar", () => false);
+    },
+  };
+
+  await operationPersonnelRunner.selectVisiblePersonnelDateRange(
+    page,
+    dialog,
+    "2026-07-24",
+    "2026-08-19",
+  );
+
+  assert.deepEqual(events, ["input", "start", "end:visible", "end"]);
+});
+
 test("current operation batch schedule rows map the visible combined schedule columns", () => {
   const schedules = operationPersonnelRunner.operationPersonnelBatchSchedulesFromVisibleRows([{
     "场次": "1",

@@ -1739,20 +1739,25 @@ async function visiblePersonnelConfigDialog(page) {
   return uniqueVisibleControl(dialogs, "在线监考配置项弹窗");
 }
 
+async function visiblePersonnelDateCell(page, value) {
+  const cell = page.locator(
+    `[title="${operationDateTitle(value)}"]:visible`
+    + ":not(.ant-calendar-last-month-cell)"
+    + ":not(.ant-calendar-next-month-btn-day)",
+  );
+  if (await cell.count() === 0) {
+    await cell.waitFor({ state: "visible", timeout: 10_000 });
+  }
+  return uniqueVisibleControl(cell, `${text(value)}日期单元格`);
+}
+
 export async function selectVisiblePersonnelDate(page, dialog, placeholder, value) {
   const input = await uniqueVisibleControl(
     dialog.locator(`input[placeholder="${placeholder}"]:visible`),
     `${placeholder}输入框`,
   );
   await input.click();
-  await clickUniqueVisible(
-    page.locator(
-      `[title="${operationDateTitle(value)}"]:visible`
-      + ":not(.ant-calendar-last-month-cell)"
-      + ":not(.ant-calendar-next-month-btn-day)",
-    ),
-    `${text(value)}日期单元格`,
-  );
+  await (await visiblePersonnelDateCell(page, value)).click();
   const calendars = page.locator(".ant-calendar-picker-container:visible");
   const calendarCount = await calendars.count();
   if (calendarCount > 1) {
@@ -1770,22 +1775,8 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     "开始日期输入框",
   );
   await input.click();
-  await clickUniqueVisible(
-    page.locator(
-      `[title="${operationDateTitle(start)}"]:visible`
-      + ":not(.ant-calendar-last-month-cell)"
-      + ":not(.ant-calendar-next-month-btn-day)",
-    ),
-    `${text(start)}日期单元格`,
-  );
-  await clickUniqueVisible(
-    page.locator(
-      `[title="${operationDateTitle(end)}"]:visible`
-      + ":not(.ant-calendar-last-month-cell)"
-      + ":not(.ant-calendar-next-month-btn-day)",
-    ),
-    `${text(end)}日期单元格`,
-  );
+  await (await visiblePersonnelDateCell(page, start)).click();
+  await (await visiblePersonnelDateCell(page, end)).click();
   const calendars = page.locator(".ant-calendar-picker-container:visible");
   if (await calendars.count() > 0) {
     await calendars.waitFor({ state: "hidden", timeout: 10_000 });
