@@ -1688,12 +1688,15 @@ async function ensureVisiblePersonnelPage(page, instruction = {}) {
 
 async function readVisiblePersonnelPage(page) {
   if (typeof page.waitForFunction === "function") {
-    await page.waitForFunction(() => {
-      const value = String(document.body?.innerText ?? "");
-      return value.includes("人员落实日期")
-        && value.includes("人员落实平台")
-        && value.includes("人员名单提交日期");
-    }, undefined, { timeout: 10_000 });
+    try {
+      await page.waitForFunction(() => {
+        const value = String(document.body?.innerText ?? "");
+        return value.includes("人员落实日期")
+          && value.includes("人员落实平台");
+      }, undefined, { timeout: 10_000 });
+    } catch {
+      throw operationConflict("人员配置保存后页面未恢复，无法回读人员落实日期和平台");
+    }
   }
   const raw = await page.evaluate(() => ({
     lines: String(document.body?.innerText ?? "")
