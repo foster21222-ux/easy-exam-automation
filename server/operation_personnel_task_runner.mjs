@@ -1740,11 +1740,13 @@ async function visiblePersonnelConfigDialog(page) {
 }
 
 async function visiblePersonnelDateCell(page, value) {
-  const cell = page.locator(
-    `[title="${operationDateTitle(value)}"]:visible`
+  const selector = `[title="${operationDateTitle(value)}"]`
     + ":not(.ant-calendar-last-month-cell)"
-    + ":not(.ant-calendar-next-month-btn-day)",
-  );
+    + ":not(.ant-calendar-next-month-btn-day)";
+  const calendars = page.locator(".ant-calendar-picker-container:visible");
+  const cell = await calendars.count() === 1 && typeof calendars.locator === "function"
+    ? calendars.locator(selector)
+    : page.locator(`${selector}:visible`);
   if (await cell.count() === 0) {
     await cell.waitFor({ state: "visible", timeout: 10_000 });
   }
