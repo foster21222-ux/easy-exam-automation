@@ -406,16 +406,17 @@ test("personnel date range selects active day cells for readonly range inputs", 
       }
       if (selector === ".ant-calendar-next-month-btn:visible") {
         return {
-          count: async () => 1,
-          last: () => ({
-            click: async () => {
-              endReady = true;
-              events.push("next-month:click");
-            },
-          }),
+          count: async () => 0,
         };
       }
       throw new Error(`unexpected selector ${selector}`);
+    },
+    keyboard: {
+      press: async (key) => {
+        assert.equal(key, "PageDown");
+        endReady = true;
+        events.push("next-month:PageDown");
+      },
     },
     waitForTimeout: async () => {},
   };
@@ -430,7 +431,7 @@ test("personnel date range selects active day cells for readonly range inputs", 
   assert.deepEqual(events, [
     "start:click",
     "start-cell:click",
-    "next-month:click",
+    "next-month:PageDown",
     "end-cell:click",
     "calendar:hidden",
   ]);

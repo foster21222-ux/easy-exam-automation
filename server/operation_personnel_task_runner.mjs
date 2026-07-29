@@ -1746,8 +1746,13 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
   const cell = page.locator(`${selector}:visible`);
   for (let attempt = 0; attempt < nextMonthAttempts && await cell.count() === 0; attempt += 1) {
     const nextButtons = page.locator(".ant-calendar-next-month-btn:visible");
-    if (await nextButtons.count() === 0) break;
-    await nextButtons.last().click();
+    if (await nextButtons.count() > 0) {
+      await nextButtons.last().click();
+    } else if (typeof page.keyboard?.press === "function") {
+      await page.keyboard.press("PageDown");
+    } else {
+      break;
+    }
     try {
       await cell.waitFor({ state: "visible", timeout: 3_000 });
       break;
