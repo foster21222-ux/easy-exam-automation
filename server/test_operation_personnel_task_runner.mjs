@@ -376,17 +376,19 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
   const inputControl = (label) => ({
     count: async () => 2,
     first: () => activeInputControl(label),
+    last: () => activeInputControl(label),
   });
+  const missingInputControl = {
+    count: async () => 0,
+    waitFor: async () => {},
+  };
   const activeCalendar = {
-    locator: (selector) => {
-      if (selector === 'input[placeholder="开始日期"]:visible') return inputControl("start");
-      if (selector === 'input[placeholder="结束日期"]:visible') return inputControl("end");
-      throw new Error(`unexpected calendar selector ${selector}`);
-    },
+    locator: () => missingInputControl,
     waitFor: async ({ state }) => events.push(`calendar:${state}`),
   };
   const calendar = {
     count: async () => 2,
+    first: () => activeCalendar,
     last: () => activeCalendar,
   };
   const dialog = {
@@ -398,6 +400,12 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
   const page = {
     locator: (selector) => {
       if (selector === ".ant-calendar-picker-container:visible") return calendar;
+      if (selector === '.ant-calendar-picker-container:visible input[placeholder="开始日期"]:visible') {
+        return inputControl("start");
+      }
+      if (selector === '.ant-calendar-picker-container:visible input[placeholder="结束日期"]:visible') {
+        return inputControl("end");
+      }
       throw new Error(`day cell must not be used: ${selector}`);
     },
   };

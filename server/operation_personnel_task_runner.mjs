@@ -1781,10 +1781,13 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
   if (await calendars.count() === 0 && typeof calendars.last === "function") {
     await calendars.waitFor({ state: "visible", timeout: 10_000 });
   }
-  if (await calendars.count() > 0 && typeof calendars.last === "function") {
-    const activeCalendar = calendars.last();
-    const startInput = activeCalendar.locator('input[placeholder="开始日期"]:visible');
-    const endInput = activeCalendar.locator('input[placeholder="结束日期"]:visible');
+  if (await calendars.count() > 0) {
+    const startInput = page.locator(
+      '.ant-calendar-picker-container:visible input[placeholder="开始日期"]:visible',
+    );
+    const endInput = page.locator(
+      '.ant-calendar-picker-container:visible input[placeholder="结束日期"]:visible',
+    );
     if (await startInput.count() === 0) {
       await startInput.waitFor({ state: "visible", timeout: 10_000 });
     }
@@ -1792,13 +1795,13 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
       await endInput.waitFor({ state: "visible", timeout: 10_000 });
     }
     if (await startInput.count() > 0 && await endInput.count() > 0) {
-      const activeStartInput = startInput.first();
-      const activeEndInput = endInput.first();
+      const activeStartInput = startInput.last();
+      const activeEndInput = endInput.last();
       await activeStartInput.fill(text(start));
       await activeStartInput.press("Enter");
       await activeEndInput.fill(text(end));
       await activeEndInput.press("Enter");
-      await activeCalendar.waitFor({ state: "hidden", timeout: 10_000 });
+      await calendars.first().waitFor({ state: "hidden", timeout: 10_000 });
       return;
     }
   }
