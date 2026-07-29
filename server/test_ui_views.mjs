@@ -1913,7 +1913,7 @@ test("stale personnel attempt response cannot render into a newly selected proje
   };
   const pollOperationPersonnelAttempt = compileInlineFunction(
     "      async function pollOperationPersonnelAttempt(taskId, attemptId, requestToken) {",
-    "\n      async function recheckOperationPersonnelTask",
+    "\n      async function resumeOperationPersonnelPolling",
     {
       taskViewState,
       fetchJson: async () => deferred.promise,
@@ -1948,7 +1948,7 @@ test("rejected personnel polling is handled and remains recoverable", async () =
   const operationPersonnelProgress = { textContent: "" };
   const pollOperationPersonnelAttempt = compileInlineFunction(
     "      async function pollOperationPersonnelAttempt(taskId, attemptId, requestToken) {",
-    "\n      async function recheckOperationPersonnelTask",
+    "\n      async function resumeOperationPersonnelPolling",
     {
       taskViewState,
       operationPersonnelProgress,
@@ -2051,9 +2051,36 @@ test("personnel UI reads server remainingSeconds instead of deriving poll countd
   assert.equal(attemptRenderer.includes("deadlineAt"), false);
   const poller = sourceBetween(
     "      async function pollOperationPersonnelAttempt(taskId, attemptId, requestToken) {",
-    "\n      async function recheckOperationPersonnelTask",
+    "\n      async function resumeOperationPersonnelPolling",
   );
   assert.ok(poller.includes("operationPersonnelRequestIsCurrent(taskId, requestToken)"));
+});
+
+test("personnel UI automatically resumes a stalled send poll when the page regains focus", async () => {
+  const taskViewState = {
+    currentProject: { taskId: "task-a" },
+    operationPersonnelAttemptId: "attempt-a",
+    operationPersonnelRequestToken: 7,
+    operationPersonnelPollTimer: 99,
+  };
+  const cleared = [];
+  const polled = [];
+  const resumeOperationPersonnelPolling = compileInlineFunction(
+    "      async function resumeOperationPersonnelPolling() {",
+    "\n      async function recheckOperationPersonnelTask",
+    {
+      taskViewState,
+      clearTimeout: (timer) => cleared.push(timer),
+      pollOperationPersonnelAttempt: async (...args) => polled.push(args),
+    },
+  );
+
+  assert.equal(await resumeOperationPersonnelPolling(), true);
+  assert.deepEqual(cleared, [99]);
+  assert.equal(taskViewState.operationPersonnelPollTimer, null);
+  assert.deepEqual(polled, [["task-a", "attempt-a", 7]]);
+  assert.ok(html.includes('window.addEventListener("focus", () => {'));
+  assert.ok(html.includes("void resumeOperationPersonnelPolling();"));
 });
 
 test("personnel UI connects the five service APIs without an environment override", () => {

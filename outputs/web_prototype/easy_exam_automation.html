@@ -10254,6 +10254,19 @@
         }
       }
 
+      async function resumeOperationPersonnelPolling() {
+        const taskId = taskViewState.currentProject?.taskId;
+        const attemptId = taskViewState.operationPersonnelAttemptId;
+        const requestToken = taskViewState.operationPersonnelRequestToken;
+        if (!taskId || !attemptId) return false;
+        if (taskViewState.operationPersonnelPollTimer) {
+          clearTimeout(taskViewState.operationPersonnelPollTimer);
+        }
+        taskViewState.operationPersonnelPollTimer = null;
+        await pollOperationPersonnelAttempt(taskId, attemptId, requestToken);
+        return true;
+      }
+
       async function recheckOperationPersonnelTask() {
         const taskId = taskViewState.currentProject?.taskId;
         const requestToken = taskViewState.operationPersonnelRequestToken;
@@ -15952,6 +15965,9 @@
           operationPersonnelConfirmSendBtn.disabled = false;
           operationPersonnelProgress.textContent = error.message;
         });
+      });
+      window.addEventListener("focus", () => {
+        void resumeOperationPersonnelPolling();
       });
       contentRequirementEmailSendBtn.addEventListener("click", () => sendContentRequirementEmailFromProject().catch((error) => { contentRequirementEmailState.textContent = error.message || String(error); }));
       projectContentTaskDraft.addEventListener("change", (event) => {
