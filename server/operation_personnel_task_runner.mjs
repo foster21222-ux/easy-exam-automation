@@ -2586,12 +2586,27 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
 
   const readPublishedBatch = async () => {
     if (snapshot.batch.published) return snapshot.batch;
+    await locateOperationPersonnelBatch(page, instruction, options);
     const batch = normalizeOperationPersonnelSnapshot({
       batch: await operationMethod(page, options, "readBatch")(page, instruction),
     }).batch;
     if (!batch.published) throw operationConflict("批次发布后回读仍为未发布");
     return batch;
   };
+  let publishInstruction = instruction;
+  const savedPublish = instruction.checkpoints?.[OPERATION_PERSONNEL_CHECKPOINTS[1]];
+  if (savedPublish?.status === "completed") {
+    await locateOperationPersonnelBatch(page, instruction, options);
+    const currentBatch = normalizeOperationPersonnelSnapshot({
+      batch: await operationMethod(page, options, "readBatch")(page, instruction),
+    }).batch;
+    snapshot.batch = currentBatch;
+    if (!currentBatch.published) {
+      const checkpoints = { ...(instruction.checkpoints || {}) };
+      delete checkpoints[OPERATION_PERSONNEL_CHECKPOINTS[1]];
+      publishInstruction = { ...instruction, checkpoints };
+    }
+  }
   snapshot.batch = await runPersonnelCheckpoint({
     name: OPERATION_PERSONNEL_CHECKPOINTS[1],
     target: { ...target.batch, published: true },
@@ -2602,7 +2617,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     },
     verify: readPublishedBatch,
     verifyCompleted: readPublishedBatch,
-    instruction,
+    instruction: publishInstruction,
     options,
   });
 

@@ -2622,6 +2622,29 @@ test("resume skips a verified checkpoint and blocks drift before continuing", as
   ), { code: "PERSONNEL_OPERATION_CONFLICT" });
 });
 
+test("resume republishes when the current batch status invalidates a completed publish checkpoint", async () => {
+  const captured = {};
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(fakeOperationPage(), {
+      onCheckpoint: async (update) => {
+        if (update.status === "completed") captured[update.name] = update;
+      },
+    }),
+  );
+
+  const page = fakeOperationPage({ published: false });
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction({
+      checkpoints: { publish_batch: captured.publish_batch },
+    }),
+    attemptOptions(page),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.filter((item) => item === "publish:click").length, 1);
+});
+
 test("resume after submit never clicks final confirmation again", async () => {
   const captured = {};
   await operationPersonnelRunner.runOperationPersonnelAttempt(
