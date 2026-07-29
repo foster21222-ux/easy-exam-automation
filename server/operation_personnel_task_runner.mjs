@@ -1583,13 +1583,38 @@ async function visiblePersonnelMailDialog(page) {
 }
 
 async function clickUniqueNamedButton(container, names, label) {
+  const button = await uniqueNamedButton(container, names, label);
+  await button.click();
+}
+
+async function uniqueNamedButton(container, names, label) {
   const matches = [];
   for (const name of names) {
     const button = container.getByRole("button", { name, exact: true });
     if (await button.count() === 1) matches.push(button);
   }
   if (matches.length !== 1) throw operationControlError(label, matches.length);
-  await matches[0].click();
+  return matches[0];
+}
+
+async function clickUniqueNamedButtonOrDialogHidden(container, names, label) {
+  const button = await uniqueNamedButton(container, names, label);
+  if (typeof container?.waitFor !== "function") {
+    await button.click();
+    return;
+  }
+  const hidden = container.waitFor({ state: "hidden", timeout: 30_000 })
+    .then(() => ({ hidden: true }))
+    .catch(() => ({ hidden: false }));
+  const clicked = button.click()
+    .then(() => ({ clicked: true }))
+    .catch((error) => ({ error }));
+  const outcome = await Promise.race([hidden, clicked]);
+  if (outcome.hidden || outcome.clicked) return;
+  if (outcome.error && await container.count() === 0) return;
+  if (outcome.error) throw outcome.error;
+  const clickOutcome = await clicked;
+  if (clickOutcome.error) throw clickOutcome.error;
 }
 
 async function exactVisibleRows(page, value) {
@@ -2026,6 +2051,15 @@ export async function clearVisiblePersonnelRecipientPeople(page, dialog) {
       dialog.getByRole("checkbox", { name: groupName, exact: true }),
       `人员目录组 ${groupName}`,
     );
+    const hasSelection = await group.isChecked() || (
+      typeof group.evaluate === "function"
+      && await group.evaluate((input) => Boolean(
+        input.indeterminate
+        || input.getAttribute("aria-checked") === "mixed"
+        || input.closest(".ant-checkbox")?.classList.contains("ant-checkbox-indeterminate"),
+      ))
+    );
+    if (!hasSelection) continue;
     if (!await group.isChecked()) await group.check();
     await page.waitForTimeout(100);
     const checkedPeople = await visibleCheckedRecipientPeople(dialog);
@@ -2571,7 +2605,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
 
   async confirmSend(page) {
     const mailDialog = await visiblePersonnelMailDialog(page);
-    await clickUniqueNamedButton(
+    await clickUniqueNamedButtonOrDialogHidden(
       mailDialog,
       ["确 定", "确定"],
       "邮件发送最终确定按钮",

@@ -1658,7 +1658,7 @@ test("inline mail directory selects recipients without clicking the final confir
     },
   });
   const mailDialog = {
-    evaluate: async () => ["演练组"],
+    evaluate: async () => ["武汉代表处", "演练组"],
     getByRole: (role, { name }) => {
       assert.equal(role, "checkbox");
       return checkbox(name);
@@ -1686,8 +1686,6 @@ test("inline mail directory selects recipients without clicking the final confir
   );
 
   assert.deepEqual(events, [
-    "check:演练组",
-    "uncheck:演练组",
     "check:演练组",
     "check:zhanglexiang@ata.net.cn (张乐翔)",
   ]);
@@ -2106,7 +2104,9 @@ function simulatedVisibleOperationPage(overrides = {}) {
       return this;
     },
   });
-  const confirm = locator(overrides.confirmCount ?? 1, () => {
+  let mailDialogVisible = true;
+  let resolveMailDialogHidden;
+  const confirm = locator(overrides.confirmCount ?? 1, async () => {
     if (dialogPurpose === "publish") {
       page.events.push("publish:confirm:visible");
       if (overrides.delayedPublishState) {
@@ -2120,10 +2120,23 @@ function simulatedVisibleOperationPage(overrides = {}) {
         type: "首次发送",
         sentAt: "2026-07-23T03:00:00.000Z",
       }];
+      if (overrides.confirmDisappearsDuringClick) {
+        mailDialogVisible = false;
+        resolveMailDialogHidden?.();
+        throw new Error("final button disappeared during click");
+      }
     }
     dialogPurpose = "";
   });
   const dialog = locator(1);
+  dialog.count = async () => mailDialogVisible ? 1 : 0;
+  dialog.waitFor = async ({ state }) => {
+    assert.equal(state, "hidden");
+    if (!mailDialogVisible) return;
+    await new Promise((resolve) => {
+      resolveMailDialogHidden = resolve;
+    });
+  };
   dialog.getByRole = (role, options = {}) => (
     role === "button" && nameMatches(options.name, confirmAccessibleName)
       ? confirm
@@ -2900,6 +2913,34 @@ test("default visible adapter uniquely matches the real spaced confirm button na
 
   assert.equal(result.status, "sent");
   assert.equal(page.events.filter((item) => item === "publish:confirm:visible").length, 1);
+});
+
+test("default visible adapter continues to send-record verification when the mail dialog closes during click", async () => {
+  const page = simulatedVisibleOperationPage({
+    publishAccessibleName: "发 布",
+    confirmAccessibleName: "确 定",
+    publishOnlyOnBatchDetail: true,
+    confirmDisappearsDuringClick: true,
+  });
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      openBatchRow: async () => {
+        page.events.push("batch:open");
+        page.currentLocation = "batch-detail";
+      },
+      openEztestSchedulePage: async () => {
+        page.events.push("exam-schedule:open");
+        page.currentLocation = "exam-schedule";
+      },
+      publishBatch: undefined,
+      confirmSend: undefined,
+    }),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.filter((item) => item === "send:confirm:visible").length, 1);
 });
 
 test("default visible adapter waits for the real published state before readback", async () => {
