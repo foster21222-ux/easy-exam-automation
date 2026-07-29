@@ -1778,9 +1778,20 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
   );
   await input.click();
   const calendars = page.locator(".ant-calendar-picker-container:visible");
+  if (typeof calendars.locator === "function") {
+    if (await calendars.count() === 0) {
+      await calendars.waitFor({ state: "visible", timeout: 10_000 });
+    }
+  }
   if (await calendars.count() === 1 && typeof calendars.locator === "function") {
     const startInput = calendars.locator('input[placeholder="开始日期"]');
     const endInput = calendars.locator('input[placeholder="结束日期"]');
+    if (await startInput.count() === 0) {
+      await startInput.waitFor({ state: "visible", timeout: 10_000 });
+    }
+    if (await endInput.count() === 0) {
+      await endInput.waitFor({ state: "visible", timeout: 10_000 });
+    }
     if (await startInput.count() === 1 && await endInput.count() === 1) {
       await startInput.fill(text(start));
       await startInput.press("Enter");
