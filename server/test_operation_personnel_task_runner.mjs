@@ -2015,6 +2015,31 @@ test("legacy completed schedule sync is reverified read only", async () => {
   assert.ok(observed.includes("verify_exam_schedules:completed"));
 });
 
+test("schedule checkpoint reopens the exam page after publication readback navigation", async () => {
+  const page = fakeOperationPage({ published: true });
+  let scheduleReads = 0;
+  let schedulePageReady = false;
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      readSchedules: async () => {
+        scheduleReads += 1;
+        if (scheduleReads > 1 && !schedulePageReady) {
+          throw new Error("考试日程页未打开");
+        }
+        return page.state.schedules;
+      },
+      openEztestSchedulePage: async () => {
+        schedulePageReady = true;
+      },
+    }),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(schedulePageReady, true);
+});
+
 test("blocks before recipient selection when task-sheet schedules drift behind matching background schedules", async () => {
   const page = fakeOperationPage();
   page.locator = (selector) => {

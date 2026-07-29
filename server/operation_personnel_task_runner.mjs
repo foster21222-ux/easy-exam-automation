@@ -2761,6 +2761,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   };
 
   const readManagedSchedules = async () => {
+    await operationMethod(page, options, "openEztestSchedulePage")(page, instruction);
     return assertManagedSchedules(
       managedSchedules,
       displaySchedules,
