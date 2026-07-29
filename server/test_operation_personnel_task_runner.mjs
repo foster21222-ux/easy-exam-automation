@@ -1405,6 +1405,78 @@ test("missing formal exam-service items are registered before their descriptions
   ]);
 });
 
+test("exam-service requirement save waits until the visible page contains every saved value", async () => {
+  const target = [
+    { name: "正式考试-监考人员数量", value: "80" },
+    { name: "正式考试-监考人员比例", value: "1:50" },
+  ];
+  let reads = 0;
+  const page = {
+    evaluate: async () => {
+      reads += 1;
+      const ready = reads >= 3;
+      return {
+        lines: [
+          "人员落实日期",
+          "2026-07-29 ~ 2026-08-19",
+          "人员落实平台",
+          "悦站",
+          "监考类型",
+          "分散监考",
+          "人员名单提交日期",
+          "2026-08-19",
+          "正式考试-监考人员数量",
+          ready ? "80" : "",
+          "正式考试-监考人员比例",
+          ready ? "1:50" : "",
+        ],
+      };
+    },
+    waitForTimeout: async () => {},
+  };
+
+  assert.deepEqual(
+    await operationPersonnelRunner.waitForVisiblePersonnelRequirements(page, target, {
+      maxChecks: 5,
+      pollMs: 0,
+    }),
+    target,
+  );
+  assert.equal(reads, 3);
+});
+
+test("exam-service requirement save failure reports the missing requirement values", async () => {
+  const page = {
+    evaluate: async () => ({
+      lines: [
+        "人员落实日期",
+        "2026-07-29 ~ 2026-08-19",
+        "人员落实平台",
+        "悦站",
+        "监考类型",
+        "分散监考",
+        "人员名单提交日期",
+        "2026-08-19",
+        "正式考试-监考人员数量",
+        "",
+      ],
+    }),
+    waitForTimeout: async () => {},
+  };
+
+  await assert.rejects(
+    operationPersonnelRunner.waitForVisiblePersonnelRequirements(
+      page,
+      [{ name: "正式考试-监考人员数量", value: "80" }],
+      { maxChecks: 2, pollMs: 0 },
+    ),
+    (error) => error.code === "PERSONNEL_OPERATION_CONFLICT"
+      && /考务需求保存后未生效/.test(error.message)
+      && /正式考试-监考人员数量/.test(error.message)
+      && !/人员配置保存后页面未恢复/.test(error.message),
+  );
+});
+
 test("current top-right send record reader uses the visible task sheet table", async () => {
   assert.equal(
     typeof operationPersonnelRunner.readVisibleTopRightSendRecords,

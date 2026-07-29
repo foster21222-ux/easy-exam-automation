@@ -1711,6 +1711,34 @@ async function readVisiblePersonnelPageSection(page, key) {
   return snapshot[key];
 }
 
+export async function waitForVisiblePersonnelRequirements(page, target = [], options = {}) {
+  const expected = target.map((item) => ({
+    name: text(item.name),
+    value: text(item.value),
+  }));
+  const maxChecks = Math.max(1, Number(options.maxChecks || 51));
+  const pollMs = Math.max(0, Number(options.pollMs ?? 200));
+  let actual = [];
+  for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+    const raw = await page.evaluate(() => ({
+      lines: String(document.body?.innerText ?? "")
+        .split(/\n+/)
+        .map((value) => value.trim().replace(/\s+/g, " "))
+        .filter(Boolean),
+    }));
+    actual = operationPersonnelPageFromVisibleRaw(raw).requirements;
+    const actualByName = new Map(actual.map((item) => [text(item.name), text(item.value)]));
+    if (expected.every((item) => actualByName.get(item.name) === item.value)) return expected;
+    if (attempt + 1 < maxChecks) await page.waitForTimeout(pollMs);
+  }
+  const actualByName = new Map(actual.map((item) => [text(item.name), text(item.value)]));
+  const missing = expected
+    .filter((item) => actualByName.get(item.name) !== item.value)
+    .map((item) => item.name)
+    .join("、");
+  throw operationConflict(`考务需求保存后未生效：${missing}`);
+}
+
 async function openVisiblePersonnelSectionEditor(page, label) {
   const title = await uniqueVisibleControl(
     page.getByText(label, { exact: true }),
@@ -2480,7 +2508,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
       "在线监考考务需求确定按钮",
     );
     await drawer.waitFor({ state: "hidden", timeout: 10_000 });
-    await readVisiblePersonnelPage(page);
+    await waitForVisiblePersonnelRequirements(page, target);
   },
 
   openTaskSheet: (page, instruction = {}) => (
