@@ -2678,6 +2678,30 @@ test("schedule checkpoint reopens the exam page after publication readback navig
   assert.equal(schedulePageReady, true);
 });
 
+test("schedule checkpoint restores batch detail after inspection leaves the task sheet open", async () => {
+  const page = fakeOperationPage({ published: true });
+  page.currentLocation = "batch-list";
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      openBatchRow: async () => {
+        page.currentLocation = "batch-detail";
+      },
+      readTaskSheet: async () => {
+        page.currentLocation = "task-sheet";
+        return page.state.taskSheet;
+      },
+      openEztestSchedulePage: async () => {
+        assert.equal(page.currentLocation, "batch-detail");
+        page.currentLocation = "exam-schedules";
+      },
+    }),
+  );
+
+  assert.equal(result.status, "sent");
+});
+
 test("blocks before recipient selection when task-sheet schedules drift behind matching background schedules", async () => {
   const page = fakeOperationPage();
   page.locator = (selector) => {
