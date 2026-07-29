@@ -1739,11 +1739,17 @@ async function visiblePersonnelConfigDialog(page) {
   return uniqueVisibleControl(dialogs, "在线监考配置项弹窗");
 }
 
-async function visiblePersonnelDateCell(page, value) {
+async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
   const selector = `[title="${operationDateTitle(value)}"]`
     + ":not(.ant-calendar-last-month-cell)"
     + ":not(.ant-calendar-next-month-btn-day)";
   const cell = page.locator(`${selector}:visible`);
+  for (let attempt = 0; attempt < nextMonthAttempts && await cell.count() === 0; attempt += 1) {
+    const nextButtons = page.locator(".ant-calendar-next-month-btn:visible");
+    if (await nextButtons.count() === 0) break;
+    await nextButtons.last().click();
+    if (typeof page.waitForTimeout === "function") await page.waitForTimeout(150);
+  }
   if (await cell.count() === 0) {
     await cell.waitFor({ state: "visible", timeout: 10_000 });
   }
@@ -1779,7 +1785,16 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     await calendars.waitFor({ state: "visible", timeout: 10_000 });
   }
   await (await visiblePersonnelDateCell(page, start)).click();
-  await (await visiblePersonnelDateCell(page, end)).click();
+  const startDate = new Date(`${text(start)}T00:00:00`);
+  const endDate = new Date(`${text(end)}T00:00:00`);
+  const monthDifference = Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())
+    ? 1
+    : Math.max(
+      1,
+      (endDate.getFullYear() - startDate.getFullYear()) * 12
+        + endDate.getMonth() - startDate.getMonth() + 1,
+    );
+  await (await visiblePersonnelDateCell(page, end, Math.min(monthDifference, 24))).click();
   if (await calendars.count() > 0) {
     await calendars.waitFor({ state: "hidden", timeout: 10_000 });
   }

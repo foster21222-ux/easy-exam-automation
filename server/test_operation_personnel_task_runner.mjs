@@ -368,6 +368,7 @@ test("personnel date range waits for the end date after the calendar rerenders",
 
 test("personnel date range selects active day cells for readonly range inputs", async () => {
   const events = [];
+  let endReady = false;
   const readonlyInput = (label) => ({
     count: async () => 1,
     click: async () => events.push(`${label}:click`),
@@ -375,9 +376,10 @@ test("personnel date range selects active day cells for readonly range inputs", 
       throw new Error("readonly input must not be filled");
     },
   });
-  const cell = (label) => ({
-    count: async () => 1,
+  const cell = (label, ready = () => true) => ({
+    count: async () => ready() ? 1 : 0,
     click: async () => events.push(`${label}:click`),
+    waitFor: async () => {},
   });
   const calendar = {
     count: async () => 1,
@@ -399,9 +401,23 @@ test("personnel date range selects active day cells for readonly range inputs", 
     locator: (selector) => {
       if (selector === ".ant-calendar-picker-container:visible") return calendar;
       if (selector.includes('[title="2026年7月29日"]')) return cell("start-cell");
-      if (selector.includes('[title="2026年8月19日"]')) return cell("end-cell");
+      if (selector.includes('[title="2026年8月19日"]')) {
+        return cell("end-cell", () => endReady);
+      }
+      if (selector === ".ant-calendar-next-month-btn:visible") {
+        return {
+          count: async () => 1,
+          last: () => ({
+            click: async () => {
+              endReady = true;
+              events.push("next-month:click");
+            },
+          }),
+        };
+      }
       throw new Error(`unexpected selector ${selector}`);
     },
+    waitForTimeout: async () => {},
   };
 
   await operationPersonnelRunner.selectVisiblePersonnelDateRange(
@@ -414,6 +430,7 @@ test("personnel date range selects active day cells for readonly range inputs", 
   assert.deepEqual(events, [
     "start:click",
     "start-cell:click",
+    "next-month:click",
     "end-cell:click",
     "calendar:hidden",
   ]);
