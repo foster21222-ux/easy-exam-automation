@@ -2170,11 +2170,38 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
 
   async publishBatch(page, instruction, options = {}) {
     await locateOperationPersonnelBatch(page, instruction, options);
+    const pageOrigin = new URL(page.url()).origin;
+    const responseWait = typeof page.waitForResponse === "function"
+      ? page.waitForResponse((response) => {
+        try {
+          const request = response.request();
+          return new URL(response.url()).origin === pageOrigin
+            && new URL(response.url()).pathname === "/api/batch/save_push_status"
+            && request.method() === "POST"
+            && ["xhr", "fetch"].includes(request.resourceType());
+        } catch {
+          return false;
+        }
+      }, { timeout: 30_000 })
+      : null;
+    responseWait?.catch(() => {});
     await clickUniqueVisible(
       page.getByRole("button", { name: /^发\s*布$/ }),
       "发布按钮",
     );
     await confirmTopVisibleDialog(page);
+    if (responseWait) {
+      const response = await responseWait;
+      const responseError = await response.finished();
+      if (responseError) throw responseError;
+      const payload = await response.json().catch(() => null);
+      if (!response.ok() || Number(payload?.code) !== 10) {
+        throw operationConflict(
+          `批次发布请求失败：HTTP ${response.status?.() || "?"}，code ${payload?.code ?? "?"}`,
+        );
+      }
+    }
+    if (typeof page.waitForTimeout === "function") await page.waitForTimeout(500);
     await page.waitForFunction(() => {
       const clean = (value) => String(value ?? "").trim();
       const visible = (node) => Boolean(

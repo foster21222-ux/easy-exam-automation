@@ -1462,6 +1462,7 @@ function simulatedVisibleOperationPage(overrides = {}) {
     sendRecordsAfterReopen: overrides.sendRecordsAfterReopen,
   });
   page.currentLocation = "batch-list";
+  page.url = () => "http://172.16.18.198:8020/batch/batchDetail?batch_guid=test";
   let dialogPurpose = "";
   const publishAccessibleName = overrides.publishAccessibleName ?? "发布";
   const confirmAccessibleName = overrides.confirmAccessibleName ?? "确定";
@@ -1539,6 +1540,25 @@ function simulatedVisibleOperationPage(overrides = {}) {
       page.state.batch.published = true;
       page.pendingPublished = false;
     }
+  };
+  page.waitForResponse = async (matches) => {
+    page.events.push("publish:response:wait");
+    const response = {
+      url: () => "http://172.16.18.198:8020/api/batch/save_push_status",
+      request: () => ({
+        method: () => "POST",
+        resourceType: () => "xhr",
+      }),
+      ok: () => true,
+      status: () => 200,
+      finished: async () => null,
+      json: async () => {
+        page.events.push("publish:response:read");
+        return { code: 10, message: null, data: null };
+      },
+    };
+    assert.equal(matches(response), true);
+    return response;
   };
   return page;
 }
@@ -2172,6 +2192,39 @@ test("default visible adapter waits for the real published state before readback
 
   assert.equal(result.status, "sent");
   assert.equal(page.events.filter((item) => item === "publish:wait:visible").length, 1);
+});
+
+test("default visible adapter completes the publish response before status readback", async () => {
+  const page = simulatedVisibleOperationPage({
+    publishAccessibleName: "发 布",
+    confirmAccessibleName: "确 定",
+    publishOnlyOnBatchDetail: true,
+  });
+
+  await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      openBatchRow: async () => {
+        page.events.push("batch:open");
+        page.currentLocation = "batch-detail";
+      },
+      openEztestSchedulePage: async () => {
+        page.events.push("exam-schedule:open");
+        page.currentLocation = "exam-schedule";
+      },
+      publishBatch: undefined,
+      confirmSend: undefined,
+    }),
+  );
+
+  assert.ok(
+    page.events.indexOf("publish:confirm:visible")
+      < page.events.indexOf("publish:response:read"),
+  );
+  assert.ok(
+    page.events.indexOf("publish:response:read")
+      < page.events.indexOf("publish:wait:visible"),
+  );
 });
 
 test("published batches skip the publish click but still complete the checkpoint", async () => {
