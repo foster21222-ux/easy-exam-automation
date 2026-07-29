@@ -2245,11 +2245,17 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
     if (text(personnel.serviceType) !== "ATA 监考－分散在线监考") {
       throw operationConflict("人员服务类型不是 ATA 分散在线监考");
     }
+    const dates = normalizeDates(instruction.target?.dates || {});
+    if (!dates.start || !dates.end || !dates.nameListDue) {
+      throw operationConflict("人员配置缺少完整日期");
+    }
     await ensureVisiblePersonnelPage(page, instruction);
     await openVisiblePersonnelSectionEditor(page, "配置项");
     const dialog = await visiblePersonnelConfigDialog(page);
     await chooseVisibleRadio(dialog, personnel.platform);
     await chooseVisibleRadio(dialog, "分散监考");
+    await selectVisiblePersonnelDateRange(page, dialog, dates.start, dates.end);
+    await selectVisiblePersonnelDate(page, dialog, "请选择日期", dates.nameListDue);
     await confirmVisiblePersonnelConfig(page, dialog);
   },
 
@@ -2693,6 +2699,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
     undefined,
     personnelConfigProjection,
   );
+  snapshot.dates = normalizeDates(await readSection("readDates", "dates"));
   await sync(OPERATION_PERSONNEL_CHECKPOINTS[4], "syncPersonnelDates", "readDates", "dates");
   await sync(
     OPERATION_PERSONNEL_CHECKPOINTS[5],

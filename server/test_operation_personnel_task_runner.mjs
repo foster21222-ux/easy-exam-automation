@@ -2325,6 +2325,27 @@ test("requirement-managed personnel changes do not edit personnel config", async
   assert.equal(page.events.includes("requirements:fill"), true);
 });
 
+test("personnel configuration saved with dates does not reopen the same editor", async () => {
+  const page = fakeOperationPage({ dates: {} });
+  let dateEditorCalls = 0;
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      syncPersonnelConfig: async (_actualPage, personnel, _current, instruction) => {
+        page.state.personnel = structuredClone(personnel);
+        page.state.dates = structuredClone(instruction.target.dates);
+      },
+      syncPersonnelDates: async () => {
+        dateEditorCalls += 1;
+      },
+    }),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(dateEditorCalls, 0);
+});
+
 test("normal pages use the concrete visible adapter for publish and final confirm", async () => {
   const page = simulatedVisibleOperationPage();
   const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
