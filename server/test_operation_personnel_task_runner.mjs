@@ -272,7 +272,11 @@ test("readonly personnel dates are selected through the exact calendar cell", as
       press: async (key) => events.push(`page:${key}`),
     },
     locator: (selector) => {
-      if (selector === '[title="2026年8月19日"]:visible') return control("cell");
+      if (selector.includes('[title="2026年8月19日"]')) {
+        assert.match(selector, /:not\(\.ant-calendar-last-month-cell\)/);
+        assert.match(selector, /:not\(\.ant-calendar-next-month-btn-day\)/);
+        return control("cell");
+      }
       assert.equal(selector, ".ant-calendar-picker-container:visible");
       return control("calendar");
     },
@@ -305,8 +309,16 @@ test("personnel date range selects both endpoints before saving", async () => {
   };
   const page = {
     locator: (selector) => {
-      if (selector.includes("2026年7月24日")) return control("start");
-      if (selector.includes("2026年8月19日")) return control("end");
+      if (selector.includes("2026年7月24日")) {
+        assert.match(selector, /:not\(\.ant-calendar-last-month-cell\)/);
+        assert.match(selector, /:not\(\.ant-calendar-next-month-btn-day\)/);
+        return control("start");
+      }
+      if (selector.includes("2026年8月19日")) {
+        assert.match(selector, /:not\(\.ant-calendar-last-month-cell\)/);
+        assert.match(selector, /:not\(\.ant-calendar-next-month-btn-day\)/);
+        return control("end");
+      }
       return control("calendar", 0);
     },
   };

@@ -1746,7 +1746,11 @@ export async function selectVisiblePersonnelDate(page, dialog, placeholder, valu
   );
   await input.click();
   await clickUniqueVisible(
-    page.locator(`[title="${operationDateTitle(value)}"]:visible`),
+    page.locator(
+      `[title="${operationDateTitle(value)}"]:visible`
+      + ":not(.ant-calendar-last-month-cell)"
+      + ":not(.ant-calendar-next-month-btn-day)",
+    ),
     `${text(value)}日期单元格`,
   );
   const calendars = page.locator(".ant-calendar-picker-container:visible");
@@ -1767,11 +1771,19 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
   );
   await input.click();
   await clickUniqueVisible(
-    page.locator(`[title="${operationDateTitle(start)}"]:visible`),
+    page.locator(
+      `[title="${operationDateTitle(start)}"]:visible`
+      + ":not(.ant-calendar-last-month-cell)"
+      + ":not(.ant-calendar-next-month-btn-day)",
+    ),
     `${text(start)}日期单元格`,
   );
   await clickUniqueVisible(
-    page.locator(`[title="${operationDateTitle(end)}"]:visible`),
+    page.locator(
+      `[title="${operationDateTitle(end)}"]:visible`
+      + ":not(.ant-calendar-last-month-cell)"
+      + ":not(.ant-calendar-next-month-btn-day)",
+    ),
     `${text(end)}日期单元格`,
   );
   const calendars = page.locator(".ant-calendar-picker-container:visible");
