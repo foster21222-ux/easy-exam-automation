@@ -1802,7 +1802,7 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     await calendars.waitFor({ state: "visible", timeout: 10_000 });
   }
   await (await visiblePersonnelDateCell(page, start)).click();
-  await endInput.click();
+  await endInput.click({ force: true });
   if (await calendars.count() === 0 && typeof calendars.last === "function") {
     await calendars.waitFor({ state: "visible", timeout: 10_000 });
   }
