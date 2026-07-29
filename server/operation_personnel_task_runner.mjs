@@ -1748,7 +1748,15 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
     const nextButtons = page.locator(".ant-calendar-next-month-btn:visible");
     if (await nextButtons.count() === 0) break;
     await nextButtons.last().click();
-    if (typeof page.waitForTimeout === "function") await page.waitForTimeout(150);
+    try {
+      await cell.waitFor({ state: "visible", timeout: 3_000 });
+      break;
+    } catch {
+      if (attempt + 1 >= nextMonthAttempts) throw operationControlError(
+        `${text(value)}日期单元格`,
+        await cell.count(),
+      );
+    }
   }
   if (await cell.count() === 0) {
     await cell.waitFor({ state: "visible", timeout: 10_000 });
@@ -1790,9 +1798,9 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
   const monthDifference = Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())
     ? 1
     : Math.max(
-      1,
+      0,
       (endDate.getFullYear() - startDate.getFullYear()) * 12
-        + endDate.getMonth() - startDate.getMonth() + 1,
+        + endDate.getMonth() - startDate.getMonth(),
     );
   await (await visiblePersonnelDateCell(page, end, Math.min(monthDifference, 24))).click();
   if (await calendars.count() > 0) {
