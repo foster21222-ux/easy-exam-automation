@@ -1996,24 +1996,63 @@ export async function editVisibleSchedule(page, schedule, existing) {
   await confirmTopVisibleDialog(page);
 }
 
-async function selectVisiblePeople(dialog, groupName, people) {
+async function visibleRecipientGroupNames(dialog) {
+  return dialog.evaluate((node) => [...node.querySelectorAll('input[type="checkbox"][value]')]
+    .map((input) => String(input.value ?? "").trim())
+    .filter(Boolean));
+}
+
+async function visibleCheckedRecipientPeople(dialog) {
+  const checked = await dialog.locator('input[type="checkbox"]:checked').all();
+  const people = [];
+  for (const control of checked) {
+    const label = await control.evaluate((input) => String(
+      input.getAttribute("aria-label")
+      || input.closest("label")?.innerText
+      || input.closest(".ant-checkbox-wrapper")?.innerText
+      || input.parentElement?.parentElement?.innerText
+      || "",
+    ).trim().replace(/\s+/g, " "));
+    if (label.includes("@")) people.push(control);
+  }
+  return people;
+}
+
+export async function clearVisiblePersonnelRecipientPeople(page, dialog) {
+  const groupNames = await visibleRecipientGroupNames(dialog);
+  for (const groupName of groupNames) {
+    const group = await uniqueVisibleControl(
+      dialog.getByRole("checkbox", { name: groupName, exact: true }),
+      `人员目录组 ${groupName}`,
+    );
+    if (!await group.isChecked()) await group.check();
+    await page.waitForTimeout(100);
+    const checkedPeople = await visibleCheckedRecipientPeople(dialog);
+    for (let index = checkedPeople.length - 1; index >= 0; index -= 1) {
+      await checkedPeople[index].uncheck();
+    }
+    if (await group.isChecked()) await group.uncheck();
+  }
+}
+
+async function selectVisiblePeople(page, dialog, groupName, people) {
   const group = dialog.getByRole("checkbox", { name: groupName, exact: true });
   if (await group.count() === 0) {
     await group.waitFor({ state: "visible", timeout: 10_000 });
   }
-  const exactGroup = await clickUniqueVisible(group, `人员目录组 ${groupName}`);
-  try {
-    for (const person of people) {
-      const label = `${person.id} (${person.name})`;
-      const candidate = dialog.getByRole("checkbox", { name: label, exact: true });
-      if (await candidate.count() === 0) {
-        await candidate.waitFor({ state: "visible", timeout: 10_000 });
-      }
-      const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
-      await exact.check();
+  const exactGroup = await uniqueVisibleControl(group, `人员目录组 ${groupName}`);
+  if (!await exactGroup.isChecked()) {
+    await exactGroup.check();
+    await page.waitForTimeout(100);
+  }
+  for (const person of people) {
+    const label = `${person.id} (${person.name})`;
+    const candidate = dialog.getByRole("checkbox", { name: label, exact: true });
+    if (await candidate.count() === 0) {
+      await candidate.waitFor({ state: "visible", timeout: 10_000 });
     }
-  } finally {
-    if (await exactGroup.isChecked()) await exactGroup.uncheck();
+    const exact = await uniqueVisibleControl(candidate, `人员 ${person.id}/${person.name}`);
+    await exact.check();
   }
 }
 
@@ -2028,21 +2067,24 @@ export async function selectVisiblePersonnelRecipients(
     exact: true,
   });
   if (await inlineGroup.count() === 1) {
-    await selectVisiblePeople(mailDialog, rule.toGroup, recipients.to);
+    await clearVisiblePersonnelRecipientPeople(page, mailDialog);
+    await selectVisiblePeople(page, mailDialog, rule.toGroup, recipients.to);
     if (recipients.cc.length) {
-      await selectVisiblePeople(mailDialog, rule.ccGroup, recipients.cc);
+      await selectVisiblePeople(page, mailDialog, rule.ccGroup, recipients.cc);
     }
     return;
   }
 
   await openVisibleMailRecipientDirectory(mailDialog, "收件人");
   let directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
-  await selectVisiblePeople(directoryDialog, rule.toGroup, recipients.to);
+  await clearVisiblePersonnelRecipientPeople(page, directoryDialog);
+  await selectVisiblePeople(page, directoryDialog, rule.toGroup, recipients.to);
   await confirmVisibleDirectory(page);
   if (recipients.cc.length) {
     await openVisibleMailRecipientDirectory(mailDialog, "抄送（C）");
     directoryDialog = await topVisibleDialog(page, "人员目录弹窗");
-    await selectVisiblePeople(directoryDialog, rule.ccGroup, recipients.cc);
+    await clearVisiblePersonnelRecipientPeople(page, directoryDialog);
+    await selectVisiblePeople(page, directoryDialog, rule.ccGroup, recipients.cc);
     await confirmVisibleDirectory(page);
   }
 }
@@ -2068,11 +2110,6 @@ export async function readVisibleExpectedMailRecipients(mailDialog, expected, ru
       checkedPeople: checkedNames.filter((name) => name.includes("@")),
     };
   }, groupNames);
-  if (raw.checkedGroups.length) {
-    throw new Error(
-      `运控人员任务检查阻断：人员目录组“${raw.checkedGroups.join("、")}”仍为整组勾选`,
-    );
-  }
   const selected = operationPersonnelMailPeopleFromVisibleTexts(raw.checkedPeople);
   const ccKeys = new Set((expected.cc || []).map((person) => (
     `${text(person.id)}\0${text(person.name)}`

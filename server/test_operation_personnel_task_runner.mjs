@@ -1646,11 +1646,11 @@ test("inline mail directory selects recipients without clicking the final confir
   let groupChecked = false;
   const checkbox = (name) => ({
     count: async () => 1,
-    click: async () => {
-      events.push(`click:${name}`);
+    click: async () => events.push(`click:${name}`),
+    check: async () => {
+      events.push(`check:${name}`);
       if (name === "演练组") groupChecked = true;
     },
-    check: async () => events.push(`check:${name}`),
     isChecked: async () => name === "演练组" && groupChecked,
     uncheck: async () => {
       events.push(`uncheck:${name}`);
@@ -1658,15 +1658,21 @@ test("inline mail directory selects recipients without clicking the final confir
     },
   });
   const mailDialog = {
+    evaluate: async () => ["演练组"],
     getByRole: (role, { name }) => {
       assert.equal(role, "checkbox");
       return checkbox(name);
+    },
+    locator: (selector) => {
+      assert.equal(selector, 'input[type="checkbox"]:checked');
+      return { all: async () => [] };
     },
   };
   const page = {
     getByRole: () => {
       throw new Error("inline directory must not open or confirm a nested dialog");
     },
+    waitForTimeout: async () => {},
   };
 
   await operationPersonnelRunner.selectVisiblePersonnelRecipients(
@@ -1680,13 +1686,121 @@ test("inline mail directory selects recipients without clicking the final confir
   );
 
   assert.deepEqual(events, [
-    "click:演练组",
-    "check:zhanglexiang@ata.net.cn (张乐翔)",
+    "check:演练组",
     "uncheck:演练组",
+    "check:演练组",
+    "check:zhanglexiang@ata.net.cn (张乐翔)",
   ]);
 });
 
-test("inline mail recipient readback rejects checked groups and reports extra people", async () => {
+test("inline recipient selection clears historical people before selecting the exact test recipient", async () => {
+  const groups = {
+    武汉代表处: [
+      { label: "duancailian@ata.net.cn (段彩练)", checked: true },
+      { label: "tangrunmei@ata.net.cn (唐润梅)", checked: true },
+    ],
+    演练组: [
+      { label: "zhanglexiang@ata.net.cn (张乐翔)", checked: false },
+    ],
+  };
+  let activeGroup = "武汉代表处";
+  const checkedGroups = new Set(["武汉代表处"]);
+  const personControl = (person) => ({
+    count: async () => 1,
+    check: async () => { person.checked = true; },
+    uncheck: async () => { person.checked = false; },
+    evaluate: async () => person.label,
+  });
+  const groupControl = (name) => ({
+    count: async () => 1,
+    check: async () => {
+      activeGroup = name;
+      checkedGroups.add(name);
+    },
+    isChecked: async () => checkedGroups.has(name),
+    uncheck: async () => {
+      checkedGroups.delete(name);
+      if (activeGroup === name) activeGroup = "";
+    },
+    evaluate: async () => name,
+  });
+  const mailDialog = {
+    evaluate: async () => Object.keys(groups),
+    getByRole: (_role, { name }) => {
+      if (groups[name]) return groupControl(name);
+      const person = Object.values(groups).flat().find((item) => item.label === name);
+      return person ? personControl(person) : { count: async () => 0 };
+    },
+    locator: (selector) => {
+      assert.equal(selector, 'input[type="checkbox"]:checked');
+      return {
+        all: async () => [
+          groupControl(activeGroup),
+          ...groups[activeGroup].filter((person) => person.checked).map(personControl),
+        ],
+      };
+    },
+  };
+
+  await operationPersonnelRunner.selectVisiblePersonnelRecipients(
+    { waitForTimeout: async () => {} },
+    mailDialog,
+    {
+      to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+      cc: [],
+    },
+    { toGroup: "演练组", ccGroup: "" },
+  );
+
+  assert.deepEqual(
+    Object.values(groups).flat().filter((person) => person.checked).map((person) => person.label),
+    ["zhanglexiang@ata.net.cn (张乐翔)"],
+  );
+  assert.equal(activeGroup, "演练组");
+  assert.deepEqual([...checkedGroups], ["演练组"]);
+});
+
+test("historical recipient cleanup tolerates checked checkbox indexes shrinking after each uncheck", async () => {
+  const people = [
+    "duancailian@ata.net.cn (段彩练)",
+    "tangrunmei@ata.net.cn (唐润梅)",
+    "xulin@ata.net.cn (徐琳)",
+  ];
+  const group = {
+    count: async () => 1,
+    isChecked: async () => true,
+    check: async () => {},
+    uncheck: async () => {},
+  };
+  const dialog = {
+    evaluate: async () => ["武汉代表处"],
+    getByRole: () => group,
+    locator: (selector) => {
+      assert.equal(selector, 'input[type="checkbox"]:checked');
+      return {
+        all: async () => people.map((_person, index) => ({
+          evaluate: async () => {
+            if (!people[index]) throw new Error(`checked index ${index} disappeared`);
+            return people[index];
+          },
+          uncheck: async () => {
+            if (!people[index]) throw new Error(`checked index ${index} disappeared`);
+            people.splice(index, 1);
+          },
+        })),
+      };
+    },
+  };
+
+  await operationPersonnelRunner.clearVisiblePersonnelRecipientPeople(
+    { waitForTimeout: async () => {} },
+    dialog,
+  );
+
+  assert.deepEqual(people, []);
+});
+
+test("inline mail recipient readback ignores the active navigation group and reports people", async () => {
   let raw = {
     checkedGroups: [],
     checkedPeople: [
@@ -1723,8 +1837,8 @@ test("inline mail recipient readback rejects checked groups and reports extra pe
     checkedGroups: ["演练组"],
     checkedPeople: ["zhanglexiang@ata.net.cn (张乐翔)"],
   };
-  await assert.rejects(
-    operationPersonnelRunner.readVisibleExpectedMailRecipients(
+  assert.deepEqual(
+    await operationPersonnelRunner.readVisibleExpectedMailRecipients(
       mailDialog,
       {
         to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
@@ -1732,7 +1846,10 @@ test("inline mail recipient readback rejects checked groups and reports extra pe
       },
       { toGroup: "演练组", ccGroup: "" },
     ),
-    /人员目录组“演练组”仍为整组勾选/,
+    {
+      to: [{ id: "zhanglexiang@ata.net.cn", name: "张乐翔" }],
+      cc: [],
+    },
   );
 });
 
