@@ -119,6 +119,28 @@ test("current operation detail header maps exact visible batch identity", () => 
   });
 });
 
+test("current operation detail treats the real revoke-publish action as published", () => {
+  const result = operationPersonnelBatchIdentityFromVisibleRaw({
+    titleCount: 1,
+    code: "EZT260006",
+    batchName: "湖北邮政_2026年8月",
+    projectLinkCount: 2,
+    projectCode: "F0012393",
+    projectName: "宁德时代",
+    headerInfoCount: 1,
+    headerInfoText: [
+      "F0012393 | 宁德时代 | 业务部归属：业务二部 | 业务负责人：陶悦",
+      "项目部归属：项目实施五部 | 项目经理：经理 | 考试日期：2026-08-22",
+    ].join("\n"),
+    statusCount: 1,
+    statusTags: ["实施中", "撤销发布"],
+    systemTypeCount: 1,
+    systemType: "易考",
+  });
+
+  assert.equal(result.batch.published, true);
+});
+
 test("current operation detail header never invents ambiguous identity fields", () => {
   const result = operationPersonnelBatchIdentityFromVisibleRaw({
     titleCount: 2,
