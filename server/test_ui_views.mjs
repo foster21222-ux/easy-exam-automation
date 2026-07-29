@@ -2083,6 +2083,48 @@ test("personnel UI automatically resumes a stalled send poll when the page regai
   assert.ok(html.includes("void resumeOperationPersonnelPolling();"));
 });
 
+test("opening personnel detail refreshes its state instead of rendering a stale project cache", async () => {
+  const events = [];
+  const panels = [
+    { dataset: { operationDetail: "personnel" }, hidden: true },
+    { dataset: { operationDetail: "archive" }, hidden: true },
+  ];
+  const buttons = [
+    { dataset: { workflowStep: "personnel" }, setAttribute: () => {} },
+  ];
+  const operationPersonnelTaskState = { textContent: "" };
+  const operationPersonnelTaskActionBtn = { disabled: false };
+  const openOperationDetail = compileInlineFunction(
+    "      async function openOperationDetail(stepKey, trigger = null) {",
+    "\n      const requirementTimeRangeFields",
+    {
+      projectWorkflowStepMeta: [
+        ["personnel", "人员任务", "泛微", "按人员服务字段生成任务参数"],
+      ],
+      operationDetailTitle: { textContent: "" },
+      operationDetailNote: { textContent: "" },
+      operationDetailModal: { querySelectorAll: () => panels },
+      projectWorkflowSteps: { querySelectorAll: () => buttons },
+      operationPersonnelTaskState,
+      operationPersonnelTaskActionBtn,
+      showProjectDialog: () => events.push("show"),
+      loadOperationPersonnelTaskState: async () => events.push("load"),
+      taskViewState: {
+        currentProject: { taskId: "task-a" },
+        operationPersonnelRequestToken: 4,
+      },
+    },
+  );
+
+  await openOperationDetail("personnel", {});
+
+  assert.deepEqual(events, ["show", "load"]);
+  assert.equal(operationPersonnelTaskState.textContent, "正在读取最新人员任务状态。");
+  assert.equal(operationPersonnelTaskActionBtn.disabled, true);
+  assert.equal(panels[0].hidden, false);
+  assert.equal(panels[1].hidden, true);
+});
+
 test("personnel UI connects the five service APIs without an environment override", () => {
   for (const suffix of [
     "operation-personnel-task?_=",

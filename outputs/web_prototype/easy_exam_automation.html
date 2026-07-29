@@ -10453,7 +10453,7 @@
         projectDialogCloseTimers.set(dialog, window.setTimeout(() => finishClosingProjectDialog(dialog), 180));
       }
 
-      function openOperationDetail(stepKey, trigger = null) {
+      async function openOperationDetail(stepKey, trigger = null) {
         const meta = projectWorkflowStepMeta.find(([key]) => key === stepKey);
         if (!meta) return;
         operationDetailTitle.textContent = `${meta[1]}详情`;
@@ -10464,7 +10464,17 @@
         projectWorkflowSteps.querySelectorAll("[data-workflow-step]").forEach((button) => {
           button.setAttribute("aria-selected", button.dataset.workflowStep === stepKey ? "true" : "false");
         });
+        if (stepKey === "personnel") {
+          operationPersonnelTaskState.textContent = "正在读取最新人员任务状态。";
+          operationPersonnelTaskActionBtn.disabled = true;
+        }
         showProjectDialog(operationDetailModal, trigger);
+        if (stepKey === "personnel") {
+          await loadOperationPersonnelTaskState(
+            taskViewState.currentProject,
+            taskViewState.operationPersonnelRequestToken,
+          );
+        }
       }
 
       const requirementTimeRangeFields = new Set(["考试日期时间", "试考日期时间"]);
@@ -15847,7 +15857,11 @@
       projectAutoConfigBtn.addEventListener("click", () => router.navigate(`/auto-config?projectId=${encodeURIComponent(taskViewState.currentProjectId)}`));
       projectWorkflowSteps.addEventListener("click", (event) => {
         const button = event.target.closest("[data-workflow-step]");
-        if (button) openOperationDetail(button.dataset.workflowStep, button);
+        if (button) {
+          openOperationDetail(button.dataset.workflowStep, button).catch((error) => {
+            operationPersonnelTaskState.textContent = error?.message || String(error);
+          });
+        }
       });
       projectSourceStrip.addEventListener("click", (event) => {
         const actualResultButton = event.target.closest("[data-project-actual-result]");
