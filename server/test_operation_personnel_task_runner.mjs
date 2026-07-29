@@ -377,14 +377,17 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
     count: async () => 2,
     first: () => activeInputControl(label),
   });
-  const calendar = {
-    count: async () => 1,
+  const activeCalendar = {
     locator: (selector) => {
       if (selector === 'input[placeholder="开始日期"]:visible') return inputControl("start");
       if (selector === 'input[placeholder="结束日期"]:visible') return inputControl("end");
       throw new Error(`unexpected calendar selector ${selector}`);
     },
     waitFor: async ({ state }) => events.push(`calendar:${state}`),
+  };
+  const calendar = {
+    count: async () => 2,
+    last: () => activeCalendar,
   };
   const dialog = {
     locator: () => ({
