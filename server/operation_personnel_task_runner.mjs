@@ -388,7 +388,10 @@ export function operationPersonnelBatchIdentityFromVisibleRaw(raw = {}) {
   const titleUnique = Number(raw.titleCount) === 1;
   const projectLinksUnique = Number(raw.projectLinkCount) === 2;
   const headerUnique = Number(raw.headerInfoCount) === 1;
-  const statusUnique = Number(raw.statusCount) === 1;
+  const publicationTags = [...(raw.statusTags || [])]
+    .map(text)
+    .filter((value) => ["已发布", "撤销发布", "未发布"].includes(value));
+  const statusUnique = Number(raw.statusCount) === 1 && publicationTags.length === 1;
   const systemTypeUnique = Number(raw.systemTypeCount) === 1 && Boolean(text(raw.systemType));
   const projectDepartment = headerUnique
     ? visibleHeaderField(raw.headerInfoText, "项目部归属")
@@ -416,7 +419,7 @@ export function operationPersonnelBatchIdentityFromVisibleRaw(raw = {}) {
       projectDepartment,
       projectManager,
       systemType: systemTypeUnique ? text(raw.systemType) : "",
-      published: statusUnique && [...(raw.statusTags || [])].map(text).includes("已发布"),
+      published: statusUnique && publicationTags[0] === "已发布",
     },
     evidence: { present: missing.length === 0, missing },
   };
@@ -1053,6 +1056,27 @@ export async function readVisiblePersonnelTaskSheet(page) {
 
 async function readVisibleOperationPersonnelSnapshot(page) {
   if (typeof page.evaluate !== "function") return {};
+  if (typeof page.waitForFunction === "function") {
+    await page.waitForFunction(() => {
+      const clean = (value) => String(value ?? "").trim();
+      const visible = (node) => Boolean(
+        node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length),
+      );
+      const titles = [...document.querySelectorAll(".header-title")].filter(visible);
+      if (titles.length !== 1) return false;
+      const headerRoot = titles[0].parentElement?.parentElement;
+      const statusNodes = headerRoot
+        ? [...headerRoot.querySelectorAll(".right p")].filter(
+          (node) => visible(node) && clean(node.textContent).startsWith("批次状态"),
+        )
+        : [];
+      if (statusNodes.length !== 1) return false;
+      const publicationTags = [...statusNodes[0].querySelectorAll(".ant-tag")]
+        .map((node) => clean(node.textContent))
+        .filter((value) => ["已发布", "撤销发布", "未发布"].includes(value));
+      return publicationTags.length === 1;
+    }, undefined, { timeout: 10_000 });
+  }
   const snapshot = await page.evaluate(() => {
     const clean = (value) => String(value ?? "").trim();
     const visible = (node) => Boolean(node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length));

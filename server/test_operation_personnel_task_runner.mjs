@@ -141,6 +141,26 @@ test("current operation detail treats the revoke-publish batch status as unpubli
   assert.equal(result.batch.published, false);
 });
 
+test("current operation detail blocks while the publication status tag is still empty", () => {
+  const result = operationPersonnelBatchIdentityFromVisibleRaw({
+    titleCount: 1,
+    code: "EZT260006",
+    batchName: "湖北邮政_2026年8月",
+    projectLinkCount: 2,
+    projectCode: "F0012393",
+    projectName: "宁德时代",
+    headerInfoCount: 1,
+    headerInfoText: "项目部归属：项目实施五部 | 项目经理：经理",
+    statusCount: 1,
+    statusTags: ["实施中"],
+    systemTypeCount: 1,
+    systemType: "易考",
+  });
+
+  assert.equal(result.evidence.present, false);
+  assert.deepEqual(result.evidence.missing, ["发布状态"]);
+});
+
 test("current operation detail header never invents ambiguous identity fields", () => {
   const result = operationPersonnelBatchIdentityFromVisibleRaw({
     titleCount: 2,
