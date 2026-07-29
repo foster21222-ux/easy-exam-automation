@@ -889,6 +889,7 @@ test("checked inline mail recipients are split between to and cc", () => {
 function fakePersonnelTaskListPage(rows = [], {
   additionalPages = [],
   firstPageRowsAfterReset = null,
+  rowsLagAfterPageChange = false,
   searchInitiallyMissing = false,
   taskSheetTextHasNoExactNode = false,
   withoutBatchCodeColumn = false,
@@ -897,6 +898,7 @@ function fakePersonnelTaskListPage(rows = [], {
   const pages = [rows, ...additionalPages];
   let searchCount = 0;
   let pageIndex = 0;
+  let rowPageIndex = 0;
   let searchReady = !searchInitiallyMissing;
   const mainTable = {
     locator(selector) {
@@ -913,7 +915,7 @@ function fakePersonnelTaskListPage(rows = [], {
         };
       }
       if (selector === "tbody tr") {
-        const rowLocators = pages[pageIndex].map((cells, rowIndex) => ({
+        const rowLocators = pages[rowPageIndex].map((cells, rowIndex) => ({
           locator: (rowSelector) => {
             assert.equal(rowSelector, "td");
             return { allInnerTexts: async () => cells };
@@ -964,6 +966,7 @@ function fakePersonnelTaskListPage(rows = [], {
       if (key === "Enter") {
         searchCount += 1;
         pageIndex = 0;
+        rowPageIndex = 0;
         if (searchCount > 1 && firstPageRowsAfterReset) {
           pages[0] = firstPageRowsAfterReset;
         }
@@ -1003,6 +1006,7 @@ function fakePersonnelTaskListPage(rows = [], {
       count: async () => 1,
       click: async () => {
         pageIndex += 1;
+        if (!rowsLagAfterPageChange) rowPageIndex = pageIndex;
         events.push(`next:${pageIndex + 1}`);
       },
     }),
@@ -1048,6 +1052,14 @@ function fakePersonnelTaskListPage(rows = [], {
         },
       };
     },
+    ...(rowsLagAfterPageChange ? {
+      waitForFunction: async (_predicate, expected) => {
+        if (expected && typeof expected === "object" && expected.pageNumber) {
+          rowPageIndex = pageIndex;
+          events.push(`rows:${rowPageIndex + 1}`);
+        }
+      },
+    } : {}),
   };
 }
 
@@ -1174,6 +1186,26 @@ test("current personnel task list returns to the exact row page after proving la
   );
 
   assert.equal(page.events.filter((event) => event === "press:Enter").length, 2);
+  assert.equal(page.events.includes("click:0"), true);
+});
+
+test("current personnel task list waits for rows to refresh after the page number changes", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["EZT260003", "目标批次", "项目实施五部", "经理", "", ""],
+  ], {
+    additionalPages: [[
+      ["EZT999999", "其它批次", "项目实施五部", "经理", "", ""],
+    ]],
+    rowsLagAfterPageChange: true,
+  });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260003", batchName: "目标批次" } },
+    { baseUrl: "http://operation.test" },
+  );
+
+  assert.equal(page.events.includes("rows:2"), true);
   assert.equal(page.events.includes("click:0"), true);
 });
 

@@ -817,6 +817,48 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
     if (!/^\d+$/.test(value)) throw new Error(`分散在线监考任务当前页无效：${value || "空"}`);
     return Number(value);
   };
+  const currentRowsSignature = async () => {
+    const tables = page.locator("table:visible");
+    for (let index = 0; index < await tables.count(); index += 1) {
+      const table = tables.nth(index);
+      const headers = (await table.locator("thead th").allInnerTexts()).map(text);
+      if (!headers.includes("批次名称")) continue;
+      const rows = table.locator("tbody tr");
+      const values = [];
+      for (let rowIndex = 0; rowIndex < await rows.count(); rowIndex += 1) {
+        values.push((await rows.nth(rowIndex).locator("td").allInnerTexts()).map(text));
+      }
+      return JSON.stringify(values);
+    }
+    throw operationControlError("分散在线监考任务主表", 0);
+  };
+  const waitForPageRows = async (pageNumber, previousRows) => {
+    if (typeof page.waitForFunction !== "function") return;
+    await page.waitForFunction(
+      ({ pageNumber: expectedPage, previousRows: previous }) => {
+        const active = document.querySelector(".ant-pagination-item-active");
+        const current = Number(active?.getAttribute("title") || active?.textContent);
+        if (current !== expectedPage) return false;
+        const visible = (element) => Boolean(
+          element.offsetWidth || element.offsetHeight || element.getClientRects().length
+        );
+        const table = [...document.querySelectorAll("table")].find((candidate) => (
+          visible(candidate)
+          && [...candidate.querySelectorAll("thead th")]
+            .some((header) => header.textContent?.trim() === "批次名称")
+        ));
+        if (!table) return false;
+        const rows = [...table.querySelectorAll("tbody tr")].map((row) => (
+          [...row.querySelectorAll("td")].map((cell) => (
+            (cell.textContent || "").trim().replace(/\s+/g, " ")
+          ))
+        ));
+        return rows.length > 0 && JSON.stringify(rows) !== previous;
+      },
+      { pageNumber, previousRows },
+      { timeout: 10_000 },
+    );
+  };
   const nextPage = async () => {
     const pagination = page.locator(".ant-pagination:visible");
     if (await pagination.count() === 0) return false;
@@ -831,20 +873,13 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
       return false;
     }
     const before = await currentPage();
+    const previousRows = await currentRowsSignature();
     const clickable = control.locator("button, a").first();
     if (await clickable.count() !== 1) {
       throw operationControlError("分散在线监考任务下一页按钮", await clickable.count());
     }
     await clickable.click();
-    if (typeof page.waitForFunction === "function") {
-      await page.waitForFunction(
-        (expected) => Number(
-          document.querySelector(".ant-pagination-item-active")?.getAttribute("title")
-          || document.querySelector(".ant-pagination-item-active")?.textContent,
-        ) === expected,
-        before + 1,
-      );
-    }
+    await waitForPageRows(before + 1, previousRows);
     return true;
   };
   const readPage = async () => {
@@ -884,14 +919,10 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   }
   const selected = exactRows[0];
   if (await currentPage() > selected.pageNumber) {
+    const previousRows = await currentRowsSignature();
     await search.fill(searchValue);
     await search.press("Enter");
-    if (typeof page.waitForFunction === "function") {
-      await page.waitForFunction(() => Number(
-        document.querySelector(".ant-pagination-item-active")?.getAttribute("title")
-        || document.querySelector(".ant-pagination-item-active")?.textContent,
-      ) === 1);
-    }
+    await waitForPageRows(1, previousRows);
     if (await currentPage() !== 1) {
       throw new Error(`运控任务查询后未返回第 1 页，无法重新定位 ${batchCode}/${batchName}`);
     }
