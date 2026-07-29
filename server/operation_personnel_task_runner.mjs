@@ -1744,6 +1744,21 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
     + ":not(.ant-calendar-last-month-cell)"
     + ":not(.ant-calendar-next-month-btn-day)";
   const cell = page.locator(`${selector}:visible`);
+  if (nextMonthAttempts > 0) {
+    const targetDate = new Date(`${text(value).replaceAll("/", "-")}T00:00:00`);
+    const monthSelects = page.locator(".ant-calendar-month-select:visible");
+    if (!Number.isNaN(targetDate.getTime()) && await monthSelects.count() > 0) {
+      await monthSelects.last().click();
+      const monthOption = page
+        .locator(".ant-calendar-month-panel:visible .ant-calendar-month-panel-month")
+        .filter({ hasText: new RegExp(`^${targetDate.getMonth() + 1}月$`) });
+      await (await uniqueVisibleControl(
+        monthOption,
+        `${targetDate.getMonth() + 1}月选项`,
+      )).click();
+      nextMonthAttempts = 0;
+    }
+  }
   for (let attempt = 0; attempt < nextMonthAttempts; attempt += 1) {
     const nextButtons = page.locator(".ant-calendar-next-month-btn:visible");
     if (await nextButtons.count() > 0) {

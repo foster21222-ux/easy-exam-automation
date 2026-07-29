@@ -409,6 +409,25 @@ test("personnel date range selects active day cells for readonly range inputs", 
           count: async () => 0,
         };
       }
+      if (selector === ".ant-calendar-month-select:visible") {
+        return {
+          count: async () => 1,
+          last: () => ({
+            click: async () => events.push("month-select:click"),
+          }),
+        };
+      }
+      if (selector === ".ant-calendar-month-panel:visible .ant-calendar-month-panel-month") {
+        return {
+          filter: ({ hasText }) => ({
+            count: async () => hasText.test("8月") ? 1 : 0,
+            click: async () => {
+              endReady = true;
+              events.push("month-option:8月");
+            },
+          }),
+        };
+      }
       throw new Error(`unexpected selector ${selector}`);
     },
     keyboard: {
@@ -432,7 +451,8 @@ test("personnel date range selects active day cells for readonly range inputs", 
     "start:click",
     "start-cell:click",
     "end:click",
-    "next-month:PageDown",
+    "month-select:click",
+    "month-option:8月",
     "end-cell:click",
     "calendar:hidden",
   ]);
