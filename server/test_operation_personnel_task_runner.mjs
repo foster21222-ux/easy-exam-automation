@@ -370,42 +370,29 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
   const events = [];
   const activeInputControl = (label) => ({
     count: async () => 1,
+    click: async () => events.push(`${label}:click`),
     fill: async (value) => events.push(`${label}:fill:${value}`),
     press: async (key) => events.push(`${label}:press:${key}`),
   });
-  const inputControl = (label) => ({
-    count: async () => 2,
-    first: () => activeInputControl(label),
-    last: () => activeInputControl(label),
-  });
-  const missingInputControl = {
-    count: async () => 0,
-    waitFor: async () => {},
-  };
-  const activeCalendar = {
-    locator: () => missingInputControl,
+  const calendar = {
+    count: async () => 1,
+    first: () => calendar,
     waitFor: async ({ state }) => events.push(`calendar:${state}`),
   };
-  const calendar = {
-    count: async () => 2,
-    first: () => activeCalendar,
-    last: () => activeCalendar,
-  };
   const dialog = {
-    locator: () => ({
-      count: async () => 1,
-      click: async () => events.push("range:click"),
-    }),
+    locator: (selector) => {
+      if (selector === 'input[placeholder="开始日期"]:visible') {
+        return activeInputControl("start");
+      }
+      if (selector === 'input[placeholder="结束日期"]:visible') {
+        return activeInputControl("end");
+      }
+      throw new Error(`unexpected dialog selector ${selector}`);
+    },
   };
   const page = {
     locator: (selector) => {
       if (selector === ".ant-calendar-picker-container:visible") return calendar;
-      if (selector === '.ant-calendar-picker-container:visible input[placeholder="开始日期"]:visible') {
-        return inputControl("start");
-      }
-      if (selector === '.ant-calendar-picker-container:visible input[placeholder="结束日期"]:visible') {
-        return inputControl("end");
-      }
       throw new Error(`day cell must not be used: ${selector}`);
     },
   };
@@ -418,7 +405,7 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
   );
 
   assert.deepEqual(events, [
-    "range:click",
+    "start:click",
     "start:fill:2026-07-29",
     "start:press:Enter",
     "end:fill:2026-08-19",

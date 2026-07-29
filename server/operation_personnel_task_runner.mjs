@@ -1772,38 +1772,28 @@ export async function selectVisiblePersonnelDate(page, dialog, placeholder, valu
 }
 
 export async function selectVisiblePersonnelDateRange(page, dialog, start, end) {
-  const input = await uniqueVisibleControl(
+  const startInput = await uniqueVisibleControl(
     dialog.locator('input[placeholder="开始日期"]:visible'),
     "开始日期输入框",
   );
-  await input.click();
+  const endInput = await uniqueVisibleControl(
+    dialog.locator('input[placeholder="结束日期"]:visible'),
+    "结束日期输入框",
+  );
+  await startInput.click();
   const calendars = page.locator(".ant-calendar-picker-container:visible");
   if (await calendars.count() === 0 && typeof calendars.last === "function") {
     await calendars.waitFor({ state: "visible", timeout: 10_000 });
   }
-  if (await calendars.count() > 0) {
-    const startInput = page.locator(
-      '.ant-calendar-picker-container:visible input[placeholder="开始日期"]:visible',
-    );
-    const endInput = page.locator(
-      '.ant-calendar-picker-container:visible input[placeholder="结束日期"]:visible',
-    );
-    if (await startInput.count() === 0) {
-      await startInput.waitFor({ state: "visible", timeout: 10_000 });
-    }
-    if (await endInput.count() === 0) {
-      await endInput.waitFor({ state: "visible", timeout: 10_000 });
-    }
-    if (await startInput.count() > 0 && await endInput.count() > 0) {
-      const activeStartInput = startInput.last();
-      const activeEndInput = endInput.last();
-      await activeStartInput.fill(text(start));
-      await activeStartInput.press("Enter");
-      await activeEndInput.fill(text(end));
-      await activeEndInput.press("Enter");
+  if (typeof startInput.fill === "function" && typeof endInput.fill === "function") {
+    await startInput.fill(text(start));
+    await startInput.press("Enter");
+    await endInput.fill(text(end));
+    await endInput.press("Enter");
+    if (await calendars.count() > 0) {
       await calendars.first().waitFor({ state: "hidden", timeout: 10_000 });
-      return;
     }
+    return;
   }
   await (await visiblePersonnelDateCell(page, start)).click();
   await (await visiblePersonnelDateCell(page, end)).click();
