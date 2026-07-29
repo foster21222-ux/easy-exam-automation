@@ -468,10 +468,6 @@ export function operationPersonnelPageFromVisibleRaw(raw = {}) {
   const personnelMissing = [
     ["人员落实平台", platform],
     ["监考类型", monitorType === "分散监考"],
-    ["正式考试-最早登录系统时间", earliestLoginMinutes],
-    ["正式考试-监考人员数量", requirement("正式考试-监考人员数量")],
-    ["正式考试-监考人员比例", requirement("正式考试-监考人员比例")],
-    ["正式考试-监考登录监控", requirement("正式考试-监考登录监控")],
   ].filter(([, present]) => !present).map(([label]) => label);
   const datesMissing = [
     ["人员落实开始日期", start],
@@ -664,8 +660,9 @@ export function operationPersonnelCheckedMailPeopleFromVisibleEntries(entries = 
 
 export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
   const values = visibleRowMap(raw.keyValueRows);
+  const arrangement = text(values.get("正式考试-监考人员安排"));
   if (values.get("监考类型") !== "分散监考"
-    || values.get("正式考试-监考人员安排") !== "ATA监考-分散") {
+    || (arrangement && arrangement !== "ATA监考-分散")) {
     throw new Error("运控人员任务检查阻断：任务单不是 ATA 分散在线监考");
   }
 
@@ -964,14 +961,15 @@ export async function readVisiblePersonnelTaskSheet(page) {
           && headers.includes("日程代码")
           && (headers.includes("考试名称") || headers.includes("科目名称"));
       });
+      const scheduleRows = schedule
+        ? [...schedule.querySelectorAll("tbody tr")].filter(visible)
+        : [];
       return Boolean(
         rowValue("批次名称")
         && rowValue("批次名称") !== "—"
-        && rowValue("正式考试-监考人员安排")
-        && rowValue("正式考试-监考人员安排") !== "—"
-        && schedule,
+        && scheduleRows.length > 0,
       );
-    }, undefined, { timeout: 10_000 });
+    }, undefined, { timeout: 30_000 });
   }
   const raw = await page.evaluate(() => {
     const clean = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
@@ -1912,6 +1910,40 @@ async function exactVisibleRequirementRow(drawer, name) {
   );
 }
 
+export async function ensureVisiblePersonnelRequirementRows(page, drawer, names = []) {
+  const missing = [];
+  for (const name of names) {
+    const count = await drawer.getByText(text(name), { exact: true }).count();
+    if (count > 1) throw operationControlError(`考务需求 ${text(name)} 名称`, count);
+    if (count === 0) missing.push(text(name));
+  }
+  if (!missing.length) return;
+
+  await clickUniqueVisible(
+    drawer.getByText("新增考务项", { exact: true }),
+    "新增考务项按钮",
+  );
+  const modals = page.locator(".ant-modal:visible").filter({
+    hasText: "自定义选项",
+  });
+  if (await modals.count() === 0) {
+    await modals.first().waitFor({ state: "visible", timeout: 10_000 });
+  }
+  const modal = await uniqueVisibleControl(modals, "考务项弹窗");
+  for (const name of missing) {
+    const checkbox = await uniqueVisibleControl(
+      modal.getByRole("checkbox", { name, exact: true }),
+      `考务项 ${name} 复选框`,
+    );
+    if (!await checkbox.isChecked()) await checkbox.check();
+  }
+  await clickUniqueVisible(
+    modal.getByRole("button", { name: /^确\s*定$/ }),
+    "考务项确定按钮",
+  );
+  await modal.waitFor({ state: "hidden", timeout: 10_000 });
+}
+
 export async function editVisibleSchedule(page, schedule, existing) {
   if (existing) {
     const rows = await exactScheduleRows(page, schedule);
@@ -2427,6 +2459,11 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
     await ensureVisiblePersonnelPage(page, instruction);
     await openVisiblePersonnelSectionEditor(page, "考务需求");
     const drawer = await visiblePersonnelRequirementsDrawer(page);
+    await ensureVisiblePersonnelRequirementRows(
+      page,
+      drawer,
+      target.map((item) => text(item.name)),
+    );
     const currentByName = new Map(current.map((item) => [text(item.name), text(item.value)]));
     for (const item of target) {
       if (currentByName.get(text(item.name)) === text(item.value)) continue;

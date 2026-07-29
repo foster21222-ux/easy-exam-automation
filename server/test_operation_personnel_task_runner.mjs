@@ -253,6 +253,33 @@ test("personnel page visible lines map configuration dates and requirements", ()
   });
 });
 
+test("personnel configuration can be verified before exam-service requirements are registered", () => {
+  const snapshot = operationPersonnelRunner.operationPersonnelPageFromVisibleRaw({
+    lines: [
+      "配置项",
+      "人员落实日期：",
+      "2026-07-29 ~ 2026-08-19",
+      "人员落实平台：",
+      "悦站",
+      "监考类型：",
+      "分散监考",
+      "人员名单提交日期：",
+      "2026-08-19",
+      "考务需求",
+    ],
+  });
+
+  assert.deepEqual(snapshot.evidence.personnel, { present: true, missing: [] });
+  assert.equal(snapshot.evidence.requirements.present, false);
+  assert.deepEqual(snapshot.evidence.requirements.missing, [
+    "正式考试-最早登录系统时间",
+    "正式考试-监考人员安排",
+    "正式考试-监考人员数量",
+    "正式考试-监考人员比例",
+    "正式考试-监考登录监控",
+  ]);
+});
+
 test("readonly personnel dates are selected through the exact calendar cell", async () => {
   const events = [];
   const control = (label) => ({
@@ -677,6 +704,36 @@ test("current personnel task sheet maps visible tables into a normalized snapsho
     type: "首次发送",
     sentAt: "2026-07-23 10:09:34",
   }]);
+});
+
+test("current personnel task sheet accepts a base dialog before exam-service items are registered", () => {
+  const raw = visiblePersonnelTaskSheetRaw();
+  raw.keyValueRows = raw.keyValueRows.filter(([label]) => (
+    !label.startsWith("正式考试-")
+  ));
+
+  const snapshot = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(raw);
+
+  assert.equal(snapshot.personnel.serviceType, "ATA 监考－分散在线监考");
+  assert.equal(snapshot.requirements.every((item) => item.value === ""), true);
+  assert.deepEqual(snapshot.sendRecords, [{
+    type: "首次发送",
+    sentAt: "2026-07-23 10:09:34",
+  }]);
+});
+
+test("current personnel task sheet still blocks a visible non-ATA arrangement", () => {
+  const raw = visiblePersonnelTaskSheetRaw();
+  raw.keyValueRows = raw.keyValueRows.map(([label, value]) => (
+    label === "正式考试-监考人员安排"
+      ? [label, "客户监考"]
+      : [label, value]
+  ));
+
+  assert.throws(
+    () => operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(raw),
+    /不是 ATA 分散在线监考/,
+  );
 });
 
 test("current personnel task sheet accepts the real 考试名称 schedule header", () => {
@@ -1190,6 +1247,61 @@ test("current personnel task sheet reader parses the unique visible dialog", asy
   assert.equal(snapshot.sendRecords[0].type, "首次发送");
 });
 
+test("current personnel task sheet readiness does not require exam-service rows in the base dialog", async () => {
+  const title = { textContent: "批次名称：" };
+  const value = { textContent: "湖北邮政_2026年8月" };
+  const batchRow = {
+    children: [title, value],
+    offsetWidth: 1,
+    querySelector: () => title,
+  };
+  const header = (textContent) => ({ textContent });
+  const scheduleRow = { offsetWidth: 1 };
+  const scheduleTable = {
+    offsetWidth: 1,
+    querySelectorAll: (selector) => {
+      if (selector === "thead th") {
+        return ["场次", "日程代码", "日程", "时长(分钟)", "考试名称"]
+          .map(header);
+      }
+      if (selector === "tbody tr") return [scheduleRow];
+      return [];
+    },
+  };
+  const modal = {
+    innerText: "任务单发送需满足以下条件",
+    offsetWidth: 1,
+    querySelectorAll: (selector) => {
+      if (selector === ".order-item, .m_bottom.ant-row") return [batchRow];
+      if (selector === "table") return [scheduleTable];
+      return [];
+    },
+  };
+  const originalDocument = globalThis.document;
+  globalThis.document = {
+    querySelectorAll: (selector) => selector === ".ant-modal" ? [modal] : [],
+  };
+  let timeout;
+  const page = {
+    locator: () => ({
+      filter: () => ({ count: async () => 1 }),
+    }),
+    waitForFunction: async (ready, _argument, options) => {
+      timeout = options.timeout;
+      if (!ready()) throw new Error("task sheet not ready");
+    },
+    evaluate: async () => visiblePersonnelTaskSheetRaw(),
+  };
+
+  try {
+    const snapshot = await operationPersonnelRunner.readVisiblePersonnelTaskSheet(page);
+    assert.equal(snapshot.sendRecords[0].type, "首次发送");
+    assert.equal(timeout, 30_000);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
 test("current personnel task sheet reader blocks duplicate visible dialogs", async () => {
   assert.equal(
     typeof operationPersonnelRunner.readVisiblePersonnelTaskSheet,
@@ -1205,6 +1317,92 @@ test("current personnel task sheet reader blocks duplicate visible dialogs", asy
     () => operationPersonnelRunner.readVisiblePersonnelTaskSheet(page),
     /分散在线监考任务单弹窗.*实际 2 个/,
   );
+});
+
+test("missing formal exam-service items are registered before their descriptions are filled", async () => {
+  const selected = new Set();
+  const visibleNames = new Set(["正式考试-监考人员安排"]);
+  const events = [];
+  let modalVisible = false;
+  const control = (count, actions = {}) => ({
+    count: async () => count,
+    ...actions,
+  });
+  const modal = {
+    count: async () => modalVisible ? 1 : 0,
+    getByRole: (role, { name }) => {
+      if (role === "checkbox") {
+        return control(1, {
+          isChecked: async () => visibleNames.has(name),
+          check: async () => {
+            selected.add(name);
+            events.push(`check:${name}`);
+          },
+        });
+      }
+      if (role === "button") {
+        return control(1, {
+          click: async () => {
+            for (const name of selected) visibleNames.add(name);
+            modalVisible = false;
+            events.push("confirm-items");
+          },
+        });
+      }
+      return control(0);
+    },
+    waitFor: async ({ state }) => {
+      assert.equal(state, "hidden");
+      assert.equal(modalVisible, false);
+    },
+  };
+  const drawer = {
+    getByText: (name) => {
+      if (name === "新增考务项") {
+        return control(1, {
+          click: async () => {
+            modalVisible = true;
+            events.push("open-items");
+          },
+        });
+      }
+      return control(visibleNames.has(name) ? 1 : 0);
+    },
+  };
+  const page = {
+    locator: (selector) => {
+      assert.equal(selector, ".ant-modal:visible");
+      return {
+        filter: ({ hasText }) => {
+          assert.equal(hasText, "自定义选项");
+          return modal;
+        },
+      };
+    },
+  };
+  const names = [
+    "正式考试-最早登录系统时间",
+    "正式考试-监考人员安排",
+    "正式考试-监考人员数量",
+    "正式考试-监考人员比例",
+    "正式考试-监考登录监控",
+  ];
+
+  await operationPersonnelRunner.ensureVisiblePersonnelRequirementRows(
+    page,
+    drawer,
+    names,
+  );
+
+  assert.deepEqual([...visibleNames].sort(), [...names].sort());
+  assert.deepEqual(events, [
+    "open-items",
+    "check:正式考试-最早登录系统时间",
+    "check:正式考试-监考人员数量",
+    "check:正式考试-监考人员比例",
+    "check:正式考试-监考登录监控",
+    "confirm-items",
+  ]);
 });
 
 test("current top-right send record reader uses the visible task sheet table", async () => {

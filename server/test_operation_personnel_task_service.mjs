@@ -1703,6 +1703,7 @@ test("real runner checkpoint callbacks keep final schedule code drift resumable 
           pages: [[{ cells: [instruction.batch.code], pageNumber: 1 }]],
         }),
         openBatchRow: async () => {},
+        openEztestSchedulePage: async () => {},
         readBatch: async () => ({ ...page.state.batch }),
         readSchedules: async () => page.state.schedules,
         readPersonnel: async () => page.state.personnel,
@@ -1759,7 +1760,11 @@ test("real runner checkpoint callbacks keep final schedule code drift resumable 
   assert.equal(state.checkpoints.submit_send, undefined);
   assert.equal(state.status, "failed_resumable");
   assert.equal(state.activeAttempt.status, "failed_resumable");
-  assert.equal(state.activeAttempt.error.code, "PERSONNEL_BATCH_SCHEDULE_CONFLICT");
+  assert.equal(
+    state.activeAttempt.error.code,
+    "PERSONNEL_BATCH_SCHEDULE_CONFLICT",
+    state.activeAttempt.error.message,
+  );
   assert.equal(events.includes("submit_send"), false);
   assert.equal(events.includes("confirm_send"), false);
 });
