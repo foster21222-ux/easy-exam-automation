@@ -1739,13 +1739,18 @@ async function visiblePersonnelConfigDialog(page) {
   return uniqueVisibleControl(dialogs, "在线监考配置项弹窗");
 }
 
-async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
+async function visiblePersonnelDateCell(
+  page,
+  value,
+  nextMonthAttempts = 0,
+  forceTargetMonth = false,
+) {
   const selector = `[title="${operationDateTitle(value)}"]`
     + ":not(.ant-calendar-last-month-cell)"
     + ":not(.ant-calendar-next-month-btn-day)";
   const cell = page.locator(`${selector}:visible`);
   let targetMonthSelected = false;
-  if (nextMonthAttempts > 0) {
+  if (nextMonthAttempts > 0 && (forceTargetMonth || await cell.count() === 0)) {
     const targetDate = new Date(`${text(value).replaceAll("/", "-")}T00:00:00`);
     const monthSelects = page.locator(".ant-calendar-month-select:visible");
     if (!Number.isNaN(targetDate.getTime()) && await monthSelects.count() > 0) {
@@ -1766,6 +1771,7 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
       nextMonthAttempts = 0;
     }
   }
+  if (await cell.count() > 0) nextMonthAttempts = 0;
   for (let attempt = 0; attempt < nextMonthAttempts; attempt += 1) {
     const nextButtons = page.locator(".ant-calendar-next-month-btn:visible");
     if (await nextButtons.count() > 0) {
@@ -1789,6 +1795,16 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
     if (await rightPanelDay.count() > 0) {
       return uniqueVisibleControl(rightPanelDay, `${text(value)}日期单元格`);
     }
+    const activeDay = page
+      .locator(
+        ".ant-calendar-picker-container:visible "
+          + "td:not(.ant-calendar-last-month-cell):not(.ant-calendar-next-month-btn-day) "
+          + ".ant-calendar-date",
+      )
+      .filter({ hasText: new RegExp(`^${dayText}$`) });
+    if (await activeDay.count() > 0) {
+      return uniqueVisibleControl(activeDay, `${text(value)}日期单元格`);
+    }
   }
   if (await cell.count() === 0) {
     await cell.waitFor({ state: "visible", timeout: 10_000 });
@@ -1802,7 +1818,7 @@ export async function selectVisiblePersonnelDate(page, dialog, placeholder, valu
     `${placeholder}输入框`,
   );
   await input.click();
-  await (await visiblePersonnelDateCell(page, value)).click();
+  await (await visiblePersonnelDateCell(page, value, 1)).click();
   const calendars = page.locator(".ant-calendar-picker-container:visible");
   const calendarCount = await calendars.count();
   if (calendarCount > 1) {
@@ -1842,7 +1858,12 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
       (endDate.getFullYear() - startDate.getFullYear()) * 12
         + endDate.getMonth() - startDate.getMonth(),
     );
-  await (await visiblePersonnelDateCell(page, end, Math.min(monthDifference, 24))).click();
+  await (await visiblePersonnelDateCell(
+    page,
+    end,
+    Math.min(monthDifference, 24),
+    true,
+  )).click();
   if (await calendars.count() > 0) {
     await calendars.waitFor({ state: "hidden", timeout: 10_000 });
   }

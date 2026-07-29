@@ -297,6 +297,67 @@ test("readonly personnel dates are selected through the exact calendar cell", as
   ]);
 });
 
+test("personnel name-list date selects the target month before a cross-month day", async () => {
+  const events = [];
+  const control = (label, count = 1) => ({
+    count: async () => count,
+    click: async () => events.push(label),
+    waitFor: async ({ state }) => events.push(`${label}:${state}`),
+  });
+  const dialog = {
+    locator: () => control("input"),
+  };
+  const calendar = {
+    count: async () => 1,
+    waitFor: async ({ state }) => events.push(`calendar:${state}`),
+  };
+  const page = {
+    keyboard: {
+      press: async (key) => events.push(`page:${key}`),
+    },
+    locator: (selector) => {
+      if (selector === ".ant-calendar-picker-container:visible") return calendar;
+      if (selector.includes('[title="2026年8月19日"]')) return control("missing-title", 0);
+      if (selector === ".ant-calendar-month-select:visible") {
+        return {
+          count: async () => 1,
+          last: () => control("month-select"),
+        };
+      }
+      if (selector === ".ant-calendar-month-panel:visible .ant-calendar-month-panel-month") {
+        return {
+          filter: ({ hasText }) => control("month-option", hasText.test("八月") ? 1 : 0),
+        };
+      }
+      if (selector.includes("td:not(.ant-calendar-last-month-cell)") && selector.includes(".ant-calendar-date")) {
+        return {
+          filter: ({ hasText }) => control("day-19", hasText.test("19") ? 1 : 0),
+        };
+      }
+      if (selector.includes(".ant-calendar-range-right")) {
+        return { filter: () => control("missing-range-day", 0) };
+      }
+      throw new Error(`unexpected selector ${selector}`);
+    },
+  };
+
+  await operationPersonnelRunner.selectVisiblePersonnelDate(
+    page,
+    dialog,
+    "请选择日期",
+    "2026-08-19",
+  );
+
+  assert.deepEqual(events, [
+    "input",
+    "month-select",
+    "month-option",
+    "day-19",
+    "page:Escape",
+    "calendar:hidden",
+  ]);
+});
+
 test("personnel date range selects both endpoints before saving", async () => {
   const events = [];
   const control = (label, count = 1) => ({
