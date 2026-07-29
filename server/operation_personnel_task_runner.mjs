@@ -1583,10 +1583,10 @@ async function fillVisibleField(page, label, value) {
   await control.fill(text(value));
 }
 
-async function confirmTopVisibleDialog(page, buttonName = "确定") {
+async function confirmTopVisibleDialog(page) {
   const dialog = await topVisibleDialog(page, "运控弹窗");
-  const button = dialog.getByRole("button", { name: buttonName, exact: true });
-  await clickUniqueVisible(button, `运控弹窗${buttonName}按钮`);
+  const button = dialog.getByRole("button", { name: /^确\s*定$/ });
+  await clickUniqueVisible(button, "运控弹窗确定按钮");
 }
 
 async function readVisibleSection(page, key) {

@@ -1431,6 +1431,7 @@ function simulatedVisibleOperationPage(overrides = {}) {
   page.currentLocation = "batch-list";
   let dialogPurpose = "";
   const publishAccessibleName = overrides.publishAccessibleName ?? "发布";
+  const confirmAccessibleName = overrides.confirmAccessibleName ?? "确定";
   const nameMatches = (expected, actual) => (
     expected instanceof RegExp ? expected.test(actual) : expected === actual
   );
@@ -1457,7 +1458,12 @@ function simulatedVisibleOperationPage(overrides = {}) {
     }
     dialogPurpose = "";
   });
-  const dialog = locator(1, undefined, { "button:确定": confirm });
+  const dialog = locator(1);
+  dialog.getByRole = (role, options = {}) => (
+    role === "button" && nameMatches(options.name, confirmAccessibleName)
+      ? confirm
+      : locator(0)
+  );
   const sendRecordLocator = (records) => ({
     count: async () => records.length,
     nth: (index) => ({
@@ -2067,6 +2073,33 @@ test("default visible adapter uniquely matches the real spaced publish button na
 
   assert.equal(result.status, "sent");
   assert.equal(page.events.filter((item) => item === "publish:click:visible").length, 1);
+});
+
+test("default visible adapter uniquely matches the real spaced confirm button name", async () => {
+  const page = simulatedVisibleOperationPage({
+    publishAccessibleName: "发 布",
+    confirmAccessibleName: "确 定",
+    publishOnlyOnBatchDetail: true,
+  });
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    validInstruction(),
+    attemptOptions(page, {
+      openBatchRow: async () => {
+        page.events.push("batch:open");
+        page.currentLocation = "batch-detail";
+      },
+      openEztestSchedulePage: async () => {
+        page.events.push("exam-schedule:open");
+        page.currentLocation = "exam-schedule";
+      },
+      publishBatch: undefined,
+      confirmSend: undefined,
+    }),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.filter((item) => item === "publish:confirm:visible").length, 1);
 });
 
 test("published batches skip the publish click but still complete the checkpoint", async () => {
