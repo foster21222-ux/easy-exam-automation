@@ -667,18 +667,24 @@ export function operationPersonnelTaskSheetFromVisibleRaw(raw = {}) {
   }
 
   const scheduleHeaders = [...(raw.scheduleHeaders || [])].map(text);
+  const subjectHeader = ["考试名称", "科目名称"].filter(
+    (label) => scheduleHeaders.includes(label),
+  );
+  if (subjectHeader.length !== 1) {
+    throw new Error("运控人员任务检查阻断：任务单日程表头“考试名称”必须精确匹配 1 列");
+  }
   const scheduleIndexes = Object.fromEntries([
     "日程代码",
     "日程",
     "时长(分钟)",
-    "科目名称",
+    subjectHeader[0],
     "考生提前登录(分钟)",
   ].map((label) => [label, requiredHeaderIndex(scheduleHeaders, label)]));
   const schedules = [...(raw.scheduleRows || [])].map((row) => {
     const range = visibleScheduleRange(row[scheduleIndexes["日程"]]);
     return {
       scheduleCode: row[scheduleIndexes["日程代码"]],
-      subjectName: row[scheduleIndexes["科目名称"]],
+      subjectName: row[scheduleIndexes[subjectHeader[0]]],
       start: range.start,
       end: range.end,
       durationMinutes: row[scheduleIndexes["时长(分钟)"]],
@@ -931,7 +937,9 @@ export async function readVisiblePersonnelTaskSheet(page) {
       };
       const schedule = [...modal.querySelectorAll("table")].find((table) => {
         const headers = [...table.querySelectorAll("thead th")].map((cell) => clean(cell.textContent));
-        return visible(table) && headers.includes("日程代码") && headers.includes("科目名称");
+        return visible(table)
+          && headers.includes("日程代码")
+          && (headers.includes("考试名称") || headers.includes("科目名称"));
       });
       return Boolean(
         rowValue("批次名称")
@@ -963,7 +971,7 @@ export async function readVisiblePersonnelTaskSheet(page) {
       const headers = [...table.querySelectorAll("thead th")].map((cell) => clean(cell.textContent));
       return headers.includes("日程代码")
         && headers.includes("日程")
-        && headers.includes("科目名称");
+        && (headers.includes("考试名称") || headers.includes("科目名称"));
     });
     const tableKeyValueRows = tables
       .filter((table) => table !== sendTable && table !== scheduleTable)

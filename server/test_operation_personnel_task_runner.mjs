@@ -456,6 +456,17 @@ test("current personnel task sheet maps visible tables into a normalized snapsho
   }]);
 });
 
+test("current personnel task sheet accepts the real 考试名称 schedule header", () => {
+  const raw = visiblePersonnelTaskSheetRaw();
+  raw.scheduleHeaders = raw.scheduleHeaders.map((header) => (
+    header === "科目名称" ? "考试名称" : header
+  ));
+
+  const snapshot = operationPersonnelRunner.operationPersonnelTaskSheetFromVisibleRaw(raw);
+
+  assert.equal(snapshot.schedules[0].subjectName, "目标考试");
+});
+
 test("current personnel task sheet splits the recorded combined personnel date range", () => {
   const raw = visiblePersonnelTaskSheetRaw();
   raw.keyValueRows = raw.keyValueRows
