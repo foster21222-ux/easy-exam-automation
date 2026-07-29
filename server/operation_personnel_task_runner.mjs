@@ -1749,12 +1749,17 @@ async function visiblePersonnelDateCell(page, value, nextMonthAttempts = 0) {
     const monthSelects = page.locator(".ant-calendar-month-select:visible");
     if (!Number.isNaN(targetDate.getTime()) && await monthSelects.count() > 0) {
       await monthSelects.last().click();
+      const monthNumber = targetDate.getMonth() + 1;
+      const chineseMonth = [
+        "", "一月", "二月", "三月", "四月", "五月", "六月",
+        "七月", "八月", "九月", "十月", "十一月", "十二月",
+      ][monthNumber];
       const monthOption = page
         .locator(".ant-calendar-month-panel:visible .ant-calendar-month-panel-month")
-        .filter({ hasText: new RegExp(`^${targetDate.getMonth() + 1}月$`) });
+        .filter({ hasText: new RegExp(`^(?:${monthNumber}月|${chineseMonth})$`) });
       await (await uniqueVisibleControl(
         monthOption,
-        `${targetDate.getMonth() + 1}月选项`,
+        `${monthNumber}月选项`,
       )).click();
       nextMonthAttempts = 0;
     }

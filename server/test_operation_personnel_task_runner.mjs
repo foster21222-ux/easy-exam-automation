@@ -420,7 +420,7 @@ test("personnel date range selects active day cells for readonly range inputs", 
       if (selector === ".ant-calendar-month-panel:visible .ant-calendar-month-panel-month") {
         return {
           filter: ({ hasText }) => ({
-            count: async () => hasText.test("8月") ? 1 : 0,
+            count: async () => hasText.test("八月") ? 1 : 0,
             click: async () => {
               endReady = true;
               events.push("month-option:8月");
