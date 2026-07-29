@@ -1792,12 +1792,20 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     dialog.locator('input[placeholder="开始日期"]:visible'),
     "开始日期输入框",
   );
+  const endInput = await uniqueVisibleControl(
+    dialog.locator('input[placeholder="结束日期"]:visible'),
+    "结束日期输入框",
+  );
   await startInput.click();
   const calendars = page.locator(".ant-calendar-picker-container:visible");
   if (await calendars.count() === 0 && typeof calendars.last === "function") {
     await calendars.waitFor({ state: "visible", timeout: 10_000 });
   }
   await (await visiblePersonnelDateCell(page, start)).click();
+  await endInput.click();
+  if (await calendars.count() === 0 && typeof calendars.last === "function") {
+    await calendars.waitFor({ state: "visible", timeout: 10_000 });
+  }
   const startDate = new Date(`${text(start)}T00:00:00`);
   const endDate = new Date(`${text(end)}T00:00:00`);
   const monthDifference = Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())

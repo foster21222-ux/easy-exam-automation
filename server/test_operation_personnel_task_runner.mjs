@@ -330,7 +330,7 @@ test("personnel date range selects both endpoints before saving", async () => {
     "2026-08-19",
   );
 
-  assert.deepEqual(events, ["input", "start", "end"]);
+  assert.deepEqual(events, ["input", "start", "input", "end"]);
 });
 
 test("personnel date range waits for the end date after the calendar rerenders", async () => {
@@ -363,7 +363,7 @@ test("personnel date range waits for the end date after the calendar rerenders",
     "2026-08-19",
   );
 
-  assert.deepEqual(events, ["input", "start", "end:visible", "end"]);
+  assert.deepEqual(events, ["input", "start", "input", "end:visible", "end"]);
 });
 
 test("personnel date range selects active day cells for readonly range inputs", async () => {
@@ -431,6 +431,7 @@ test("personnel date range selects active day cells for readonly range inputs", 
   assert.deepEqual(events, [
     "start:click",
     "start-cell:click",
+    "end:click",
     "next-month:PageDown",
     "end-cell:click",
     "calendar:hidden",
