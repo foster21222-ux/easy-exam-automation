@@ -1777,9 +1777,21 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     "开始日期输入框",
   );
   await input.click();
+  const calendars = page.locator(".ant-calendar-picker-container:visible");
+  if (await calendars.count() === 1 && typeof calendars.locator === "function") {
+    const startInput = calendars.locator('input[placeholder="开始日期"]');
+    const endInput = calendars.locator('input[placeholder="结束日期"]');
+    if (await startInput.count() === 1 && await endInput.count() === 1) {
+      await startInput.fill(text(start));
+      await startInput.press("Enter");
+      await endInput.fill(text(end));
+      await endInput.press("Enter");
+      await calendars.waitFor({ state: "hidden", timeout: 10_000 });
+      return;
+    }
+  }
   await (await visiblePersonnelDateCell(page, start)).click();
   await (await visiblePersonnelDateCell(page, end)).click();
-  const calendars = page.locator(".ant-calendar-picker-container:visible");
   if (await calendars.count() > 0) {
     await calendars.waitFor({ state: "hidden", timeout: 10_000 });
   }

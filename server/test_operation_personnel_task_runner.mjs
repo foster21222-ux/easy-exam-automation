@@ -366,6 +366,52 @@ test("personnel date range waits for the end date after the calendar rerenders",
   assert.deepEqual(events, ["input", "start", "end:visible", "end"]);
 });
 
+test("personnel date range uses the real calendar inputs instead of day cells", async () => {
+  const events = [];
+  const inputControl = (label) => ({
+    count: async () => 1,
+    fill: async (value) => events.push(`${label}:fill:${value}`),
+    press: async (key) => events.push(`${label}:press:${key}`),
+  });
+  const calendar = {
+    count: async () => 1,
+    locator: (selector) => {
+      if (selector === 'input[placeholder="开始日期"]') return inputControl("start");
+      if (selector === 'input[placeholder="结束日期"]') return inputControl("end");
+      throw new Error(`unexpected calendar selector ${selector}`);
+    },
+    waitFor: async ({ state }) => events.push(`calendar:${state}`),
+  };
+  const dialog = {
+    locator: () => ({
+      count: async () => 1,
+      click: async () => events.push("range:click"),
+    }),
+  };
+  const page = {
+    locator: (selector) => {
+      if (selector === ".ant-calendar-picker-container:visible") return calendar;
+      throw new Error(`day cell must not be used: ${selector}`);
+    },
+  };
+
+  await operationPersonnelRunner.selectVisiblePersonnelDateRange(
+    page,
+    dialog,
+    "2026-07-29",
+    "2026-08-19",
+  );
+
+  assert.deepEqual(events, [
+    "range:click",
+    "start:fill:2026-07-29",
+    "start:press:Enter",
+    "end:fill:2026-08-19",
+    "end:press:Enter",
+    "calendar:hidden",
+  ]);
+});
+
 test("current operation batch schedule rows map the visible combined schedule columns", () => {
   const schedules = operationPersonnelRunner.operationPersonnelBatchSchedulesFromVisibleRows([{
     "场次": "1",
