@@ -1743,10 +1743,7 @@ async function visiblePersonnelDateCell(page, value) {
   const selector = `[title="${operationDateTitle(value)}"]`
     + ":not(.ant-calendar-last-month-cell)"
     + ":not(.ant-calendar-next-month-btn-day)";
-  const calendars = page.locator(".ant-calendar-picker-container:visible");
-  const cell = await calendars.count() === 1 && typeof calendars.locator === "function"
-    ? calendars.locator(selector)
-    : page.locator(`${selector}:visible`);
+  const cell = page.locator(`${selector}:visible`);
   if (await cell.count() === 0) {
     await cell.waitFor({ state: "visible", timeout: 10_000 });
   }
@@ -1776,24 +1773,10 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     dialog.locator('input[placeholder="开始日期"]:visible'),
     "开始日期输入框",
   );
-  const endInput = await uniqueVisibleControl(
-    dialog.locator('input[placeholder="结束日期"]:visible'),
-    "结束日期输入框",
-  );
   await startInput.click();
   const calendars = page.locator(".ant-calendar-picker-container:visible");
   if (await calendars.count() === 0 && typeof calendars.last === "function") {
     await calendars.waitFor({ state: "visible", timeout: 10_000 });
-  }
-  if (typeof startInput.fill === "function" && typeof endInput.fill === "function") {
-    await startInput.fill(text(start));
-    await startInput.press("Enter");
-    await endInput.fill(text(end));
-    await endInput.press("Enter");
-    if (await calendars.count() > 0) {
-      await calendars.first().waitFor({ state: "hidden", timeout: 10_000 });
-    }
-    return;
   }
   await (await visiblePersonnelDateCell(page, start)).click();
   await (await visiblePersonnelDateCell(page, end)).click();

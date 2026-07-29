@@ -366,13 +366,18 @@ test("personnel date range waits for the end date after the calendar rerenders",
   assert.deepEqual(events, ["input", "start", "end:visible", "end"]);
 });
 
-test("personnel date range uses the real calendar inputs instead of day cells", async () => {
+test("personnel date range selects active day cells for readonly range inputs", async () => {
   const events = [];
-  const activeInputControl = (label) => ({
+  const readonlyInput = (label) => ({
     count: async () => 1,
     click: async () => events.push(`${label}:click`),
-    fill: async (value) => events.push(`${label}:fill:${value}`),
-    press: async (key) => events.push(`${label}:press:${key}`),
+    fill: async () => {
+      throw new Error("readonly input must not be filled");
+    },
+  });
+  const cell = (label) => ({
+    count: async () => 1,
+    click: async () => events.push(`${label}:click`),
   });
   const calendar = {
     count: async () => 1,
@@ -382,10 +387,10 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
   const dialog = {
     locator: (selector) => {
       if (selector === 'input[placeholder="开始日期"]:visible') {
-        return activeInputControl("start");
+        return readonlyInput("start");
       }
       if (selector === 'input[placeholder="结束日期"]:visible') {
-        return activeInputControl("end");
+        return readonlyInput("end");
       }
       throw new Error(`unexpected dialog selector ${selector}`);
     },
@@ -393,7 +398,9 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
   const page = {
     locator: (selector) => {
       if (selector === ".ant-calendar-picker-container:visible") return calendar;
-      throw new Error(`day cell must not be used: ${selector}`);
+      if (selector.includes('[title="2026年7月29日"]')) return cell("start-cell");
+      if (selector.includes('[title="2026年8月19日"]')) return cell("end-cell");
+      throw new Error(`unexpected selector ${selector}`);
     },
   };
 
@@ -406,10 +413,8 @@ test("personnel date range uses the real calendar inputs instead of day cells", 
 
   assert.deepEqual(events, [
     "start:click",
-    "start:fill:2026-07-29",
-    "start:press:Enter",
-    "end:fill:2026-08-19",
-    "end:press:Enter",
+    "start-cell:click",
+    "end-cell:click",
     "calendar:hidden",
   ]);
 });
