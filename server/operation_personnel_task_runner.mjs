@@ -1811,7 +1811,7 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
   const monthDifference = Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())
     ? 1
     : Math.max(
-      0,
+      1,
       (endDate.getFullYear() - startDate.getFullYear()) * 12
         + endDate.getMonth() - startDate.getMonth(),
     );
