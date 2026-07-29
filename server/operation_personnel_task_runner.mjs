@@ -416,8 +416,7 @@ export function operationPersonnelBatchIdentityFromVisibleRaw(raw = {}) {
       projectDepartment,
       projectManager,
       systemType: systemTypeUnique ? text(raw.systemType) : "",
-      published: statusUnique && [...(raw.statusTags || [])]
-        .some((value) => ["已发布", "撤销发布"].includes(text(value))),
+      published: statusUnique && [...(raw.statusTags || [])].map(text).includes("已发布"),
     },
     evidence: { present: missing.length === 0, missing },
   };
@@ -2183,7 +2182,7 @@ const VISIBLE_OPERATION_PERSONNEL_ADAPTER = Object.freeze({
         : [];
       return statusNodes.length === 1
         && [...statusNodes[0].querySelectorAll(".ant-tag")]
-          .some((node) => ["已发布", "撤销发布"].includes(clean(node.textContent)));
+          .some((node) => clean(node.textContent) === "已发布");
     }, null, { timeout: 30_000 });
   },
 

@@ -119,7 +119,7 @@ test("current operation detail header maps exact visible batch identity", () => 
   });
 });
 
-test("current operation detail treats the real revoke-publish action as published", () => {
+test("current operation detail treats the revoke-publish batch status as unpublished", () => {
   const result = operationPersonnelBatchIdentityFromVisibleRaw({
     titleCount: 1,
     code: "EZT260006",
@@ -138,7 +138,7 @@ test("current operation detail treats the real revoke-publish action as publishe
     systemType: "易考",
   });
 
-  assert.equal(result.batch.published, true);
+  assert.equal(result.batch.published, false);
 });
 
 test("current operation detail header never invents ambiguous identity fields", () => {
