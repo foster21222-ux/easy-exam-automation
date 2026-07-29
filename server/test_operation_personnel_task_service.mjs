@@ -580,6 +580,13 @@ test("send keeps managed schedules outside the operation target and forwards the
   });
 
   const attempt = harness.task.config.operationPersonnelTask.activeAttempt;
+  const inspectCheckpoint = harness.task.config.operationPersonnelTask.checkpoints.inspect_batch;
+  assert.equal(inspectCheckpoint.status, "completed");
+  assert.match(inspectCheckpoint.targetDigest, /^[a-f0-9]{64}$/);
+  assert.deepEqual(
+    inspectCheckpoint.readback,
+    harness.task.config.operationPersonnelTask.draft.previewOperationSnapshot,
+  );
   assert.deepEqual(attempt.target.schedules, visible.schedules);
   assert.deepEqual(attempt.managedSchedules, [managedSchedule()]);
   assert.deepEqual(attempt.displaySchedules, [{
@@ -639,14 +646,13 @@ test("ordinary resend uses draft changes even when operation configuration is un
   harness.setInspection(current);
 
   const preview = await harness.service.preview("task-a", ADMIN);
-  assert.equal(harness.inspectionInstructions.length, 2);
-  assert.equal(harness.inspectionInstructions[0].directoryProbeSummary, undefined);
+  assert.equal(harness.inspectionInstructions.length, 1);
   assert.match(
-    harness.inspectionInstructions[1].directoryProbeSummary,
+    harness.inspectionInstructions[0].directoryProbeSummary,
     /批次受管日程/,
   );
   assert.doesNotMatch(
-    harness.inspectionInstructions[1].directoryProbeSummary,
+    harness.inspectionInstructions[0].directoryProbeSummary,
     /上次监考人数调整/,
   );
   assert.deepEqual(preview.state.draft.directoryMatch, {
@@ -666,27 +672,22 @@ test("ordinary resend uses draft changes even when operation configuration is un
   assert.equal(accepted.statusCode, 202);
 });
 
-test("ordinary resend blocks non-directory drift between initial and recipient inspections", async () => {
+test("ordinary resend reads operation state and recipient directory in one inspection", async () => {
   const harness = serviceHarness({
     changedAfterSend: true,
     inspectionResult(instruction, current) {
-      const result = structuredClone(current);
-      if (!instruction.directoryProbeSummary) {
-        result.directoryMatch = { to: [], cc: [] };
-      } else {
-        result.dates.end = "2099-01-01";
-      }
-      return result;
+      assert.match(instruction.directoryProbeSummary, /人员|考试日程|批次受管日程/);
+      return structuredClone(current);
     },
   });
 
-  await assert.rejects(
-    harness.service.preview("task-a", ADMIN),
-    (error) => error.code === "PERSONNEL_OPERATION_CONFLICT"
-      && error.conflicts.some((item) => item.path === "dates.end"),
-  );
-  assert.equal(harness.inspectionInstructions.length, 2);
-  assert.equal(harness.task.config.operationPersonnelTask.activePreview, null);
+  const preview = await harness.service.preview("task-a", ADMIN);
+
+  assert.equal(harness.inspectionInstructions.length, 1);
+  assert.deepEqual(preview.state.draft.directoryMatch, {
+    to: [{ group: "演练组", id: "t1", name: "张乐翔" }],
+    cc: [],
+  });
 });
 
 test("unpublished initial preview defers task sheet and directory inspection until send", async () => {
@@ -1561,7 +1562,7 @@ test("a resumable orphan keeps its attempt id and completed checkpoints", async 
   assert.equal(harness.task.config.operationPersonnelTask.activeAttempt.completedAt, "");
 });
 
-test("changed resumable target gets a new attempt id and clears old checkpoints", async () => {
+test("changed resumable target gets a new attempt id and replaces old checkpoints with preview inspection", async () => {
   const harness = serviceHarness({ orphanedAttemptCheckpoint: "sync_personnel_dates" });
   const preview = await harness.service.preview("task-a", owner(), { monitorCount: 4 });
   const accepted = await harness.service.send("task-a", owner(), {
@@ -1570,7 +1571,14 @@ test("changed resumable target gets a new attempt id and clears old checkpoints"
     changeSummary: "",
   });
   assert.equal(accepted.attemptId, "attempt-1");
-  assert.deepEqual(harness.task.config.operationPersonnelTask.checkpoints, {});
+  assert.deepEqual(
+    Object.keys(harness.task.config.operationPersonnelTask.checkpoints),
+    ["inspect_batch"],
+  );
+  assert.equal(
+    harness.task.config.operationPersonnelTask.checkpoints.inspect_batch.status,
+    "completed",
+  );
   assert.equal(
     harness.task.config.operationPersonnelTask.activeAttempt.target.personnel.monitorCount,
     4,

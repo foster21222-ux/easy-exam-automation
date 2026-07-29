@@ -44,6 +44,18 @@ function fingerprint(value) {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
+function completedPreviewInspectionCheckpoint(kind, baseline, snapshot, completedAt) {
+  return {
+    name: "inspect_batch",
+    status: "completed",
+    completedAt,
+    targetDigest: createHash("sha256")
+      .update(JSON.stringify({ kind, baseline }))
+      .digest("hex"),
+    readback: structuredClone(snapshot),
+  };
+}
+
 function draftSourceFingerprint(draft = {}) {
   return fingerprint(draft);
 }
@@ -552,12 +564,22 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     let target;
     let baseline;
     let operationChanges;
+    const knownResend = Boolean(existing.lastSuccessfulFingerprint);
+    const knownResendDirectoryProbeSummary = knownResend
+      ? text(
+        diffOperationPersonnelTaskDrafts(existing.draft || {}, draft).summary
+        || "本次人员任务重发收件目录核验",
+      )
+      : "";
     try {
       snapshot = normalizeOperationPersonnelSnapshot(await runInspection({
         environment,
         batch: draft.batch,
         batchCode: draft.batch.code,
         allowUnpublishedPreview: true,
+        ...(knownResendDirectoryProbeSummary
+          ? { directoryProbeSummary: knownResendDirectoryProbeSummary }
+          : {}),
       }));
       draft.displaySchedules = operationPersonnelDisplaySchedules(
         draft.managedSchedules,
@@ -576,7 +598,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
           : structuredClone(target);
       if (kind === "initial") baseline.batch.published = snapshot.batch.published;
       operationChanges = operationSnapshotChanges(snapshot, target);
-      if (kind === "resend") {
+      if (kind === "resend" && !knownResend) {
         const directoryProbeSummary = text(
           diffOperationPersonnelTaskDrafts(existing.draft || {}, draft).summary
           || suggestedChangeSummary(confirmationOperationChanges(operationChanges))
@@ -1064,6 +1086,12 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         baseline,
         previewBinding,
       };
+      const inspectCheckpoint = completedPreviewInspectionCheckpoint(
+        kind,
+        baseline,
+        finalDraft.previewOperationSnapshot || {},
+        nowIso(now),
+      );
       const next = {
         ...state,
         status: "ready",
@@ -1073,7 +1101,10 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         scheduleCodeMap: structuredClone(finalDraft.scheduleCodeMap || {}),
         activePreview: null,
         activeAttempt: attempt,
-        checkpoints: resumeSameAttempt ? state.checkpoints : {},
+        checkpoints: {
+          ...(resumeSameAttempt ? state.checkpoints : {}),
+          inspect_batch: inspectCheckpoint,
+        },
         changeSummary,
         events: [...state.events, {
           type: "operation_personnel_attempt_queued",
