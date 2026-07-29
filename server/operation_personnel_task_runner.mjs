@@ -1784,8 +1784,8 @@ export async function selectVisiblePersonnelDateRange(page, dialog, start, end) 
     }
   }
   if (await calendars.count() === 1 && typeof calendars.locator === "function") {
-    const startInput = calendars.locator('input[placeholder="开始日期"]');
-    const endInput = calendars.locator('input[placeholder="结束日期"]');
+    const startInput = calendars.locator('input[placeholder="开始日期"]:visible');
+    const endInput = calendars.locator('input[placeholder="结束日期"]:visible');
     if (await startInput.count() === 0) {
       await startInput.waitFor({ state: "visible", timeout: 10_000 });
     }
