@@ -4177,6 +4177,50 @@ test("resend does not treat the non-visible candidate basis as operation drift",
   ), []);
 });
 
+test("resend ignores derived task-sheet content when structured operation fields match", () => {
+  const shared = {
+    taskSheet: {
+      type: "分散在线监考",
+      conditions: [{ name: "人员配置", satisfied: true }],
+    },
+  };
+  assert.deepEqual(operationPersonnelConflicts(
+    {
+      ...shared,
+      taskSheet: { ...shared.taskSheet, content: "比例 1:50，人数 80" },
+    },
+    {
+      ...shared,
+      taskSheet: { ...shared.taskSheet, content: "比例 1:55，人数 70" },
+    },
+    "resend",
+  ), []);
+});
+
+test("resend still blocks task-sheet type and condition drift", () => {
+  const conflicts = operationPersonnelConflicts(
+    {
+      taskSheet: {
+        type: "分散在线监考",
+        conditions: [{ name: "人员配置", satisfied: true }],
+        content: "旧展示文本",
+      },
+    },
+    {
+      taskSheet: {
+        type: "其他任务",
+        conditions: [{ name: "人员配置", satisfied: false }],
+        content: "新展示文本",
+      },
+    },
+    "resend",
+  );
+  assert.deepEqual(conflicts.map((item) => item.path), [
+    "taskSheet.conditions.0.satisfied",
+    "taskSheet.type",
+  ]);
+});
+
 test("missing or duplicate schedule codes are rejected before comparison", () => {
   assert.throws(() => normalizeOperationPersonnelSnapshot({
     schedules: [{ start: "2026-08-22 10:00" }],

@@ -1536,6 +1536,7 @@ export function operationPersonnelConflicts(expected = {}, actual = {}, mode = "
       .filter((fieldPath) => !hidesMembershipChild(fieldPath))
       .sort();
   const fieldConflicts = paths.flatMap((fieldPath) => {
+    if (fieldPath === "taskSheet.content") return [];
     const expectedValue = expectedFields.get(fieldPath);
     const actualValue = actualFields.get(fieldPath);
     if (sameValue(expectedValue, actualValue)) return [];

@@ -690,6 +690,35 @@ test("ordinary resend reads operation state and recipient directory in one inspe
   });
 });
 
+test("known resend preview ignores stale derived task-sheet content", async () => {
+  const harness = serviceHarness({ alreadySent: true });
+  harness.task.config.operationPersonnelTask.lastOperationSnapshot.taskSheet.content = [
+    "人员落实日期 2026-07-29 ~ 2026-08-19",
+    "监考人员数量 80",
+    "监考人员比例 1:50",
+  ].join("；");
+  harness.setInspection({
+    ...inspectionFor(harness.task),
+    taskSheet: {
+      type: "分散在线监考",
+      conditions: [{ name: "人员配置", satisfied: true }],
+      content: [
+        "人员落实日期 2026-07-30 ~ 2026-08-19",
+        "监考人员数量 70",
+        "监考人员比例 1:55",
+      ].join("；"),
+    },
+  });
+
+  const preview = await harness.service.preview("task-a", owner(), {
+    monitorRatio: "1:55",
+  });
+
+  assert.equal(preview.state.status, "changes_pending");
+  assert.equal(preview.state.draft.personnel.monitorRatio, "1:55");
+  assert.equal(preview.state.draft.operationTaskSheet.content.includes("1:55"), true);
+});
+
 test("unpublished initial preview defers task sheet and directory inspection until send", async () => {
   const harness = serviceHarness({
     inspectionResult(instruction, inspection) {
