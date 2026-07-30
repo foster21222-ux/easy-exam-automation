@@ -159,6 +159,38 @@ function sourceVersion(task) {
   };
 }
 
+export function operationPersonnelConfirmedEdits(draft = {}) {
+  const dates = {};
+  for (const key of ["start", "end", "nameListDue"]) {
+    const value = text(draft.dates?.[key]);
+    if (value) dates[key] = value;
+  }
+  const personnel = {};
+  const monitorRatio = text(draft.personnel?.monitorRatio);
+  if (monitorRatio) personnel.monitorRatio = monitorRatio;
+  const monitorCount = Number(draft.personnel?.monitorCount);
+  if (Number.isSafeInteger(monitorCount) && monitorCount > 0) {
+    personnel.monitorCount = monitorCount;
+  }
+  return { dates, personnel };
+}
+
+function confirmedEditsFromTask(task = {}) {
+  const state = task.config?.operationPersonnelTask || {};
+  if (state.confirmedEdits) {
+    return operationPersonnelConfirmedEdits(state.confirmedEdits);
+  }
+  if (!state.lastSuccessfulFingerprint) return { dates: {}, personnel: {} };
+  const stored = operationPersonnelConfirmedEdits(state.draft || {});
+  const successfulTarget = state.activeAttempt?.status === "sent"
+    ? operationPersonnelConfirmedEdits(state.activeAttempt.target || {})
+    : { dates: {}, personnel: {} };
+  return {
+    dates: { ...stored.dates, ...successfulTarget.dates },
+    personnel: { ...stored.personnel, ...successfulTarget.personnel },
+  };
+}
+
 export function buildOperationPersonnelTaskDraft(task = {}, options = {}) {
   const environment = text(options.environment || task.config?.operationPersonnelTask?.environment || "test");
   const recipientsRule = RECIPIENT_RULES[environment];
@@ -188,7 +220,7 @@ export function buildOperationPersonnelTaskDraft(task = {}, options = {}) {
   const recipients = recipientsRule
     ? { ...recipientsRule, toNames: [...recipientsRule.toNames], ruleVersion: 1 }
     : { toGroup: "", toNames: [], ccGroup: "", ccCount: 0, ruleVersion: 1 };
-  return {
+  const draft = {
     schemaVersion: SCHEMA_VERSION,
     environment,
     batch: {
@@ -218,6 +250,19 @@ export function buildOperationPersonnelTaskDraft(task = {}, options = {}) {
     warnings,
     scheduleCodeMap,
   };
+  const confirmed = confirmedEditsFromTask(task);
+  draft.dates = { ...draft.dates, ...confirmed.dates };
+  draft.personnel = { ...draft.personnel, ...confirmed.personnel };
+  const datesComplete = ["start", "end", "nameListDue"].every(
+    (key) => /^\d{4}-\d{2}-\d{2}$/.test(text(draft.dates[key])),
+  ) && draft.dates.start <= draft.dates.end;
+  const monitorCountComplete = Number.isSafeInteger(Number(draft.personnel.monitorCount))
+    && Number(draft.personnel.monitorCount) > 0;
+  draft.warnings = draft.warnings.filter((item) => (
+    !(item.code === "PERSONNEL_DATES_REQUIRED" && datesComplete)
+    && !(item.code === "MONITOR_COUNT_REQUIRED" && monitorCountComplete)
+  ));
+  return draft;
 }
 
 export function operationPersonnelTaskFingerprint(draft) {

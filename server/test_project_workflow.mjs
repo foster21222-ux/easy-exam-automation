@@ -161,6 +161,52 @@ test("workflow exposes the stable personnel-task status and actions", () => {
   assert.deepEqual(workflow.steps.personnel.actions, []);
 });
 
+test("workflow uses the same confirmed personnel fields as the detail state", () => {
+  const config = buildFanweiProjectConfig({
+    fanwei,
+    model,
+    parsed: {
+      config: {
+        startTimeDisplay: "2026/08/20 09:30",
+        endTimeDisplay: "2026/08/20 11:30",
+        courses: [{ code: "C001", name: "综合能力" }],
+      },
+    },
+  });
+  const task = {
+    config: {
+      ...config,
+      operationBatchCode: "EZT260003",
+      operationPersonnelTask: {
+        status: "sent",
+        confirmedEdits: {
+          dates: {
+            start: "2026-07-30",
+            end: "2026-08-17",
+            nameListDue: "2026-08-17",
+          },
+          personnel: { monitorRatio: "1:55", monitorCount: 70 },
+        },
+      },
+    },
+    sessions: [],
+  };
+  const sentDraft = buildOperationPersonnelTaskDraft(task);
+  task.config.operationPersonnelTask.lastSuccessfulFingerprint =
+    operationPersonnelTaskFingerprint(sentDraft);
+
+  const workflow = buildProjectWorkflow(task, { warnings: [] });
+
+  assert.deepEqual(workflow.personnelDraft.dates, {
+    start: "2026-07-30",
+    end: "2026-08-17",
+    nameListDue: "2026-08-17",
+  });
+  assert.equal(workflow.personnelDraft.personnel.monitorRatio, "1:55");
+  assert.equal(workflow.personnelDraft.personnel.monitorCount, 70);
+  assert.equal(workflow.steps.personnel.status, "sent");
+});
+
 test("workflow includes synchronized managed schedules when deciding whether personnel content changed", () => {
   const task = {
     config: {

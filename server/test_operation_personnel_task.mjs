@@ -141,6 +141,77 @@ test("does not prefill invalid past personnel dates", () => {
   assert.ok(draft.warnings.some((item) => item.code === "PERSONNEL_DATES_REQUIRED"));
 });
 
+test("keeps confirmed personnel fields while easy-exam schedules continue to refresh", () => {
+  const task = structuredClone(baseTask);
+  task.config.operationPersonnelTask = {
+    status: "sent",
+    lastSuccessfulFingerprint: "sent-fingerprint",
+    confirmedEdits: {
+      dates: {
+        start: "2026-07-30",
+        end: "2026-08-19",
+        nameListDue: "2026-08-19",
+      },
+      personnel: {
+        monitorRatio: "1:55",
+        monitorCount: 70,
+      },
+    },
+  };
+  task.config.examRequirements[0].config.startTimeDisplay = "2026/08/23 09:00";
+  task.config.examRequirements[0].config.endTimeDisplay = "2026/08/23 11:00";
+
+  const draft = buildOperationPersonnelTaskDraft(task, {
+    environment: "test",
+    now: "2026-07-31T02:00:00.000Z",
+  });
+
+  assert.deepEqual(draft.dates, {
+    start: "2026-07-30",
+    end: "2026-08-19",
+    nameListDue: "2026-08-19",
+  });
+  assert.equal(draft.personnel.monitorRatio, "1:55");
+  assert.equal(draft.personnel.monitorCount, 70);
+  assert.equal(draft.schedules[0].start, "2026/08/23 09:00");
+  assert.equal(draft.schedules[0].end, "2026/08/23 11:00");
+});
+
+test("recovers confirmed personnel fields from the successful attempt target", () => {
+  const task = structuredClone(baseTask);
+  task.config.operationPersonnelTask = {
+    status: "sent",
+    lastSuccessfulFingerprint: "sent-fingerprint",
+    activeAttempt: {
+      status: "sent",
+      target: {
+        dates: {
+          start: "2026-07-30",
+          end: "2026-08-19",
+          nameListDue: "2026-08-19",
+        },
+        personnel: {
+          monitorRatio: "1:55",
+          monitorCount: 70,
+        },
+      },
+    },
+  };
+
+  const draft = buildOperationPersonnelTaskDraft(task, {
+    environment: "test",
+    now: "2026-07-31T02:00:00.000Z",
+  });
+
+  assert.deepEqual(draft.dates, {
+    start: "2026-07-30",
+    end: "2026-08-19",
+    nameListDue: "2026-08-19",
+  });
+  assert.equal(draft.personnel.monitorRatio, "1:55");
+  assert.equal(draft.personnel.monitorCount, 70);
+});
+
 test("uses isolated fixed recipient rules", () => {
   const testDraft = buildOperationPersonnelTaskDraft(baseTask, {
     environment: "test",
