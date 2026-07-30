@@ -1036,6 +1036,33 @@ test("operation batch confirmation is disabled without differences and posts onl
   assert.equal(confirmSource.includes("desiredSnapshot"), false);
 });
 
+test("operation batch update dialog changes cancel to close only after completion", () => {
+  const operationBatchUpdateConfirmCancelBtn = { textContent: "" };
+  const renderOperationBatchUpdateDialogAction = compileInlineFunction(
+    "      function renderOperationBatchUpdateDialogAction(attempt = {}) {",
+    "\n      function renderOperationBatchUpdateAttempt",
+    { operationBatchUpdateConfirmCancelBtn },
+  );
+
+  renderOperationBatchUpdateDialogAction({ completed: false });
+  assert.equal(operationBatchUpdateConfirmCancelBtn.textContent, "取消");
+
+  renderOperationBatchUpdateDialogAction({ completed: true });
+  assert.equal(operationBatchUpdateConfirmCancelBtn.textContent, "关闭");
+
+  const previewSource = sourceBetween(
+    "      async function previewOperationBatchUpdate() {",
+    "\n      async function confirmOperationBatchUpdate",
+  );
+  assert.ok(previewSource.includes("renderOperationBatchUpdateDialogAction({ completed: false })"));
+
+  const attemptSource = sourceBetween(
+    "      function renderOperationBatchUpdateAttempt(attempt = {}) {",
+    "\n      function scheduleOperationBatchUpdatePoll",
+  );
+  assert.ok(attemptSource.includes("renderOperationBatchUpdateDialogAction(attempt)"));
+});
+
 test("operation batch terminal state preserves fresh context and exact conflict evidence", () => {
   const operationBatchUpdateTerminalState = compileInlineFunction(
     "      function operationBatchUpdateTerminalState(previous = {}, result = {}) {",

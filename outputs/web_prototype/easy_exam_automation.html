@@ -9728,6 +9728,7 @@
           operationBatchUpdateProgress.textContent = operationBatchUpdateConfirmAllowed(result)
             ? "预检完成，请核对服务端返回的全部变化。"
             : "服务端预检未发现实际差异，不能提交修改。";
+          renderOperationBatchUpdateDialogAction({ completed: false });
           closeProjectDialog(operationDetailModal);
           if (!operationBatchUpdateConfirmDialog.open) operationBatchUpdateConfirmDialog.showModal();
           return result;
@@ -9799,7 +9800,12 @@
         }
       }
 
+      function renderOperationBatchUpdateDialogAction(attempt = {}) {
+        operationBatchUpdateConfirmCancelBtn.textContent = attempt.completed ? "关闭" : "取消";
+      }
+
       function renderOperationBatchUpdateAttempt(attempt = {}) {
+        renderOperationBatchUpdateDialogAction(attempt);
         const copy = operationBatchUpdateAttemptCopy(attempt);
         operationBatchUpdateProgress.textContent = attempt.error?.message
           || copy
