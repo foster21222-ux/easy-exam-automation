@@ -6,6 +6,7 @@ import {
   launchOperationBatchContext,
   openExactOperationBatchCard,
   operationBatchDetailIdentity,
+  operationDateTitle,
   operationBatchExactCodeLocation,
   runWithOperationBatchContext,
   searchOperationBatchListPages,
@@ -497,6 +498,45 @@ async function visibleModal(page, title) {
   );
 }
 
+export async function fillOperationBatchOverviewDateRange(page, start, end) {
+  const modal = await visibleModal(page, "基本信息");
+  const dateControl = await uniqueControl(
+    modal.locator("#exam_datetime"),
+    "考试日期控件",
+  );
+  await dateControl.click();
+  for (const [label, value] of [["开始日期", start], ["结束日期", end]]) {
+    const title = operationDateTitle(value);
+    const cell = await uniqueControl(
+      page.locator(
+        `td[title="${title}"]:not(.ant-calendar-last-month-cell):not(.ant-calendar-next-month-btn-day):visible .ant-calendar-date`,
+      ),
+      `${label}日期单元格`,
+    );
+    await cell.click();
+  }
+  const picker = page.locator(".ant-calendar-picker-container:visible");
+  if (await picker.count()) {
+    await picker.first().waitFor({ state: "hidden", timeout: 10000 });
+  }
+  const startInput = await uniqueControl(
+    dateControl.locator('input[placeholder="开始日期"]'),
+    "开始日期输入框",
+  );
+  const endInput = await uniqueControl(
+    dateControl.locator('input[placeholder="结束日期"]'),
+    "结束日期输入框",
+  );
+  const actualStart = text(await startInput.inputValue());
+  const actualEnd = text(await endInput.inputValue());
+  if (actualStart !== text(start) || actualEnd !== text(end)) {
+    throw errorWithCode(
+      `考试日期范围回显不一致：${actualStart} ~ ${actualEnd}`,
+      "OPERATION_BATCH_UPDATE_CONFLICT",
+    );
+  }
+}
+
 async function editScheduleTable(page) {
   const modal = await visibleModal(page, "易考——考试日程");
   const matches = [];
@@ -748,12 +788,8 @@ const visiblePageAdapter = {
       await (await managedFormControl(page, "批次名称")).fill(desired.batchName);
     }
     if (changed.has("examStartDate") || changed.has("examEndDate")) {
-      const item = await formItemByLabel(page, "考试日期");
-      await fillRangeInputs(
+      await fillOperationBatchOverviewDateRange(
         page,
-        item,
-        "开始日期",
-        "结束日期",
         desired.examStartDate,
         desired.examEndDate,
       );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  fillOperationBatchOverviewDateRange,
   fillRangeInputs,
   inspectOperationBatchManagedSnapshot,
   openVisibleEztestSchedulePage,
@@ -12,6 +13,93 @@ import {
   runOperationBatchScheduleInitialization,
   visibleButtonByExactText,
 } from "./operation_batch_update_runner.mjs";
+
+test("overview date update scopes the stable exam_datetime control to the visible basic-info modal", async () => {
+  const events = [];
+  let selected = 0;
+  let startValue = "2026-08-22";
+  let endValue = "2026-08-22";
+  const input = (side) => ({
+    count: async () => 1,
+    first() { return this; },
+    inputValue: async () => (side === "start" ? startValue : endValue),
+  });
+  const dateControl = {
+    count: async () => 1,
+    first() { return this; },
+    click: async () => events.push("date-control:click"),
+    locator(selector) {
+      const placeholder = selector.match(/placeholder="([^"]+)"/)?.[1];
+      if (placeholder === "开始日期") return input("start");
+      if (placeholder === "结束日期") return input("end");
+      throw new Error(`unexpected date control selector: ${selector}`);
+    },
+  };
+  const dateCell = {
+    count: async () => 1,
+    first() { return this; },
+    async click() {
+      selected += 1;
+      events.push(`date-cell:${selected}:click`);
+      if (selected === 2) {
+        startValue = "2026-08-23";
+        endValue = "2026-08-23";
+      }
+    },
+  };
+  const picker = {
+    count: async () => 1,
+    first() {
+      return {
+        waitFor: async (options) => events.push(["picker:wait", options]),
+      };
+    },
+  };
+  const title = { count: async () => 1 };
+  const modal = {
+    count: async () => 1,
+    first() { return this; },
+    locator(selector) {
+      assert.equal(selector, "#exam_datetime");
+      return dateControl;
+    },
+  };
+  const page = {
+    getByText(value, options) {
+      assert.equal(value, "基本信息");
+      assert.deepEqual(options, { exact: true });
+      return title;
+    },
+    locator(selector) {
+      if (selector === ".ant-modal:visible") {
+        return {
+          filter(options) {
+            assert.strictEqual(options.has, title);
+            return modal;
+          },
+        };
+      }
+      if (selector === ".ant-calendar-picker-container:visible") return picker;
+      assert.match(selector, /td\[title="2026年8月23日"\]/);
+      assert.match(selector, /not\(\.ant-calendar-last-month-cell\)/);
+      assert.match(selector, /not\(\.ant-calendar-next-month-btn-day\)/);
+      return dateCell;
+    },
+  };
+
+  await fillOperationBatchOverviewDateRange(
+    page,
+    "2026-08-23",
+    "2026-08-23",
+  );
+
+  assert.deepEqual(events, [
+    "date-control:click",
+    "date-cell:1:click",
+    "date-cell:2:click",
+    ["picker:wait", { state: "hidden", timeout: 10000 }],
+  ]);
+});
 
 test("schedule page accepts duplicate title text only when one visible collapse section owns it", async () => {
   const title = { count: async () => 2 };
