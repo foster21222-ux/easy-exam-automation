@@ -2827,7 +2827,8 @@ export function findAttemptSendRecord(records = [], attempt = {}) {
   return normalizeSendRecords(records).find((record) => {
     if (record.type !== expectedType) return false;
     const sentAt = Date.parse(record.sentAt);
-    return Number.isFinite(sentAt) && sentAt > startedAt;
+    return Number.isFinite(sentAt)
+      && Math.floor(sentAt / 1000) >= Math.floor(startedAt / 1000);
   }) || null;
 }
 

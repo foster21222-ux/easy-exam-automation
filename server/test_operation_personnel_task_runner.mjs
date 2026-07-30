@@ -3348,6 +3348,15 @@ test("resend only accepts a record later than attempt start", () => {
   }).sentAt, "2026-07-23T02:00:01.000Z");
 });
 
+test("send record shown only to the second matches a click later in the same second", () => {
+  assert.equal(operationPersonnelRunner.findAttemptSendRecord([
+    { type: "再次发送", sentAt: "2026-07-30 16:17:25" },
+  ], {
+    kind: "resend",
+    startedAt: "2026-07-30T08:17:25.081Z",
+  }).sentAt, "2026-07-30 16:17:25");
+});
+
 test("send record matching only accepts a fresh top-right record for both attempt kinds", () => {
   const startedAt = "2026-07-23T02:00:00.000Z";
   assert.equal(operationPersonnelRunner.findAttemptSendRecord([
