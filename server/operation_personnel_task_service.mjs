@@ -4,6 +4,7 @@ import {
   buildOperationPersonnelTaskDraft,
   buildOperationPersonnelTaskStatus,
   diffOperationPersonnelTaskDrafts,
+  operationPersonnelConfirmedEdits,
   operationPersonnelTaskFingerprint,
 } from "./operation_personnel_task.mjs";
 import {
@@ -1098,6 +1099,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         draft: finalDraft,
         draftVersion: finalDraftVersion,
         sourceFingerprint: draftSourceFingerprint(finalDraft),
+        confirmedEdits: operationPersonnelConfirmedEdits(finalDraft),
         scheduleCodeMap: structuredClone(finalDraft.scheduleCodeMap || {}),
         activePreview: null,
         activeAttempt: attempt,
@@ -1195,6 +1197,7 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
         status: "sent",
         lastSuccessfulFingerprint: freshAttempt.fingerprint,
         lastOperationSnapshot: operationSnapshot,
+        confirmedEdits: operationPersonnelConfirmedEdits(freshAttempt.target || freshState.draft),
         activeAttempt: {
           ...freshAttempt,
           status: "sent",

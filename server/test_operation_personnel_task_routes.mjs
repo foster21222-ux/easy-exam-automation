@@ -594,6 +594,17 @@ test("personnel send applies final edits and ignores forged read-only fields", a
       const persisted = runTaskState(runtimeDir, "get", { taskId: "task-a" });
       const state = persisted.config.operationPersonnelTask;
       assert.equal(state.draft.dates.start, "2026-07-28");
+      assert.deepEqual(state.confirmedEdits, {
+        dates: {
+          start: "2026-07-28",
+          end: "2026-08-19",
+          nameListDue: "2026-08-19",
+        },
+        personnel: {
+          monitorRatio: "1:50",
+          monitorCount: 80,
+        },
+      });
       assert.equal(state.activeAttempt.target.dates.start, "2026-07-28");
       assert.equal(state.activeAttempt.target.personnel.monitorCount, 80);
       assert.equal(state.activeAttempt.target.schedules.length, 1);

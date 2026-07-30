@@ -1334,9 +1334,61 @@ test("send applies final edits once inside the task lock", async () => {
   assert.equal(queued.statusCode, 202);
   assert.equal(state.draftVersion, preview.draftVersion + 1);
   assert.equal(state.draft.dates.start, "2026-07-28");
+  assert.deepEqual(state.confirmedEdits, {
+    dates: {
+      start: "2026-07-28",
+      end: "2026-08-19",
+      nameListDue: "2026-08-19",
+    },
+    personnel: {
+      monitorRatio: "1:50",
+      monitorCount: 80,
+    },
+  });
   assert.equal(state.activeAttempt.draftVersion, state.draftVersion);
   assert.equal(state.activeAttempt.target.dates.start, "2026-07-28");
   assert.equal(state.activeAttempt.target.personnel.monitorCount, 80);
+});
+
+test("successful send keeps confirmed personnel fields on later reads and source changes", async () => {
+  const harness = serviceHarness();
+  const preview = await harness.service.preview("task-a", ADMIN);
+  await harness.service.send("task-a", ADMIN, {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "",
+    edits: {
+      dates: {
+        start: "2026-07-28",
+        end: "2026-08-19",
+        nameListDue: "2026-08-19",
+      },
+      personnel: { monitorCount: "70", monitorRatio: "1:55" },
+    },
+  });
+  await harness.runDeferred();
+  harness.advance(24 * 60 * 60 * 1000);
+
+  const unchanged = await harness.service.get("task-a", ADMIN);
+  assert.equal(unchanged.state.status, "sent");
+  assert.equal(unchanged.state.draft.dates.start, "2026-07-28");
+  assert.equal(unchanged.state.draft.personnel.monitorRatio, "1:55");
+  assert.equal(unchanged.state.draft.personnel.monitorCount, 70);
+
+  harness.task.config.examRequirement.version += 1;
+  harness.task.config.examRequirement.config.startTimeDisplay = "2026/08/23 09:00";
+  harness.task.config.examRequirement.config.endTimeDisplay = "2026/08/23 11:00";
+  harness.setSynchronizedManagedSchedule({
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  });
+  const changed = await harness.service.get("task-a", ADMIN);
+
+  assert.equal(changed.state.status, "changes_pending");
+  assert.equal(changed.state.draft.schedules[0].start, "2026/08/23 09:00");
+  assert.equal(changed.state.draft.dates.start, "2026-07-28");
+  assert.equal(changed.state.draft.personnel.monitorRatio, "1:55");
+  assert.equal(changed.state.draft.personnel.monitorCount, 70);
 });
 
 test("send rejects invalid final edits before queueing an attempt", async () => {
@@ -1885,6 +1937,17 @@ test("recheck reconciles a newly visible record without another send or attempt 
   assert.equal(result.state.sendHistory[0].attemptId, "attempt-orphan");
   assert.equal(result.state.activeAttempt.attemptId, "attempt-orphan");
   assert.equal(result.state.activeAttempt.error, null);
+  assert.deepEqual(result.state.confirmedEdits, {
+    dates: {
+      start: "2026-07-23",
+      end: "2026-08-19",
+      nameListDue: "2026-08-19",
+    },
+    personnel: {
+      monitorRatio: "1:50",
+      monitorCount: 2,
+    },
+  });
   assert.deepEqual(harness.runnerCalls, ["recheck"]);
 });
 
