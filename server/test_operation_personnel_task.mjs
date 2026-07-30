@@ -299,11 +299,17 @@ test("managed schedule changes appear in the personnel draft change summary", ()
   assert.equal(changes.summary, "批次受管日程：已更新");
 });
 
-test("does not expose a resend action for the current successful fingerprint", () => {
+test("exposes deliberate adjustment without treating sent content as changed", () => {
   const draft = buildOperationPersonnelTaskDraft(baseTask, { environment: "test", now: "2026-07-23T02:00:00.000Z" });
   const task = structuredClone(baseTask);
   task.config.operationPersonnelTask = { lastSuccessfulFingerprint: operationPersonnelTaskFingerprint(draft) };
-  assert.deepEqual(buildOperationPersonnelTaskStatus(task, draft), { status: "sent", actions: [] });
+  assert.deepEqual(buildOperationPersonnelTaskStatus(task, draft), {
+    status: "sent",
+    actions: [{
+      id: "preview_adjust",
+      label: "调整人员任务并重新发送",
+    }],
+  });
 });
 
 test("uses the persisted changes-pending state before deriving a new ready state", () => {
@@ -316,11 +322,17 @@ test("uses the persisted changes-pending state before deriving a new ready state
   });
 });
 
-test("keeps an explicitly persisted sent status non-repeatable", () => {
+test("keeps an explicitly persisted sent status adjustable", () => {
   const draft = buildOperationPersonnelTaskDraft(baseTask, { environment: "test", now: "2026-07-23T02:00:00.000Z" });
   const task = structuredClone(baseTask);
   task.config.operationPersonnelTask = { status: "sent" };
-  assert.deepEqual(buildOperationPersonnelTaskStatus(task, draft), { status: "sent", actions: [] });
+  assert.deepEqual(buildOperationPersonnelTaskStatus(task, draft), {
+    status: "sent",
+    actions: [{
+      id: "preview_adjust",
+      label: "调整人员任务并重新发送",
+    }],
+  });
 });
 
 test("blocks every confirmed high-end supplement indication", () => {

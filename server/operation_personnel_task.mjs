@@ -367,10 +367,14 @@ export function buildOperationPersonnelTaskStatus(task = {}, draft = {}) {
   }
   if (!operationBatchCodeIsValid(draft.batch?.code)) return { status: "waiting_batch", actions: [] };
   const fingerprint = operationPersonnelTaskFingerprint(draft);
-  if (state.lastSuccessfulFingerprint && state.lastSuccessfulFingerprint === fingerprint) return { status: "sent", actions: [] };
+  if (state.lastSuccessfulFingerprint && state.lastSuccessfulFingerprint === fingerprint) {
+    return { status: "sent", actions: actions("preview_adjust", "调整人员任务并重新发送") };
+  }
   if (state.lastSuccessfulFingerprint) return { status: "changes_pending", actions: actions("preview_resend", "检查变更并重新发送") };
   if (persistent === "changes_pending") return { status: "changes_pending", actions: actions("preview_resend", "检查变更并重新发送") };
-  if (persistent === "sent") return { status: "sent", actions: [] };
+  if (persistent === "sent") {
+    return { status: "sent", actions: actions("preview_adjust", "调整人员任务并重新发送") };
+  }
   if ((draft.warnings || []).some((item) => item.code === "UNSUPPORTED_PERSONNEL_TASK")) return { status: "unsupported", actions: [] };
   if (state.pendingChange === true || task.config?.pendingChange === true) return { status: "blocked_pending_change", actions: [] };
   if ((draft.warnings || []).length) return { status: "needs_review", actions: actions("preview", "检查并发送人员任务单") };

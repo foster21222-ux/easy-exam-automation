@@ -1188,7 +1188,7 @@ test("personnel task labels and visible countdown follow server state", () => {
 
   assert.equal(
     operationPersonnelActionLabel({ status: "sent", canResend: false }),
-    "内容未变化，不允许重复发送",
+    "调整人员任务并重新发送",
   );
   assert.equal(
     operationPersonnelActionLabel({ status: "changes_pending" }),
@@ -1831,14 +1831,14 @@ test("personnel send payload contains the server preview binding, resend summary
   );
 });
 
-test("personnel state disables unchanged resend and only exposes recheck for unknown result", () => {
+test("personnel state allows deliberate adjustment and only exposes recheck for unknown result", () => {
   const operationPersonnelActionState = compileInlineFunction(
     "      function operationPersonnelActionState(state = {}) {",
     "\n      function operationPersonnelActionLabel",
   );
   assert.deepEqual(operationPersonnelActionState({ status: "sent" }), {
     action: "preview",
-    disabled: true,
+    disabled: false,
     showRecheck: false,
   });
   assert.deepEqual(operationPersonnelActionState({ status: "result_unknown" }), {

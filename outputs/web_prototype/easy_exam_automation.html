@@ -9866,7 +9866,7 @@
           return { action: "recheck", disabled: true, showRecheck: true };
         }
         if (state.status === "sent") {
-          return { action: "preview", disabled: true, showRecheck: false };
+          return { action: "preview", disabled: false, showRecheck: false };
         }
         if (["unsupported", "waiting_batch", "blocked_pending_change", "operation_conflict"].includes(state.status)) {
           return { action: "preview", disabled: true, showRecheck: false };
@@ -9886,8 +9886,7 @@
         if (state.status === "waiting_batch") return "等待运控批次";
         if (state.status === "blocked_pending_change") return "存在待审核需求变更";
         if (state.status === "operation_conflict") return "运控与平台不一致，请人工处理";
-        if (state.status === "sent" && state.canResend === false) return "内容未变化，不允许重复发送";
-        if (state.status === "sent") return "内容未变化，不允许重复发送";
+        if (state.status === "sent") return "调整人员任务并重新发送";
         return "检查并发送人员任务单";
       }
 

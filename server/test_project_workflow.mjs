@@ -158,7 +158,10 @@ test("workflow exposes the stable personnel-task status and actions", () => {
   const workflow = buildProjectWorkflow(task, { warnings: [] });
 
   assert.equal(workflow.steps.personnel.status, "sent");
-  assert.deepEqual(workflow.steps.personnel.actions, []);
+  assert.deepEqual(workflow.steps.personnel.actions, [{
+    id: "preview_adjust",
+    label: "调整人员任务并重新发送",
+  }]);
 });
 
 test("workflow uses the same confirmed personnel fields as the detail state", () => {
@@ -263,7 +266,13 @@ test("workflow includes synchronized managed schedules when deciding whether per
     operationPersonnelTaskFingerprint(workflow.personnelDraft),
     task.config.operationPersonnelTask.lastSuccessfulFingerprint,
   );
-  assert.deepEqual(workflow.steps.personnel, { status: "sent", actions: [] });
+  assert.deepEqual(workflow.steps.personnel, {
+    status: "sent",
+    actions: [{
+      id: "preview_adjust",
+      label: "调整人员任务并重新发送",
+    }],
+  });
 });
 
 test("workflow keeps no-personnel arrangements skipped", () => {
