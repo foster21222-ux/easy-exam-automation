@@ -683,7 +683,7 @@ export async function advanceOperationBatchListPage(
   }
   const rows = await performOperationBatchTableAction(
     page,
-    () => control.click(),
+    () => control.evaluate((element) => element.click()),
     options,
     { batchListUrl },
   );

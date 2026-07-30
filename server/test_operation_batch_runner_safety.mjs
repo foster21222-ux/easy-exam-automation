@@ -364,6 +364,7 @@ test("card detail opening blocks duplicate exact batch codes before clicking", a
 
 function fakeBatchListPage(pages, {
   advancePage = true,
+  detachDuringPlaywrightClick = false,
   initialPageIndex = 0,
   loadingVisible = true,
   malformedPagination = false,
@@ -433,6 +434,18 @@ function fakeBatchListPage(pages, {
             async click() {
               events.push("next:click");
               if (advancePage) pageIndex += 1;
+              if (detachDuringPlaywrightClick) {
+                throw new Error("element was detached from the DOM");
+              }
+            },
+            async evaluate(callback) {
+              events.push("next:evaluate");
+              return callback({
+                click() {
+                  events.push("next:dom-click");
+                  if (advancePage) pageIndex += 1;
+                },
+              });
             },
           };
         },
@@ -1000,7 +1013,25 @@ test("batch lookup collects every Ant pagination page before resolving", async (
   );
 
   assert.equal(result.operationBatchCode, "QTT260007");
-  assert.equal(page.events.filter((event) => event === "next:click").length, 1);
+  assert.equal(page.events.filter((event) => event === "next:dom-click").length, 1);
+  assert.ok(page.events.includes("rows:2"));
+});
+
+test("batch lookup survives Ant replacing the next-page node during activation", async () => {
+  const page = fakeBatchListPage([
+    [["QTT260007", "目标项目_2026年8月"]],
+    [["QTT260008", "其他项目_2026年8月"]],
+  ], { detachDuringPlaywrightClick: true });
+
+  const result = await findCreatedBatchFromList(
+    page,
+    "http://operation/batch/batchList",
+    "目标项目_2026年8月",
+    { tableStablePollMs: 0 },
+  );
+
+  assert.equal(result.operationBatchCode, "QTT260007");
+  assert.equal(page.events.filter((event) => event === "next:dom-click").length, 1);
   assert.ok(page.events.includes("rows:2"));
 });
 
@@ -1074,7 +1105,7 @@ test("batch lookup rejects immediately when the Ant active page does not advance
     ),
     (error) => error?.code === OPERATION_BATCH_RECONCILIATION_REQUIRED && /未推进/.test(error.message),
   );
-  assert.equal(page.events.filter((event) => event === "next:click").length, 1);
+  assert.equal(page.events.filter((event) => event === "next:dom-click").length, 1);
 });
 
 test("batch lookup rejects a terminal active page other than page one", async () => {
