@@ -655,7 +655,7 @@ test("operation batch updates expose configuration-console states and exactly on
 test("operation batch update state helpers keep create states separate from update actions", () => {
   const operationBatchUpdateStatus = compileInlineFunction(
     "      function operationBatchUpdateStatus(state = {}) {",
-    "\n      function operationBatchUpdateActionState",
+    "\n      function operationBatchUpdateStateFromWorkflow",
   );
   const operationBatchUpdateActionState = compileInlineFunction(
     "      function operationBatchUpdateActionState(state = {}) {",
@@ -761,6 +761,14 @@ test("operation batch update state helpers keep create states separate from upda
     /[&<>"']/g,
     (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
   );
+  const renderOperationBatchUpdatePreview = compileInlineFunction(
+    "      function renderOperationBatchUpdatePreview(preview = {}) {",
+    "\n      function operationBatchUpdateConfirmAllowed",
+    {
+      safeText,
+      operationBatchUpdateDisplayValue,
+    },
+  );
   const renderOperationBatchUpdateState = compileInlineFunction(
     "      function renderOperationBatchUpdateState(state = {}) {",
     "\n      function invalidateOperationBatchUpdateRequests",
@@ -772,6 +780,7 @@ test("operation batch update state helpers keep create states separate from upda
       operationBatchUpdateDisplayValue,
       operationBatchUpdateBtn,
       operationBatchUpdateStateText,
+      renderOperationBatchUpdatePreview,
       safeText,
     },
   );
@@ -783,6 +792,20 @@ test("operation batch update state helpers keep create states separate from upda
   assert.equal(operationBatchUpdateBtn.hidden, false);
   assert.equal(operationBatchUpdateBtn.disabled, false);
   assert.equal(operationBatchUpdateBtn.textContent, "修改批次信息");
+
+  renderOperationBatchUpdateState({
+    pageStatus: "update_available",
+    state: {
+      status: "update_available",
+      changes: [{
+        path: "examStartDate",
+        label: "概况考试开始日期",
+        before: "2026-08-22",
+        after: "2026-08-23",
+      }],
+    },
+  });
+  assert.match(operationBatchUpdateStateText.innerHTML, /2026-08-22 → 2026-08-23/);
 
   renderOperationBatchUpdateState({
     pageStatus: "success",
@@ -853,7 +876,7 @@ test("operation batch preview renders only escaped server changes by overview an
 test("operation batch conflict objects render exact stable values with safe escaping", () => {
   const operationBatchUpdateStatus = compileInlineFunction(
     "      function operationBatchUpdateStatus(state = {}) {",
-    "\n      function operationBatchUpdateActionState",
+    "\n      function operationBatchUpdateStateFromWorkflow",
   );
   const operationBatchUpdateActionState = compileInlineFunction(
     "      function operationBatchUpdateActionState(state = {}) {",
@@ -2123,6 +2146,139 @@ test("opening personnel detail refreshes its state instead of rendering a stale 
   assert.equal(operationPersonnelTaskActionBtn.disabled, true);
   assert.equal(panels[0].hidden, false);
   assert.equal(panels[1].hidden, true);
+});
+
+test("opening batch detail immediately exposes workflow update state and refreshes exact state", async () => {
+  const events = [];
+  const panels = [
+    { dataset: { operationDetail: "batch" }, hidden: true },
+    { dataset: { operationDetail: "personnel" }, hidden: true },
+  ];
+  const buttons = [
+    { dataset: { workflowStep: "batch" }, setAttribute: () => {} },
+  ];
+  const action = { hidden: true };
+  const openOperationDetail = compileInlineFunction(
+    "      async function openOperationDetail(stepKey, trigger = null) {",
+    "\n      const requirementTimeRangeFields",
+    {
+      projectWorkflowStepMeta: [
+        ["batch", "建批次", "泛微", "生成并回填运营批次代码"],
+      ],
+      operationDetailTitle: { textContent: "" },
+      operationDetailNote: { textContent: "" },
+      operationDetailModal: { querySelectorAll: () => panels },
+      projectWorkflowSteps: { querySelectorAll: () => buttons },
+      operationPersonnelTaskState: { textContent: "" },
+      operationPersonnelTaskActionBtn: { disabled: false },
+      showProjectDialog: () => events.push("show"),
+      operationBatchUpdateStateFromWorkflow: (workflow) => ({
+        pageStatus: workflow.steps.batch.status,
+        state: {
+          status: workflow.steps.batch.status,
+          changes: workflow.steps.batch.managedChanges,
+        },
+      }),
+      renderOperationBatchUpdateState: (state) => {
+        action.hidden = state.state?.status !== "update_available";
+        events.push(`render:${state.state?.status || state.pageStatus}`);
+      },
+      loadOperationBatchUpdateState: async () => events.push("load"),
+      loadOperationPersonnelTaskState: async () => events.push("personnel-load"),
+      taskViewState: {
+        currentProject: { taskId: "task-a" },
+        currentProjectWorkflow: {
+          steps: {
+            batch: {
+              status: "update_available",
+              managedChanges: [{ path: "examStartDate" }],
+            },
+          },
+        },
+        operationBatchUpdateRequestToken: 3,
+        operationPersonnelRequestToken: 4,
+      },
+    },
+  );
+
+  await openOperationDetail("batch", {});
+
+  assert.deepEqual(events, ["render:update_available", "show", "load"]);
+  assert.equal(action.hidden, false);
+  assert.equal(panels[0].hidden, false);
+  assert.equal(panels[1].hidden, true);
+});
+
+test("batch detail keeps its workflow update action when exact state refresh fails", async () => {
+  const events = [];
+  let renderedState = {};
+  const openOperationDetail = compileInlineFunction(
+    "      async function openOperationDetail(stepKey, trigger = null) {",
+    "\n      const requirementTimeRangeFields",
+    {
+      projectWorkflowStepMeta: [
+        ["batch", "建批次", "泛微", "生成并回填运营批次代码"],
+      ],
+      operationDetailTitle: { textContent: "" },
+      operationDetailNote: { textContent: "" },
+      operationDetailModal: {
+        querySelectorAll: () => [
+          { dataset: { operationDetail: "batch" }, hidden: true },
+        ],
+      },
+      projectWorkflowSteps: {
+        querySelectorAll: () => [
+          { dataset: { workflowStep: "batch" }, setAttribute: () => {} },
+        ],
+      },
+      operationPersonnelTaskState: { textContent: "" },
+      operationPersonnelTaskActionBtn: { disabled: false },
+      showProjectDialog: () => events.push("show"),
+      operationBatchUpdateStateFromWorkflow: (workflow) => ({
+        pageStatus: workflow.steps.batch.status,
+        state: {
+          status: workflow.steps.batch.status,
+          changes: workflow.steps.batch.managedChanges,
+        },
+      }),
+      renderOperationBatchUpdateState: (state) => {
+        renderedState = state;
+        events.push(`render:${state.state?.status || state.pageStatus}`);
+      },
+      loadOperationBatchUpdateState: async () => {
+        events.push("load");
+        throw new Error("状态接口暂不可用");
+      },
+      loadOperationPersonnelTaskState: async () => {},
+      taskViewState: {
+        currentProject: { taskId: "task-a" },
+        currentProjectWorkflow: {
+          steps: {
+            batch: {
+              status: "update_available",
+              managedChanges: [{ path: "examStartDate" }],
+            },
+          },
+        },
+        operationBatchUpdateRequestToken: 3,
+        operationPersonnelRequestToken: 4,
+      },
+    },
+  );
+
+  await openOperationDetail("batch", {});
+
+  assert.deepEqual(events, [
+    "render:update_available",
+    "show",
+    "load",
+    "render:update_available",
+  ]);
+  assert.equal(renderedState.state.status, "update_available");
+  assert.equal(
+    renderedState.errorMessage,
+    "读取批次修改状态失败：状态接口暂不可用",
+  );
 });
 
 test("personnel UI connects the five service APIs without an environment override", () => {

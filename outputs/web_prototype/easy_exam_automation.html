@@ -9392,6 +9392,17 @@
         return String(state.state?.status || pageStatus || "");
       }
 
+      function operationBatchUpdateStateFromWorkflow(workflow = {}) {
+        const batch = workflow.steps?.batch || {};
+        return {
+          pageStatus: batch.status || "",
+          state: {
+            status: batch.status || "",
+            changes: Array.isArray(batch.managedChanges) ? batch.managedChanges : [],
+          },
+        };
+      }
+
       function operationBatchUpdateActionState(state = {}) {
         const status = operationBatchUpdateStatus(state);
         if (status === "update_available") {
@@ -9568,6 +9579,12 @@
         const missingCopy = operationBatchUpdateMissingCopy(state.missing || state.state?.missing || []);
         const attemptCopy = operationBatchUpdateAttemptCopy(state.attempt || {});
         const differences = Array.isArray(state.differingFields) ? state.differingFields : [];
+        const changes = Array.isArray(state.changes)
+          ? state.changes
+          : Array.isArray(state.state?.changes) ? state.state.changes : [];
+        const changesHtml = status === "update_available" && changes.length
+          ? `<div class="operation-batch-update-differences">${renderOperationBatchUpdatePreview({ changes })}</div>`
+          : "";
         const differenceHtml = differences.length
           ? `<ul>${differences.map((item) => {
             const expected = item?.expected ?? item?.before ?? "";
@@ -9579,6 +9596,7 @@
           missingCopy ? `<div>缺失要求：${safeText(missingCopy)}</div>` : "",
           attemptCopy ? `<div>${safeText(attemptCopy)}</div>` : "",
           state.errorMessage ? `<div>服务端提示：${safeText(state.errorMessage)}</div>` : "",
+          changesHtml,
           differenceHtml,
         ].filter(Boolean).join("");
         operationBatchUpdateStateText.hidden = false;
@@ -10467,7 +10485,28 @@
           operationPersonnelTaskState.textContent = "正在读取最新人员任务状态。";
           operationPersonnelTaskActionBtn.disabled = true;
         }
+        if (stepKey === "batch") {
+          renderOperationBatchUpdateState(
+            operationBatchUpdateStateFromWorkflow(taskViewState.currentProjectWorkflow),
+          );
+        }
         showProjectDialog(operationDetailModal, trigger);
+        if (stepKey === "batch") {
+          try {
+            await loadOperationBatchUpdateState(
+              taskViewState.currentProject,
+              taskViewState.operationBatchUpdateRequestToken,
+            );
+          } catch (error) {
+            const fallback = operationBatchUpdateStateFromWorkflow(
+              taskViewState.currentProjectWorkflow,
+            );
+            renderOperationBatchUpdateState({
+              ...fallback,
+              errorMessage: `读取批次修改状态失败：${error?.message || String(error)}`,
+            });
+          }
+        }
         if (stepKey === "personnel") {
           await loadOperationPersonnelTaskState(
             taskViewState.currentProject,
