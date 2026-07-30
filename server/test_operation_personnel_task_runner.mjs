@@ -893,6 +893,7 @@ function fakePersonnelTaskListPage(rows = [], {
   searchInitiallyMissing = false,
   taskSheetTextHasNoExactNode = false,
   withoutBatchCodeColumn = false,
+  searchResultRowsAfterWait = null,
 } = {}) {
   const events = [];
   const pages = [rows, ...additionalPages];
@@ -1052,8 +1053,16 @@ function fakePersonnelTaskListPage(rows = [], {
         },
       };
     },
-    ...(rowsLagAfterPageChange ? {
+    ...(rowsLagAfterPageChange || searchResultRowsAfterWait ? {
       waitForFunction: async (_predicate, expected) => {
+        if (searchResultRowsAfterWait
+          && expected && typeof expected === "object" && expected.batchName) {
+          pages[0] = searchResultRowsAfterWait;
+          pageIndex = 0;
+          rowPageIndex = 0;
+          events.push("search-rows:ready");
+          return;
+        }
         if (expected && typeof expected === "object" && expected.pageNumber) {
           rowPageIndex = pageIndex;
           events.push(`rows:${rowPageIndex + 1}`);
@@ -1102,6 +1111,26 @@ test("current personnel task list uses the batch name when the real table omits 
 
   assert.equal(page.events.includes("fill:目标批次"), true);
   assert.equal(page.events.includes("wait:目标批次"), true);
+  assert.equal(page.events.includes("click:0"), true);
+});
+
+test("current personnel task list waits for the exact main-table row after search", async () => {
+  const page = fakePersonnelTaskListPage([
+    ["旧批次", "项目实施五部", "经理", "", ""],
+  ], {
+    withoutBatchCodeColumn: true,
+    searchResultRowsAfterWait: [
+      ["湖北邮政_2026年8月", "项目实施五部", "经理", "2026-07-29 15:34:05", "2026-07-30 00:39:05"],
+    ],
+  });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260006", batchName: "湖北邮政_2026年8月" } },
+    { baseUrl: "http://operation.test/" },
+  );
+
+  assert.equal(page.events.includes("search-rows:ready"), true);
   assert.equal(page.events.includes("click:0"), true);
 });
 

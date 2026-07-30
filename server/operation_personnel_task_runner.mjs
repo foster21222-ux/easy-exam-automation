@@ -801,6 +801,40 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
     error.cause = cause;
     throw error;
   }
+  if (typeof page.waitForFunction === "function") {
+    try {
+      await page.waitForFunction(
+        ({ batchCode: expectedCode, batchName: expectedName }) => {
+          const visible = (element) => Boolean(
+            element.offsetWidth || element.offsetHeight || element.getClientRects().length
+          );
+          const tables = [...document.querySelectorAll("table")].filter((table) => {
+            if (!visible(table)) return false;
+            const headers = [...table.querySelectorAll("thead th")]
+              .map((header) => (header.textContent || "").trim().replace(/\s+/g, " "));
+            return headers.includes("批次名称");
+          });
+          if (tables.length !== 1) return false;
+          const table = tables[0];
+          const headers = [...table.querySelectorAll("thead th")]
+            .map((header) => (header.textContent || "").trim().replace(/\s+/g, " "));
+          const codeIndex = headers.indexOf("批次代码");
+          const nameIndex = headers.indexOf("批次名称");
+          const exact = [...table.querySelectorAll("tbody tr")].filter((row) => {
+            const cells = [...row.querySelectorAll("td")]
+              .map((cell) => (cell.textContent || "").trim().replace(/\s+/g, " "));
+            return cells[nameIndex] === expectedName
+              && (codeIndex < 0 || cells[codeIndex] === expectedCode);
+          });
+          return exact.length === 1;
+        },
+        { batchCode, batchName },
+        { timeout: 10_000 },
+      );
+    } catch {
+      // The exact row count below reports the stable blocking result.
+    }
+  }
 
   const currentPage = async () => {
     const pagination = page.locator(".ant-pagination:visible");
