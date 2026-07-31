@@ -3563,6 +3563,84 @@ test("resume skips a verified checkpoint and blocks drift before continuing", as
   ), { code: "PERSONNEL_OPERATION_CONFLICT" });
 });
 
+test("resume accepts requirement values written by completed checkpoints", async () => {
+  const baseline = structuredClone(validInstruction().target);
+  baseline.personnel.monitorCount = 65;
+  baseline.personnel.monitorRatio = "1:55";
+  baseline.requirements = [
+    { name: "正式考试-监考人员数量", value: "65" },
+    { name: "正式考试-监考人员比例", value: "1:55" },
+  ];
+  const target = structuredClone(baseline);
+  target.personnel.monitorCount = 80;
+  target.personnel.monitorRatio = "1:50";
+  target.requirements = [
+    { name: "正式考试-监考人员数量", value: "80" },
+    { name: "正式考试-监考人员比例", value: "1:50" },
+  ];
+  const instruction = validInstruction({
+    kind: "resend",
+    baseline,
+    target,
+    changeSummary: "调整监考人数和比例",
+  });
+  const page = fakeOperationPage({
+    published: true,
+    schedules: target.schedules,
+    personnelPlatform: baseline.personnel.platform,
+    dates: baseline.dates,
+    requirements: baseline.requirements,
+    taskSheet: target.taskSheet,
+  });
+  page.state.personnel = structuredClone(baseline.personnel);
+  const checkpoints = {};
+  let failTaskSheetOnce = true;
+  const options = attemptOptions(page, {
+    onCheckpoint: async (update) => {
+      checkpoints[update.name] = structuredClone(update);
+    },
+    syncExamServiceRequirements: async (_actualPage, requirements) => {
+      page.events.push("requirements:fill");
+      page.state.requirements = structuredClone(requirements);
+      page.state.personnel.monitorCount = 80;
+      page.state.personnel.monitorRatio = "1:50";
+    },
+    openTaskSheet: async () => {
+      if (failTaskSheetOnce) {
+        failTaskSheetOnce = false;
+        throw new Error("simulated task-sheet timeout");
+      }
+      page.events.push("task-sheet:open");
+    },
+  });
+
+  await assert.rejects(
+    () => operationPersonnelRunner.runOperationPersonnelAttempt(instruction, options),
+    /simulated task-sheet timeout/,
+  );
+  assert.equal(checkpoints.sync_exam_service_requirements.status, "completed");
+
+  page.state.personnel.monitorCount = 81;
+  page.state.requirements[0].value = "81";
+  await assert.rejects(
+    () => operationPersonnelRunner.runOperationPersonnelAttempt(
+      { ...instruction, checkpoints },
+      options,
+    ),
+    { code: "PERSONNEL_OPERATION_CONFLICT" },
+  );
+  page.state.personnel.monitorCount = 80;
+  page.state.requirements[0].value = "80";
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    { ...instruction, checkpoints },
+    options,
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.includes("send:confirm"), true);
+});
+
 test("resume republishes when the current batch status invalidates a completed publish checkpoint", async () => {
   const captured = {};
   await operationPersonnelRunner.runOperationPersonnelAttempt(

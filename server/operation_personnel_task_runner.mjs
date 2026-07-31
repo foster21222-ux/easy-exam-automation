@@ -167,6 +167,42 @@ function personnelConfigProjection(raw = {}) {
   };
 }
 
+function operationPersonnelResumeBaseline(baseline = {}, checkpoints = {}) {
+  const expected = structuredClone(baseline);
+  const completedReadback = (name) => (
+    checkpoints?.[name]?.status === "completed"
+      ? checkpoints[name].readback
+      : undefined
+  );
+  const personnelConfig = completedReadback("sync_personnel_config");
+  if (personnelConfig) {
+    Object.assign(expected.personnel, personnelConfigProjection(personnelConfig));
+  }
+  const dates = completedReadback("sync_personnel_dates");
+  if (dates) expected.dates = normalizeDates(dates);
+  const requirements = completedReadback("sync_exam_service_requirements");
+  if (requirements) {
+    expected.requirements = normalizeRequirements(requirements);
+    const values = new Map(expected.requirements.map((item) => [item.name, item.value]));
+    const earliestLoginMinutes = text(values.get("正式考试-最早登录系统时间"))
+      .match(/前\s*(\d+)\s*分钟/)?.[1];
+    if (earliestLoginMinutes !== undefined) {
+      expected.personnel.earliestLoginMinutes = numberOrText(earliestLoginMinutes);
+    }
+    const monitorCount = values.get("正式考试-监考人员数量");
+    if (monitorCount !== undefined) {
+      expected.personnel.monitorCount = numberOrText(monitorCount);
+    }
+    const monitorRatio = values.get("正式考试-监考人员比例");
+    if (monitorRatio !== undefined) expected.personnel.monitorRatio = text(monitorRatio);
+    const loginMonitoring = values.get("正式考试-监考登录监控");
+    if (loginMonitoring !== undefined) {
+      expected.personnel.loginMonitoring = text(loginMonitoring);
+    }
+  }
+  return expected;
+}
+
 function normalizeDates(raw = {}) {
   return {
     start: text(raw.start),
@@ -2945,6 +2981,10 @@ function scheduleNotUnique(schedule, count) {
 async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
   const target = normalizeOperationPersonnelSnapshot(instruction.target || {});
   const baseline = normalizeOperationPersonnelSnapshot(instruction.baseline || instruction.target || {});
+  const resumeBaseline = operationPersonnelResumeBaseline(
+    baseline,
+    instruction.checkpoints,
+  );
   const kind = instruction.kind === "resend" ? "resend" : "initial";
   const managedSchedules = [...(instruction.managedSchedules || [])]
     .map(normalizeManagedSchedule)
@@ -2956,7 +2996,7 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
       allowUnpublishedPreview: kind === "initial",
     }, options);
     const expected = operationPersonnelConflictBaseline(
-      baseline,
+      resumeBaseline,
       actual,
       kind,
       managedSchedules,
