@@ -9,6 +9,7 @@ import {
 } from "./operation_personnel_task.mjs";
 import {
   normalizeOperationPersonnelSnapshot,
+  operationPersonnelConflictBaseline,
   operationPersonnelConflicts,
   operationPersonnelDisplaySchedules,
 } from "./operation_personnel_task_runner.mjs";
@@ -640,7 +641,12 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
       releaseProfile();
     }
     const conflicts = operationPersonnelConflicts(
-      baseline || target,
+      operationPersonnelConflictBaseline(
+        baseline || target,
+        snapshot,
+        kind,
+        draft.managedSchedules,
+      ),
       snapshot,
       kind,
     );

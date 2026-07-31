@@ -133,6 +133,19 @@ export function operationPersonnelDisplaySchedules(managedSchedules = [], operat
   return displaySchedules;
 }
 
+export function operationPersonnelConflictBaseline(
+  expected = {},
+  actual = {},
+  mode = "initial",
+  managedSchedules = [],
+) {
+  const baseline = structuredClone(expected);
+  if (mode !== "resend") return baseline;
+  operationPersonnelDisplaySchedules(managedSchedules, actual.schedules || []);
+  baseline.schedules = structuredClone(actual.schedules || []);
+  return baseline;
+}
+
 function normalizePersonnel(raw = {}) {
   return {
     serviceType: text(raw.serviceType),
@@ -2919,7 +2932,12 @@ async function runOperationPersonnelAttemptOnPage(page, instruction, options) {
       ...instruction,
       allowUnpublishedPreview: kind === "initial",
     }, options);
-    const expected = structuredClone(baseline);
+    const expected = operationPersonnelConflictBaseline(
+      baseline,
+      actual,
+      kind,
+      managedSchedules,
+    );
     if (kind === "initial") {
       expected.batch.published = actual.batch.published;
     }

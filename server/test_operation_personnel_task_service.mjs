@@ -672,6 +672,37 @@ test("ordinary resend uses draft changes even when operation configuration is un
   assert.equal(accepted.statusCode, 202);
 });
 
+test("resend adopts a synchronized managed schedule change after the batch was updated", async () => {
+  const harness = serviceHarness({ changedAfterSend: true });
+  harness.setSynchronizedManagedSchedule({
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  });
+  const current = inspectionFor(harness.task);
+  current.schedules = [{
+    ...current.schedules[0],
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  }];
+  harness.setInspection(current);
+
+  const preview = await harness.service.preview("task-a", ADMIN);
+
+  assert.equal(preview.state.status, "changes_pending");
+  assert.deepEqual(preview.state.draft.managedSchedules, [{
+    requirementIndex: 0,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  }]);
+  assert.deepEqual(preview.state.draft.displaySchedules, [{
+    scheduleCode: 17,
+    name: "湖北邮政招聘考试",
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  }]);
+});
+
 test("ordinary resend reads operation state and recipient directory in one inspection", async () => {
   const harness = serviceHarness({
     changedAfterSend: true,

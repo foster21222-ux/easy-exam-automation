@@ -2415,6 +2415,50 @@ test("attempt applies checkpoints in the approved order", async () => {
   ]);
 });
 
+test("resend accepts a batch-managed schedule change and continues to send", async () => {
+  const base = validInstruction();
+  const target = structuredClone(base.target);
+  target.schedules = [{
+    ...target.schedules[0],
+    start: "2026-08-23T09:00:00",
+    end: "2026-08-23T11:00:00",
+  }];
+  const baseline = structuredClone(target);
+  baseline.schedules = structuredClone(base.target.schedules);
+  const instruction = validInstruction({
+    kind: "resend",
+    target,
+    baseline,
+    managedSchedules: [{
+      requirementIndex: 0,
+      name: "湖北邮政招聘考试",
+      start: "2026-08-23T09:00:00",
+      end: "2026-08-23T11:00:00",
+    }],
+    displaySchedules: [{
+      scheduleCode: 1,
+      name: "湖北邮政招聘考试",
+      start: "2026-08-23T09:00:00",
+      end: "2026-08-23T11:00:00",
+    }],
+  });
+  const page = fakeOperationPage({
+    published: true,
+    schedules: target.schedules,
+    personnelPlatform: "悦站",
+    dates: target.dates,
+    requirements: target.requirements,
+  });
+
+  const result = await operationPersonnelRunner.runOperationPersonnelAttempt(
+    instruction,
+    attemptOptions(page),
+  );
+
+  assert.equal(result.status, "sent");
+  assert.equal(page.events.includes("send:confirm"), true);
+});
+
 test("resumed attempt restores the personnel page before reading dates after completed config", async () => {
   const checkpoints = {};
   const firstPage = fakeOperationPage({
