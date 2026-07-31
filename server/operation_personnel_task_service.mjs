@@ -373,11 +373,14 @@ function attemptHistory(attempt, result, completedAt) {
 }
 
 function attemptMatchesPreview(attempt, preview) {
-  const binding = (value = {}, baseline = {}) => ({
-    ...value,
-    baselineSnapshotFingerprint: value.baselineSnapshotFingerprint
-      || fingerprint(baseline),
-  });
+  const binding = (value = {}, baseline = {}) => {
+    const { operationSnapshotFingerprint: _operationSnapshotFingerprint, ...comparable } = value;
+    return {
+      ...comparable,
+      baselineSnapshotFingerprint: value.baselineSnapshotFingerprint
+        || fingerprint(baseline),
+    };
+  };
   return attempt
     && attempt.environment === preview.environment
     && attempt.kind === preview.kind

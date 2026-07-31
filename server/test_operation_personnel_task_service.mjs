@@ -1737,6 +1737,59 @@ test("preview accepts requirement values written by a resumable attempt", async 
     "requirements.2.value",
     "requirements.3.value",
   ].includes(item.path)), false);
+
+  const persisted = harness.task.config.operationPersonnelTask;
+  const draft = persisted.draft;
+  const snapshot = draft.previewOperationSnapshot;
+  const batch = {
+    ...snapshot.batch,
+    ...draft.operationBatch,
+    ...draft.batch,
+    projectCode: snapshot.batch.projectCode,
+    projectName: snapshot.batch.projectName,
+    published: true,
+  };
+  persisted.activeAttempt = {
+    ...persisted.activeAttempt,
+    environment: "test",
+    kind: "resend",
+    requirementVersion: persisted.activePreview.requirementVersion,
+    draftVersion: persisted.draftVersion,
+    fingerprint: operationPersonnelTaskFingerprint(draft),
+    recipients: {
+      to: structuredClone(draft.directoryMatch.to),
+      cc: structuredClone(draft.directoryMatch.cc),
+    },
+    target: normalizeOperationPersonnelSnapshot({
+      batch,
+      schedules: snapshot.schedules,
+      personnel: draft.personnel,
+      dates: draft.dates,
+      requirements: requirementsForPersonnel(draft.personnel),
+      taskSheet: draft.operationTaskSheet,
+      sendRecords: snapshot.sendRecords,
+      directoryMatch: draft.directoryMatch,
+    }),
+    baseline: structuredClone(draft.previewBaselineSnapshot),
+    previewBinding: {
+      baselineSnapshotFingerprint: persisted.activePreview.baselineSnapshotFingerprint,
+      operationSnapshotFingerprint: valueFingerprint(draft.previewBaselineSnapshot),
+      directoryMatchFingerprint: persisted.activePreview.directoryMatchFingerprint,
+      managedScheduleFingerprint: persisted.activePreview.managedScheduleFingerprint,
+      displayScheduleFingerprint: persisted.activePreview.displayScheduleFingerprint,
+    },
+  };
+  const accepted = await harness.service.send("task-a", owner(), {
+    previewToken: preview.previewToken,
+    draftVersion: preview.draftVersion,
+    changeSummary: "调整监考人数和比例",
+  });
+  assert.equal(accepted.attemptId, "attempt-resumable");
+  assert.equal(
+    harness.task.config.operationPersonnelTask.checkpoints
+      .sync_exam_service_requirements.status,
+    "completed",
+  );
 });
 
 test("changed resumable target gets a new attempt id and replaces old checkpoints with preview inspection", async () => {
