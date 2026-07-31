@@ -800,6 +800,10 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   const searchValue = !batchCodeColumnVisible && batchNameColumnVisible
     ? batchName
     : batchCode;
+  const resultSummary = page.getByText(/^找到\s*\d+\s*条结果$/);
+  const previousResultSummary = await resultSummary.count() === 1
+    ? text(await resultSummary.first().innerText())
+    : "";
   await search.fill(searchValue);
   await search.press("Enter");
   try {
@@ -817,7 +821,11 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
   if (typeof page.waitForFunction === "function") {
     try {
       await page.waitForFunction(
-        ({ batchCode: expectedCode, batchName: expectedName }) => {
+        ({
+          batchCode: expectedCode,
+          batchName: expectedName,
+          previousResultSummary: previousSummary,
+        }) => {
           const visible = (element) => Boolean(
             element.offsetWidth || element.offsetHeight || element.getClientRects().length
           );
@@ -839,13 +847,28 @@ export async function openVisiblePersonnelTaskSheet(page, instruction = {}, opti
             return cells[nameIndex] === expectedName
               && (codeIndex < 0 || cells[codeIndex] === expectedCode);
           });
-          return exact.length === 1;
+          const summary = String(document.body?.innerText ?? "")
+            .match(/找到\s*\d+\s*条结果/)?.[0]
+            ?.trim()
+            .replace(/\s+/g, " ") || "";
+          const summarySettled = !previousSummary
+            || (summary && (
+              summary !== previousSummary
+              || /^找到\s*1\s*条结果$/.test(previousSummary)
+            ));
+          return exact.length === 1 && summarySettled;
         },
-        { batchCode, batchName },
+        { batchCode, batchName, previousResultSummary },
         { timeout: 10_000 },
       );
-    } catch {
-      // The exact row count below reports the stable blocking result.
+    } catch (cause) {
+      const error = new Error(
+        `运控任务查询结果未在 10 秒内稳定：${batchCode}/${batchName}`,
+      );
+      error.code = "PERSONNEL_TASK_LIST_FILTER_TIMEOUT";
+      error.status = 409;
+      error.cause = cause;
+      throw error;
     }
   }
 

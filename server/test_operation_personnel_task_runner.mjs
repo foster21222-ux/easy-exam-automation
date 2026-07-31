@@ -894,6 +894,7 @@ function fakePersonnelTaskListPage(rows = [], {
   taskSheetTextHasNoExactNode = false,
   withoutBatchCodeColumn = false,
   searchResultRowsAfterWait = null,
+  staleExactRowBeforeSearchSettles = false,
 } = {}) {
   const events = [];
   const pages = [rows, ...additionalPages];
@@ -1040,6 +1041,15 @@ function fakePersonnelTaskListPage(rows = [], {
       throw new Error(`unexpected page selector: ${selector}`);
     },
     getByText(name, options) {
+      if (name instanceof RegExp) {
+        return {
+          count: async () => 1,
+          first() {
+            return this;
+          },
+          innerText: async () => `找到 ${pages.flat().length} 条结果`,
+        };
+      }
       assert.equal(options.exact, true);
       return {
         first() {
@@ -1057,13 +1067,25 @@ function fakePersonnelTaskListPage(rows = [], {
       waitForFunction: async (_predicate, expected) => {
         if (searchResultRowsAfterWait
           && expected && typeof expected === "object" && expected.batchName) {
+          if (staleExactRowBeforeSearchSettles && !expected.previousResultSummary) {
+            events.push("search-rows:stale");
+            return;
+          }
           pages[0] = searchResultRowsAfterWait;
+          pages.splice(1);
           pageIndex = 0;
           rowPageIndex = 0;
           events.push("search-rows:ready");
           return;
         }
         if (expected && typeof expected === "object" && expected.pageNumber) {
+          if (staleExactRowBeforeSearchSettles && searchResultRowsAfterWait) {
+            pages[0] = searchResultRowsAfterWait;
+            pages.splice(1);
+            pageIndex = 0;
+            rowPageIndex = 0;
+            throw new Error("page.waitForFunction: Timeout 10000ms exceeded.");
+          }
           rowPageIndex = pageIndex;
           events.push(`rows:${rowPageIndex + 1}`);
         }
@@ -1131,6 +1153,34 @@ test("current personnel task list waits for the exact main-table row after searc
   );
 
   assert.equal(page.events.includes("search-rows:ready"), true);
+  assert.equal(page.events.includes("click:0"), true);
+});
+
+test("current personnel task list waits for a stale visible row to become the filtered result", async () => {
+  const target = [
+    "EZT260006",
+    "湖北邮政_2026年8月",
+    "项目实施五部",
+    "经理",
+    "2026-07-29 15:34:05",
+    "2026-07-31 09:24:48",
+  ];
+  const page = fakePersonnelTaskListPage([target], {
+    additionalPages: [[
+      ["EZT999999", "其它批次", "项目实施五部", "经理", "", ""],
+    ]],
+    searchResultRowsAfterWait: [target],
+    staleExactRowBeforeSearchSettles: true,
+  });
+
+  await operationPersonnelRunner.openVisiblePersonnelTaskSheet(
+    page,
+    { batch: { code: "EZT260006", batchName: "湖北邮政_2026年8月" } },
+    { baseUrl: "http://operation.test/" },
+  );
+
+  assert.equal(page.events.includes("search-rows:ready"), true);
+  assert.equal(page.events.includes("next:2"), false);
   assert.equal(page.events.includes("click:0"), true);
 });
 
