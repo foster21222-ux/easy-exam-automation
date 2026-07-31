@@ -12,6 +12,7 @@ import {
   operationPersonnelConflictBaseline,
   operationPersonnelConflicts,
   operationPersonnelDisplaySchedules,
+  operationPersonnelResumeBaseline,
 } from "./operation_personnel_task_runner.mjs";
 import { operationPersonnelScheduleGate } from "./operation_personnel_schedule_gate.mjs";
 
@@ -640,9 +641,13 @@ export function createOperationPersonnelTaskService(dependencies = {}) {
     } finally {
       releaseProfile();
     }
+    const conflictBaseline = existing.status === "failed_resumable"
+      && existing.activeAttempt
+      ? operationPersonnelResumeBaseline(baseline || target, existing.checkpoints)
+      : baseline || target;
     const conflicts = operationPersonnelConflicts(
       operationPersonnelConflictBaseline(
-        baseline || target,
+        conflictBaseline,
         snapshot,
         kind,
         draft.managedSchedules,

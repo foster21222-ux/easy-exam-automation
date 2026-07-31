@@ -1674,6 +1674,71 @@ test("a resumable orphan keeps its attempt id and completed checkpoints", async 
   assert.equal(harness.task.config.operationPersonnelTask.activeAttempt.completedAt, "");
 });
 
+test("preview accepts requirement values written by a resumable attempt", async () => {
+  const harness = serviceHarness({ changedAfterSend: true });
+  const state = harness.task.config.operationPersonnelTask;
+  const baseline = structuredClone(state.lastOperationSnapshot);
+  baseline.personnel = {
+    ...structuredClone(state.draft.personnel),
+    monitorCount: 65,
+    monitorRatio: "1:55",
+  };
+  baseline.requirements = requirementsForPersonnel({
+    ...state.draft.personnel,
+    monitorCount: 65,
+    monitorRatio: "1:55",
+  });
+  const current = structuredClone(baseline);
+  current.personnel.monitorCount = 80;
+  current.personnel.monitorRatio = "1:50";
+  current.requirements = requirementsForPersonnel({
+    ...state.draft.personnel,
+    monitorCount: 80,
+    monitorRatio: "1:50",
+  });
+  state.status = "failed_resumable";
+  state.lastOperationSnapshot = structuredClone(baseline);
+  state.activeAttempt = {
+    attemptId: "attempt-resumable",
+    status: "failed_resumable",
+    target: structuredClone(current),
+    baseline: structuredClone(baseline),
+  };
+  state.checkpoints = {
+    sync_exam_service_requirements: {
+      name: "sync_exam_service_requirements",
+      status: "completed",
+      readback: structuredClone(current.requirements),
+    },
+  };
+  const drifted = structuredClone(current);
+  drifted.personnel.monitorCount = 81;
+  drifted.requirements[2].value = "81";
+  harness.setInspection(drifted);
+  await assert.rejects(
+    () => harness.service.preview("task-a", owner(), {
+      monitorCount: 80,
+      monitorRatio: "1:50",
+    }),
+    { code: "PERSONNEL_OPERATION_CONFLICT" },
+  );
+  harness.setInspection(current);
+
+  const preview = await harness.service.preview("task-a", owner(), {
+    monitorCount: 80,
+    monitorRatio: "1:50",
+  });
+
+  assert.equal(preview.state.status, "failed_resumable");
+  assert.equal(typeof preview.previewToken, "string");
+  assert.equal(preview.operationChanges.some((item) => [
+    "personnel.monitorCount",
+    "personnel.monitorRatio",
+    "requirements.2.value",
+    "requirements.3.value",
+  ].includes(item.path)), false);
+});
+
 test("changed resumable target gets a new attempt id and replaces old checkpoints with preview inspection", async () => {
   const harness = serviceHarness({ orphanedAttemptCheckpoint: "sync_personnel_dates" });
   const preview = await harness.service.preview("task-a", owner(), { monitorCount: 4 });

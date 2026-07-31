@@ -167,7 +167,7 @@ function personnelConfigProjection(raw = {}) {
   };
 }
 
-function operationPersonnelResumeBaseline(baseline = {}, checkpoints = {}) {
+export function operationPersonnelResumeBaseline(baseline = {}, checkpoints = {}) {
   const expected = structuredClone(baseline);
   const completedReadback = (name) => (
     checkpoints?.[name]?.status === "completed"
