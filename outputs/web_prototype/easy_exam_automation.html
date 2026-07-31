@@ -10239,6 +10239,8 @@
       function renderOperationPersonnelAttempt(attempt = {}) {
         const verificationCopy = operationPersonnelVerificationCopy(attempt);
         const remainingSeconds = Math.max(0, Number(attempt.remainingSeconds || 0));
+        operationPersonnelConfirmCancelBtn.textContent = attempt.completed ? "关闭" : "取消";
+        if (attempt.completed) operationPersonnelConfirmSendBtn.disabled = true;
         operationPersonnelProgress.textContent = verificationCopy
           || (attempt.completed
             ? (attempt.error?.message || (attempt.status === "sent" ? "人员任务单发送成功" : operationPersonnelActionLabel({ status: attempt.status })))
@@ -15990,6 +15992,7 @@
       operationPersonnelTaskActionBtn.addEventListener("click", () => {
         const taskId = taskViewState.currentProject?.taskId;
         const requestToken = taskViewState.operationPersonnelRequestToken + 1;
+        operationPersonnelConfirmCancelBtn.textContent = "取消";
         previewOperationPersonnelTask().catch((error) => {
           renderOperationPersonnelRequestError(taskId, requestToken, operationPersonnelTaskState, error, () => {
             operationPersonnelTaskActionBtn.disabled = false;

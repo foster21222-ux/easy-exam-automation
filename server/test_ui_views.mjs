@@ -2106,6 +2106,32 @@ test("personnel UI reads server remainingSeconds instead of deriving poll countd
   assert.ok(poller.includes("operationPersonnelRequestIsCurrent(taskId, requestToken)"));
 });
 
+test("completed personnel send changes the confirmation action to close", () => {
+  const operationPersonnelConfirmCancelBtn = { textContent: "取消" };
+  const operationPersonnelConfirmSendBtn = { disabled: false };
+  const operationPersonnelProgress = { textContent: "" };
+  const renderOperationPersonnelAttempt = compileInlineFunction(
+    "      function renderOperationPersonnelAttempt(attempt = {}) {",
+    "\n      async function pollOperationPersonnelAttempt",
+    {
+      operationPersonnelConfirmCancelBtn,
+      operationPersonnelConfirmSendBtn,
+      operationPersonnelProgress,
+      operationPersonnelVerificationCopy: () => "",
+      operationPersonnelActionLabel: ({ status }) => status,
+    },
+  );
+
+  renderOperationPersonnelAttempt({
+    status: "sent",
+    completed: true,
+  });
+
+  assert.equal(operationPersonnelProgress.textContent, "人员任务单发送成功");
+  assert.equal(operationPersonnelConfirmCancelBtn.textContent, "关闭");
+  assert.equal(operationPersonnelConfirmSendBtn.disabled, true);
+});
+
 test("personnel UI automatically resumes a stalled send poll when the page regains focus", async () => {
   const taskViewState = {
     currentProject: { taskId: "task-a" },
